@@ -49,6 +49,7 @@ static constexpr std::array<const char*, 13> sensorTypes = {
     "xyz.openbmc_project.Configuration.MAX6581",
     "xyz.openbmc_project.Configuration.MAX6654",
     "xyz.openbmc_project.Configuration.SBTSI",
+    "xyz.openbmc_project.Configuration.TMP102",
     "xyz.openbmc_project.Configuration.TMP112",
     "xyz.openbmc_project.Configuration.TMP175",
     "xyz.openbmc_project.Configuration.TMP421",
