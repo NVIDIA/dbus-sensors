@@ -60,7 +60,7 @@ bool isAdc(const fs::path& parentPath)
     std::string name;
     std::getline(nameFile, name);
 
-    return name == "iio_hwmon";
+    return name == "iio_hwmon" || name == "tps53679";
 }
 
 void createSensors(
