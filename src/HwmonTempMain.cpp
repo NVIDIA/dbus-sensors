@@ -40,13 +40,7 @@ static constexpr bool debug = false;
 static constexpr float pollRateDefault = 0.5;
 
 namespace fs = std::filesystem;
-<<<<<<< HEAD
-static constexpr std::array<const char*, 15> sensorTypes = {
-||||||| merged common ancestors
-static constexpr std::array<const char*, 13> sensorTypes = {
-=======
-static constexpr std::array<const char*, 16> sensorTypes = {
->>>>>>> origin/master
+static constexpr std::array<const char*, 18> sensorTypes = {
     "xyz.openbmc_project.Configuration.EMC1412",
     "xyz.openbmc_project.Configuration.EMC1413",
     "xyz.openbmc_project.Configuration.EMC1414",
@@ -56,12 +50,8 @@ static constexpr std::array<const char*, 16> sensorTypes = {
     "xyz.openbmc_project.Configuration.MAX6581",
     "xyz.openbmc_project.Configuration.MAX6654",
     "xyz.openbmc_project.Configuration.SBTSI",
-<<<<<<< HEAD
     "xyz.openbmc_project.Configuration.TMP102",
-||||||| merged common ancestors
-=======
     "xyz.openbmc_project.Configuration.LM95234",
->>>>>>> origin/master
     "xyz.openbmc_project.Configuration.TMP112",
     "xyz.openbmc_project.Configuration.TMP175",
     "xyz.openbmc_project.Configuration.TMP421",
