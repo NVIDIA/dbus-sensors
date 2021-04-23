@@ -33,14 +33,16 @@
 #include <iostream>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
 
 static constexpr bool debug = false;
 
-static constexpr std::array<const char*, 22> sensorTypes = {
+static constexpr std::array<const char*, 24> sensorTypes = {
     "xyz.openbmc_project.Configuration.ADM1272",
+    "xyz.openbmc_project.Configuration.ADM1275",
     "xyz.openbmc_project.Configuration.ADM1278",
     "xyz.openbmc_project.Configuration.DPS800",
     "xyz.openbmc_project.Configuration.INA219",
@@ -50,6 +52,7 @@ static constexpr std::array<const char*, 22> sensorTypes = {
     "xyz.openbmc_project.Configuration.ISL68223",
     "xyz.openbmc_project.Configuration.ISL69243",
     "xyz.openbmc_project.Configuration.ISL69260",
+    "xyz.openbmc_project.Configuration.LM25066",
     "xyz.openbmc_project.Configuration.MAX16601",
     "xyz.openbmc_project.Configuration.MAX20710",
     "xyz.openbmc_project.Configuration.MAX20730",
@@ -64,10 +67,10 @@ static constexpr std::array<const char*, 22> sensorTypes = {
     "xyz.openbmc_project.Configuration.TPS546D24"};
 
 static std::vector<std::string> pmbusNames = {
-    "adm1272",   "adm1278",   "dps800",    "ina219",   "ina230",   "isl68137",
-    "isl68220",  "isl68223",  "isl69243",  "isl69260", "max16601", "max20710",
-    "max20730",  "max20734",  "max20796",  "max34451", "pmbus",    "pxe1610",
-    "raa228000", "raa228228", "raa229004", "tps546d24"};
+    "adm1272",  "adm1275",  "adm1278",   "dps800",    "ina219",    "ina230",
+    "isl68137", "isl68220", "isl68223",  "isl69243",  "isl69260",  "lm25066",
+    "max16601", "max20710", "max20730",  "max20734",  "max20796",  "max34451",
+    "pmbus",    "pxe1610",  "raa228000", "raa228228", "raa229004", "tps546d24"};
 
 namespace fs = std::filesystem;
 
@@ -175,14 +178,28 @@ void checkEventLimits(
     boost::container::flat_map<std::string, std::vector<std::string>>&
         eventPathList)
 {
+    auto attributePartPos = sensorPathStr.find_last_of('_');
+    if (attributePartPos == std::string::npos)
+    {
+        // There is no '_' in the string, skip it
+        return;
+    }
+    auto attributePart =
+        std::string_view(sensorPathStr).substr(attributePartPos + 1);
+    if (attributePart != "input")
+    {
+        // If the sensor is not xxx_input, skip it
+        return;
+    }
+
+    auto prefixPart = sensorPathStr.substr(0, attributePartPos + 1);
     for (const auto& limitMatch : limitEventMatch)
     {
         const std::vector<std::string>& limitEventAttrs = limitMatch.second;
         const std::string& eventName = limitMatch.first;
         for (const auto& limitEventAttr : limitEventAttrs)
         {
-            auto limitEventPath =
-                boost::replace_all_copy(sensorPathStr, "input", limitEventAttr);
+            auto limitEventPath = prefixPart + limitEventAttr;
             std::ifstream eventFile(limitEventPath);
             if (!eventFile.good())
             {
@@ -891,6 +908,7 @@ void propertyInitialize(void)
                   {"vout30", PSUProperty("Output Voltage", 255, 0, 3)},
                   {"vout31", PSUProperty("Output Voltage", 255, 0, 3)},
                   {"vout32", PSUProperty("Output Voltage", 255, 0, 3)},
+                  {"vmon", PSUProperty("Auxiliary Input Voltage", 255, 0, 3)},
                   {"in1", PSUProperty("Output Voltage", 255, 0, 3)},
                   {"iin", PSUProperty("Input Current", 20, 0, 3)},
                   {"iout1", PSUProperty("Output Current", 255, 0, 3)},

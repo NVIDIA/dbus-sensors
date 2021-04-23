@@ -83,7 +83,22 @@ FanTypes getFanType(const fs::path& parentPath)
     // todo: will we need to support other types?
     return FanTypes::i2c;
 }
+void enablePwm(const fs::path& filePath)
+{
+    std::fstream enableFile(filePath, std::ios::in | std::ios::out);
+    if (!enableFile.good())
+    {
+        std::cerr << "Error read/write " << filePath << "\n";
+        return;
+    }
 
+    std::string regulateMode;
+    std::getline(enableFile, regulateMode);
+    if (regulateMode == "0")
+    {
+        enableFile << 1;
+    }
+}
 void createRedundancySensor(
     const boost::container::flat_map<std::string, std::unique_ptr<TachSensor>>&
         sensors,
@@ -171,25 +186,8 @@ void createSensors(
                 std::string indexStr = *(match.begin() + 1);
 
                 fs::path directory = path.parent_path();
-                fs::path pwmPath = directory / ("pwm" + indexStr);
                 FanTypes fanType = getFanType(directory);
 
-                size_t bus = 0;
-                size_t address = 0;
-                if (fanType == FanTypes::i2c)
-                {
-                    std::string link =
-                        fs::read_symlink(directory / "device").filename();
-
-                    size_t findDash = link.find('-');
-                    if (findDash == std::string::npos ||
-                        link.size() <= findDash + 1)
-                    {
-                        std::cerr << "Error finding device from symlink";
-                    }
-                    bus = std::stoi(link.substr(0, findDash));
-                    address = std::stoi(link.substr(findDash + 1), nullptr, 16);
-                }
                 // convert to 0 based
                 size_t index = std::stoul(indexStr) - 1;
 
@@ -236,6 +234,22 @@ void createSensors(
                     }
                     if (fanType == FanTypes::i2c)
                     {
+                        size_t bus = 0;
+                        size_t address = 0;
+
+                        std::string link =
+                            fs::read_symlink(directory / "device").filename();
+
+                        size_t findDash = link.find('-');
+                        if (findDash == std::string::npos ||
+                            link.size() <= findDash + 1)
+                        {
+                            std::cerr << "Error finding device from symlink";
+                        }
+                        bus = std::stoi(link.substr(0, findDash));
+                        address =
+                            std::stoi(link.substr(findDash + 1), nullptr, 16);
+
                         auto findBus = baseConfiguration->second.find("Bus");
                         auto findAddress =
                             baseConfiguration->second.find("Address");
@@ -366,15 +380,21 @@ void createSensors(
 
                 std::optional<std::string> led;
                 std::string pwmName;
+                fs::path pwmPath;
 
                 if (connector != sensorData->end())
                 {
                     auto findPwm = connector->second.find("Pwm");
                     if (findPwm != connector->second.end())
                     {
-
+                        fs::path pwmEnableFile =
+                            "pwm" + std::to_string(index + 1) + "_enable";
+                        fs::path enablePath =
+                            path.parent_path() / pwmEnableFile;
+                        enablePwm(enablePath);
                         size_t pwm = std::visit(VariantToUnsignedIntVisitor(),
                                                 findPwm->second);
+                        pwmPath = directory / ("pwm" + std::to_string(pwm + 1));
                         /* use pwm name override if found in configuration else
                          * use default */
                         auto findOverride = connector->second.find("PwmName");
@@ -418,7 +438,8 @@ void createSensors(
                     std::move(sensorThresholds), *interfacePath, limits,
                     powerState, led);
 
-                if (fs::exists(pwmPath) && !pwmSensors.count(pwmPath))
+                if (!pwmPath.empty() && fs::exists(pwmPath) &&
+                    !pwmSensors.count(pwmPath))
                 {
                     pwmSensors[pwmPath] = std::make_unique<PwmSensor>(
                         pwmName, pwmPath, dbusConnection, objectServer,

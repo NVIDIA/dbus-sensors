@@ -202,10 +202,15 @@ CFMSensor::CFMSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
 void CFMSensor::setupMatches()
 {
 
-    std::shared_ptr<CFMSensor> self = shared_from_this();
+    std::weak_ptr<CFMSensor> weakRef = weak_from_this();
     setupSensorMatch(matches, *dbusConnection, "fan_tach",
-                     std::move([self](const double& value,
-                                      sdbusplus::message::message& message) {
+                     std::move([weakRef](const double& value,
+                                         sdbusplus::message::message& message) {
+                         auto self = weakRef.lock();
+                         if (!self)
+                         {
+                             return;
+                         }
                          self->tachReadings[message.get_path()] = value;
                          if (self->tachRanges.find(message.get_path()) ==
                              self->tachRanges.end())
@@ -221,8 +226,14 @@ void CFMSensor::setupMatches()
                      }));
 
     dbusConnection->async_method_call(
-        [self](const boost::system::error_code ec,
-               const std::variant<double> cfmVariant) {
+        [weakRef](const boost::system::error_code ec,
+                  const std::variant<double> cfmVariant) {
+            auto self = weakRef.lock();
+            if (!self)
+            {
+                return;
+            }
+
             uint64_t maxRpm = 100;
             if (!ec)
             {
@@ -247,7 +258,12 @@ void CFMSensor::setupMatches()
         "freedesktop.DBus.Properties',path='" +
             std::string(cfmSettingPath) + "',arg0='" +
             std::string(cfmSettingIface) + "'",
-        [self](sdbusplus::message::message& message) {
+        [weakRef](sdbusplus::message::message& message) {
+            auto self = weakRef.lock();
+            if (!self)
+            {
+                return;
+            }
             boost::container::flat_map<std::string, std::variant<double>>
                 values;
             std::string objectName;
@@ -293,17 +309,22 @@ void CFMSensor::createMaxCFMIface(void)
 void CFMSensor::addTachRanges(const std::string& serviceName,
                               const std::string& path)
 {
-    std::shared_ptr<CFMSensor> self = shared_from_this();
+    std::weak_ptr<CFMSensor> weakRef = weak_from_this();
     dbusConnection->async_method_call(
-        [self, path](const boost::system::error_code ec,
-                     const boost::container::flat_map<std::string,
-                                                      BasicVariantType>& data) {
+        [weakRef,
+         path](const boost::system::error_code ec,
+               const boost::container::flat_map<std::string, BasicVariantType>&
+                   data) {
             if (ec)
             {
                 std::cerr << "Error getting properties from " << path << "\n";
                 return;
             }
-
+            auto self = weakRef.lock();
+            if (!self)
+            {
+                return;
+            }
             double max = loadVariant<double>(data, "MaxValue");
             double min = loadVariant<double>(data, "MinValue");
             self->tachRanges[path] = std::make_pair(min, max);
@@ -531,12 +552,17 @@ void ExitAirTempSensor::setupMatches(void)
     constexpr const std::array<const char*, 2> matchTypes = {
         "power", inletTemperatureSensor};
 
-    std::shared_ptr<ExitAirTempSensor> self = shared_from_this();
+    std::weak_ptr<ExitAirTempSensor> weakRef = weak_from_this();
     for (const std::string& type : matchTypes)
     {
         setupSensorMatch(matches, *dbusConnection, type,
-                         [self, type](const double& value,
-                                      sdbusplus::message::message& message) {
+                         [weakRef, type](const double& value,
+                                         sdbusplus::message::message& message) {
+                             auto self = weakRef.lock();
+                             if (!self)
+                             {
+                                 return;
+                             }
                              if (type == "power")
                              {
                                  std::string path = message.get_path();
@@ -555,24 +581,33 @@ void ExitAirTempSensor::setupMatches(void)
                          });
     }
     dbusConnection->async_method_call(
-        [self](boost::system::error_code ec,
-               const std::variant<double>& value) {
+        [weakRef](boost::system::error_code ec,
+                  const std::variant<double>& value) {
             if (ec)
             {
                 // sensor not ready yet
                 return;
             }
-
+            auto self = weakRef.lock();
+            if (!self)
+            {
+                return;
+            }
             self->inletTemp = std::visit(VariantToDoubleVisitor(), value);
         },
         "xyz.openbmc_project.HwmonTempSensor",
         std::string("/xyz/openbmc_project/sensors/") + inletTemperatureSensor,
         properties::interface, properties::get, sensorValueInterface, "Value");
     dbusConnection->async_method_call(
-        [self](boost::system::error_code ec, const GetSubTreeType& subtree) {
+        [weakRef](boost::system::error_code ec, const GetSubTreeType& subtree) {
             if (ec)
             {
                 std::cerr << "Error contacting mapper\n";
+                return;
+            }
+            auto self = weakRef.lock();
+            if (!self)
+            {
                 return;
             }
             for (const auto& item : subtree)
@@ -589,14 +624,18 @@ void ExitAirTempSensor::setupMatches(void)
                 {
                     const std::string& path = item.first;
                     self->dbusConnection->async_method_call(
-                        [self, path](boost::system::error_code ec,
-                                     const std::variant<double>& value) {
+                        [weakRef, path](boost::system::error_code ec,
+                                        const std::variant<double>& value) {
                             if (ec)
                             {
                                 std::cerr << "Error getting value from " << path
                                           << "\n";
                             }
-
+                            auto self = weakRef.lock();
+                            if (!self)
+                            {
+                                return;
+                            }
                             double reading =
                                 std::visit(VariantToDoubleVisitor(), value);
                             if constexpr (debug)
@@ -649,7 +688,7 @@ double ExitAirTempSensor::getTotalCFM(void)
 
 bool ExitAirTempSensor::calculate(double& val)
 {
-    constexpr size_t maxErrorPrint = 1;
+    constexpr size_t maxErrorPrint = 5;
     static bool firstRead = false;
     static size_t errorPrint = maxErrorPrint;
 
@@ -657,6 +696,23 @@ bool ExitAirTempSensor::calculate(double& val)
     if (cfm <= 0)
     {
         std::cerr << "Error getting cfm\n";
+        return false;
+    }
+
+    // Though cfm is not expected to be less than qMin normally,
+    // it is not a hard limit for exit air temp calculation.
+    // 50% qMin is chosen as a generic limit between providing
+    // a valid derived exit air temp and reporting exit air temp not available.
+    constexpr const double cfmLimitFactor = 0.5;
+    if (cfm < (qMin * cfmLimitFactor))
+    {
+        if (errorPrint > 0)
+        {
+            errorPrint--;
+            std::cerr << "cfm " << cfm << " is too low, expected qMin " << qMin
+                      << "\n";
+        }
+        val = 0;
         return false;
     }
 
@@ -756,7 +812,7 @@ bool ExitAirTempSensor::calculate(double& val)
         alpha = alphaS + ((alphaF - alphaS) * (cfm - qMin) / (qMax - qMin));
     }
 
-    auto time = std::chrono::system_clock::now();
+    auto time = std::chrono::steady_clock::now();
     if (!firstRead)
     {
         firstRead = true;
@@ -884,13 +940,9 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
                         sensor->c2 =
                             loadVariant<double>(entry.second, "C2") / 100;
                         sensor->tachMinPercent =
-                            loadVariant<double>(entry.second,
-                                                "TachMinPercent") /
-                            100;
+                            loadVariant<double>(entry.second, "TachMinPercent");
                         sensor->tachMaxPercent =
-                            loadVariant<double>(entry.second,
-                                                "TachMaxPercent") /
-                            100;
+                            loadVariant<double>(entry.second, "TachMaxPercent");
                         sensor->createMaxCFMIface();
                         sensor->setupMatches();
 
