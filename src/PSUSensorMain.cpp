@@ -40,13 +40,14 @@
 
 static constexpr bool debug = false;
 
-static constexpr std::array<const char*, 24> sensorTypes = {
+static constexpr std::array<const char*, 25> sensorTypes = {
     "xyz.openbmc_project.Configuration.ADM1272",
     "xyz.openbmc_project.Configuration.ADM1275",
     "xyz.openbmc_project.Configuration.ADM1278",
     "xyz.openbmc_project.Configuration.DPS800",
     "xyz.openbmc_project.Configuration.INA219",
     "xyz.openbmc_project.Configuration.INA230",
+    "xyz.openbmc_project.Configuration.IPSPS",
     "xyz.openbmc_project.Configuration.ISL68137",
     "xyz.openbmc_project.Configuration.ISL68220",
     "xyz.openbmc_project.Configuration.ISL68223",
@@ -67,10 +68,11 @@ static constexpr std::array<const char*, 24> sensorTypes = {
     "xyz.openbmc_project.Configuration.TPS546D24"};
 
 static std::vector<std::string> pmbusNames = {
-    "adm1272",  "adm1275",  "adm1278",   "dps800",    "ina219",    "ina230",
-    "isl68137", "isl68220", "isl68223",  "isl69243",  "isl69260",  "lm25066",
-    "max16601", "max20710", "max20730",  "max20734",  "max20796",  "max34451",
-    "pmbus",    "pxe1610",  "raa228000", "raa228228", "raa229004", "tps546d24"};
+    "adm1272",  "adm1275",   "adm1278",   "dps800",    "ina219",
+    "ina230",   "ipsps1",    "isl68137",  "isl68220",  "isl68223",
+    "isl69243", "isl69260",  "lm25066",   "max16601",  "max20710",
+    "max20730", "max20734",  "max20796",  "max34451",  "pmbus",
+    "pxe1610",  "raa228000", "raa228228", "raa229004", "tps546d24"};
 
 namespace fs = std::filesystem;
 
@@ -772,8 +774,8 @@ static void createSensorsCallback(
                           << sensorNameSubStr << "\n";
             }
 
-            auto findSensorType = sensorTable.find(sensorNameSubStr);
-            if (findSensorType == sensorTable.end())
+            auto findSensorUnit = sensorTable.find(sensorNameSubStr);
+            if (findSensorUnit == sensorTable.end())
             {
                 std::cerr << sensorNameSubStr
                           << " is not a recognized sensor type\n";
@@ -819,7 +821,7 @@ static void createSensorsCallback(
             sensors[sensorName] = std::make_shared<PSUSensor>(
                 sensorPathStr, sensorType, objectServer, dbusConnection, io,
                 sensorName, std::move(sensorThresholds), *interfacePath,
-                findSensorType->second, factor, psuProperty->maxReading,
+                findSensorUnit->second, factor, psuProperty->maxReading,
                 psuProperty->minReading, labelHead, thresholdConfSize);
             sensors[sensorName]->setupRead();
             ++numCreated;
@@ -862,11 +864,11 @@ void createSensors(
 
 void propertyInitialize(void)
 {
-    sensorTable = {{"power", "power/"},
-                   {"curr", "current/"},
-                   {"temp", "temperature/"},
-                   {"in", "voltage/"},
-                   {"fan", "fan_tach/"}};
+    sensorTable = {{"power", sensor_paths::unitWatts},
+                   {"curr", sensor_paths::unitAmperes},
+                   {"temp", sensor_paths::unitDegreesC},
+                   {"in", sensor_paths::unitVolts},
+                   {"fan", sensor_paths::unitRPMs}};
 
     labelMatch = {{"pin", PSUProperty("Input Power", 3000, 0, 6)},
                   {"pout1", PSUProperty("Output Power", 3000, 0, 6)},
