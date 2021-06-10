@@ -14,6 +14,8 @@
 // limitations under the License.
 */
 
+#include <NVMeContext.hpp>
+#include <NVMeMCTPContext.hpp>
 #include <NVMeSensor.hpp>
 #include <boost/asio/deadline_timer.hpp>
 
@@ -78,8 +80,8 @@ void createSensors(boost::asio::io_service& io,
                     continue;
                 }
 
-                unsigned int busNumber =
-                    std::visit(VariantToUnsignedIntVisitor(), findBus->second);
+                int busNumber =
+                    std::visit(VariantToIntVisitor(), findBus->second);
 
                 auto findSensorName = baseConfiguration->second.find("Name");
                 if (findSensorName == baseConfiguration->second.end())
@@ -108,7 +110,7 @@ void createSensors(boost::asio::io_service& io,
                 {
                     std::string rootName =
                         std::filesystem::read_symlink(muxPath).filename();
-                    size_t dash = rootName.find("-");
+                    size_t dash = rootName.find('-');
                     if (dash == std::string::npos)
                     {
                         std::cerr << "Error finding root bus for " << rootName
@@ -126,7 +128,7 @@ void createSensors(boost::asio::io_service& io,
                 }
                 else
                 {
-                    context = std::make_shared<NVMeContext>(io, rootBus);
+                    context = std::make_shared<NVMeMCTPContext>(io, rootBus);
                     nvmeDeviceMap[rootBus] = context;
                 }
 
@@ -135,7 +137,7 @@ void createSensors(boost::asio::io_service& io,
                         objectServer, io, dbusConnection, sensorName,
                         std::move(sensorThresholds), interfacePath, busNumber);
 
-                context->sensors.emplace_back(sensorPtr);
+                context->addSensor(sensorPtr);
             }
             for (const auto& [_, context] : nvmeDeviceMap)
             {
@@ -167,7 +169,8 @@ int main()
                 {
                     return; // we're being canceled
                 }
-                else if (ec)
+
+                if (ec)
                 {
                     std::cerr << "Error: " << ec.message() << "\n";
                     return;
@@ -184,5 +187,6 @@ int main()
             std::string(sensorType) + "'",
         eventHandler);
 
+    setupManufacturingModeMatch(*systemBus);
     io.run();
 }

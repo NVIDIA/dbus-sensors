@@ -77,6 +77,7 @@ struct CPUConfig
 
     bool operator<(const CPUConfig& rhs) const
     {
+        // NOLINTNEXTLINE
         return (name < rhs.name);
     }
 };
@@ -142,7 +143,7 @@ bool createSensors(boost::asio::io_service& io,
         if (cpu.state != State::OFF)
         {
             available = true;
-            std::shared_ptr<sdbusplus::asio::dbus_interface> iface =
+            std::shared_ptr<sdbusplus::asio::dbus_interface>& iface =
                 inventoryIfaces[cpu.name];
             if (iface != nullptr)
             {
@@ -771,5 +772,7 @@ int main()
     }
 
     systemBus->request_name("xyz.openbmc_project.CPUSensor");
+
+    setupManufacturingModeMatch(*systemBus);
     io.run();
 }

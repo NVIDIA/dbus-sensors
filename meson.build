@@ -4,10 +4,11 @@ project(
     default_options: [
         'warning_level=3',
         'werror=true',
-        'cpp_std=c++17'
+        'cpp_std=c++20'
     ],
     license: 'Apache-2.0',
     version: '0.1',
+    meson_version: '>=0.57.0',
 )
 
 add_project_arguments(
@@ -23,18 +24,28 @@ add_project_arguments(
 
 build_tests = get_option('tests')
 gpiodcxx = dependency('libgpiodcxx')
+
+# i2c-tools doesn't ship a pkg-config file for libi2c
 i2c = meson.get_compiler('cpp').find_library('i2c')
-sdbusplus = dependency('sdbusplus')
-mctp = meson.get_compiler('cpp').find_library('mctp', required : false)
+
+sdbusplus = dependency(
+    'sdbusplus',
+    fallback: [
+        'sdbusplus',
+        'sdbusplus_dep'
+    ],
+)
+
 systemd = dependency('systemd')
-systemd_system_unit_dir = systemd.get_pkgconfig_variable(
-    'systemdsystemunitdir',
-    define_variable: ['prefix', get_option('prefix')])
+systemd_system_unit_dir = systemd.get_variable(
+    pkgconfig: 'systemdsystemunitdir',
+    pkgconfig_define: ['prefix', get_option('prefix')])
 threads = dependency('threads')
 
 thresholds_a = static_library(
     'thresholds_a',
     'src/Thresholds.cpp',
+    dependencies: [ sdbusplus ],
     implicit_include_directories: false,
     include_directories: 'include',
 )
@@ -42,6 +53,7 @@ thresholds_a = static_library(
 utils_a = static_library(
     'utils_a',
     ['src/Utils.cpp', 'src/SensorPaths.cpp'],
+    dependencies: [ sdbusplus ],
     implicit_include_directories: false,
     include_directories: 'include',
 )
@@ -49,11 +61,12 @@ utils_a = static_library(
 pwmsensor_a = static_library(
     'pwmsensor_a',
     'src/PwmSensor.cpp',
+    dependencies: [ sdbusplus ],
     implicit_include_directories: false,
     include_directories: 'include',
 )
 
-
+subdir('include')
 subdir('service_files')
 subdir('src')
 
