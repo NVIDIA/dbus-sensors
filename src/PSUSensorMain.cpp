@@ -68,11 +68,12 @@ static constexpr std::array<const char*, 25> sensorTypes = {
     "xyz.openbmc_project.Configuration.TPS546D24"};
 
 static std::vector<std::string> pmbusNames = {
-    "adm1272",  "adm1275",   "adm1278",   "dps800",    "ina219",
-    "ina230",   "ipsps1",    "isl68137",  "isl68220",  "isl68223",
-    "isl69243", "isl69260",  "lm25066",   "max16601",  "max20710",
-    "max20730", "max20734",  "max20796",  "max34451",  "pmbus",
-    "pxe1610",  "raa228000", "raa228228", "raa229004", "tps546d24"};
+    "adm1272",  "adm1275",   "adm1278",   "bmr453",    "dps800",
+    "ina219",   "ina230",    "ipsps1",    "isl68137",  "isl68220",
+    "isl68223", "isl69243",  "isl69260",  "lm25066",   "max16601",  
+    "max20710", "max20730",  "max20734",  "max20796",  "max34451",
+    "pmbus",    "pxe1610",   "raa228000", "raa228228", "raa229004", 
+    "tps546d24"};
 
 namespace fs = std::filesystem;
 
@@ -807,7 +808,7 @@ static void createSensorsCallback(
                 // Sensor name not customized, do prefix/suffix composition,
                 // preserving default behavior by using psuNameFromIndex.
                 sensorName =
-                    psuNameFromIndex + " " + psuProperty->labelTypeName;
+                    psuProperty->labelTypeName + " " + psuNameFromIndex;
             }
 
             if constexpr (debug)
@@ -929,12 +930,12 @@ void propertyInitialize(void)
                   {"iout14", PSUProperty("Output Current", 255, 0, 3)},
                   {"curr1", PSUProperty("Output Current", 255, 0, 3)},
                   {"maxiout1", PSUProperty("Max Output Current", 255, 0, 3)},
-                  {"temp1", PSUProperty("Temperature", 127, -128, 3)},
-                  {"temp2", PSUProperty("Temperature", 127, -128, 3)},
-                  {"temp3", PSUProperty("Temperature", 127, -128, 3)},
-                  {"temp4", PSUProperty("Temperature", 127, -128, 3)},
-                  {"temp5", PSUProperty("Temperature", 127, -128, 3)},
-                  {"temp6", PSUProperty("Temperature", 127, -128, 3)},
+                  {"temp1", PSUProperty("TEMP", 127, -128, 3)},
+                  {"temp2", PSUProperty("TEMP", 127, -128, 3)},
+                  {"temp3", PSUProperty("TEMP", 127, -128, 3)},
+                  {"temp4", PSUProperty("TEMP", 127, -128, 3)},
+                  {"temp5", PSUProperty("TEMP", 127, -128, 3)},
+                  {"temp6", PSUProperty("TEMP", 127, -128, 3)},
                   {"maxtemp1", PSUProperty("Max Temperature", 127, -128, 3)},
                   {"fan1", PSUProperty("Fan Speed 1", 30000, 0, 0)},
                   {"fan2", PSUProperty("Fan Speed 2", 30000, 0, 0)}};
