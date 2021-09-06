@@ -84,7 +84,7 @@ void closeInFd(int rootBus)
 int getRootBus(int inFd)
 {
     // we assume that we won't have too many FDs, so looping is OK
-    for (const auto [root, fd] : inFds)
+    for (const auto& [root, fd] : inFds)
     {
         if (fd == inFd)
         {
