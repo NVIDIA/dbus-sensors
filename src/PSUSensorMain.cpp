@@ -872,7 +872,7 @@ void propertyInitialize(void)
                    {"fan", sensor_paths::unitRPMs}};
 
     labelMatch = {{"pin", PSUProperty("Input Power", 3000, 0, 6)},
-                  {"pout1", PSUProperty("Output Power", 3000, 0, 6)},
+                  {"pout1", PSUProperty("PWR", 3000, 0, 6)},
                   {"pout2", PSUProperty("Output Power", 3000, 0, 6)},
                   {"pout3", PSUProperty("Output Power", 3000, 0, 6)},
                   {"power1", PSUProperty("Output Power", 3000, 0, 6)},
@@ -937,7 +937,7 @@ void propertyInitialize(void)
                   {"temp5", PSUProperty("TEMP", 127, -128, 3)},
                   {"temp6", PSUProperty("TEMP", 127, -128, 3)},
                   {"maxtemp1", PSUProperty("Max Temperature", 127, -128, 3)},
-                  {"fan1", PSUProperty("Fan Speed 1", 30000, 0, 0)},
+                  {"fan1", PSUProperty("SPD FAN", 30000, 0, 0)},
                   {"fan2", PSUProperty("Fan Speed 2", 30000, 0, 0)}};
 
     pwmTable = {{"fan1", "Fan_1"}, {"fan2", "Fan_2"}};
