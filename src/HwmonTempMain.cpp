@@ -39,49 +39,11 @@
 static constexpr float pollRateDefault = 0.5;
 
 namespace fs = std::filesystem;
-<<<<<<< HEAD
-static constexpr std::array<const char*, 18> sensorTypes = {
-    "xyz.openbmc_project.Configuration.EMC1412",
-    "xyz.openbmc_project.Configuration.EMC1413",
-    "xyz.openbmc_project.Configuration.EMC1414",
-    "xyz.openbmc_project.Configuration.EMC1424",
-    "xyz.openbmc_project.Configuration.MAX31725",
-    "xyz.openbmc_project.Configuration.MAX31730",
-    "xyz.openbmc_project.Configuration.MAX6581",
-    "xyz.openbmc_project.Configuration.MAX6654",
-    "xyz.openbmc_project.Configuration.SBTSI",
-    "xyz.openbmc_project.Configuration.TMP102",
-    "xyz.openbmc_project.Configuration.LM95234",
-    "xyz.openbmc_project.Configuration.TMP112",
-    "xyz.openbmc_project.Configuration.TMP175",
-    "xyz.openbmc_project.Configuration.TMP421",
-    "xyz.openbmc_project.Configuration.TMP441",
-    "xyz.openbmc_project.Configuration.LM75A",
-    "xyz.openbmc_project.Configuration.TMP75",
-    "xyz.openbmc_project.Configuration.W83773G"};
-||||||| 18fffd3
-static constexpr std::array<const char*, 16> sensorTypes = {
-    "xyz.openbmc_project.Configuration.EMC1412",
-    "xyz.openbmc_project.Configuration.EMC1413",
-    "xyz.openbmc_project.Configuration.EMC1414",
-    "xyz.openbmc_project.Configuration.MAX31725",
-    "xyz.openbmc_project.Configuration.MAX31730",
-    "xyz.openbmc_project.Configuration.MAX6581",
-    "xyz.openbmc_project.Configuration.MAX6654",
-    "xyz.openbmc_project.Configuration.SBTSI",
-    "xyz.openbmc_project.Configuration.LM95234",
-    "xyz.openbmc_project.Configuration.TMP112",
-    "xyz.openbmc_project.Configuration.TMP175",
-    "xyz.openbmc_project.Configuration.TMP421",
-    "xyz.openbmc_project.Configuration.TMP441",
-    "xyz.openbmc_project.Configuration.LM75A",
-    "xyz.openbmc_project.Configuration.TMP75",
-    "xyz.openbmc_project.Configuration.W83773G"};
-=======
 static auto sensorTypes{
     std::to_array<const char*>({"xyz.openbmc_project.Configuration.EMC1412",
                                 "xyz.openbmc_project.Configuration.EMC1413",
                                 "xyz.openbmc_project.Configuration.EMC1414",
+                                "xyz.openbmc_project.Configuration.EMC1424",
                                 "xyz.openbmc_project.Configuration.MAX31725",
                                 "xyz.openbmc_project.Configuration.MAX31730",
                                 "xyz.openbmc_project.Configuration.MAX6581",
@@ -89,6 +51,7 @@ static auto sensorTypes{
                                 "xyz.openbmc_project.Configuration.NCT7802",
                                 "xyz.openbmc_project.Configuration.SBTSI",
                                 "xyz.openbmc_project.Configuration.LM95234",
+                                "xyz.openbmc_project.Configuration.TMP102",
                                 "xyz.openbmc_project.Configuration.TMP112",
                                 "xyz.openbmc_project.Configuration.TMP175",
                                 "xyz.openbmc_project.Configuration.TMP421",
@@ -97,7 +60,6 @@ static auto sensorTypes{
                                 "xyz.openbmc_project.Configuration.TMP75",
                                 "xyz.openbmc_project.Configuration.W83773G",
                                 "xyz.openbmc_project.Configuration.JC42"})};
->>>>>>> origin/master
 
 void createSensors(
     boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
