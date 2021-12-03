@@ -36,10 +36,10 @@
 #include <variant>
 #include <vector>
 
-static constexpr bool debug = false;
 static constexpr float pollRateDefault = 0.5;
 
 namespace fs = std::filesystem;
+<<<<<<< HEAD
 static constexpr std::array<const char*, 18> sensorTypes = {
     "xyz.openbmc_project.Configuration.EMC1412",
     "xyz.openbmc_project.Configuration.EMC1413",
@@ -59,6 +59,45 @@ static constexpr std::array<const char*, 18> sensorTypes = {
     "xyz.openbmc_project.Configuration.LM75A",
     "xyz.openbmc_project.Configuration.TMP75",
     "xyz.openbmc_project.Configuration.W83773G"};
+||||||| 18fffd3
+static constexpr std::array<const char*, 16> sensorTypes = {
+    "xyz.openbmc_project.Configuration.EMC1412",
+    "xyz.openbmc_project.Configuration.EMC1413",
+    "xyz.openbmc_project.Configuration.EMC1414",
+    "xyz.openbmc_project.Configuration.MAX31725",
+    "xyz.openbmc_project.Configuration.MAX31730",
+    "xyz.openbmc_project.Configuration.MAX6581",
+    "xyz.openbmc_project.Configuration.MAX6654",
+    "xyz.openbmc_project.Configuration.SBTSI",
+    "xyz.openbmc_project.Configuration.LM95234",
+    "xyz.openbmc_project.Configuration.TMP112",
+    "xyz.openbmc_project.Configuration.TMP175",
+    "xyz.openbmc_project.Configuration.TMP421",
+    "xyz.openbmc_project.Configuration.TMP441",
+    "xyz.openbmc_project.Configuration.LM75A",
+    "xyz.openbmc_project.Configuration.TMP75",
+    "xyz.openbmc_project.Configuration.W83773G"};
+=======
+static auto sensorTypes{
+    std::to_array<const char*>({"xyz.openbmc_project.Configuration.EMC1412",
+                                "xyz.openbmc_project.Configuration.EMC1413",
+                                "xyz.openbmc_project.Configuration.EMC1414",
+                                "xyz.openbmc_project.Configuration.MAX31725",
+                                "xyz.openbmc_project.Configuration.MAX31730",
+                                "xyz.openbmc_project.Configuration.MAX6581",
+                                "xyz.openbmc_project.Configuration.MAX6654",
+                                "xyz.openbmc_project.Configuration.NCT7802",
+                                "xyz.openbmc_project.Configuration.SBTSI",
+                                "xyz.openbmc_project.Configuration.LM95234",
+                                "xyz.openbmc_project.Configuration.TMP112",
+                                "xyz.openbmc_project.Configuration.TMP175",
+                                "xyz.openbmc_project.Configuration.TMP421",
+                                "xyz.openbmc_project.Configuration.TMP441",
+                                "xyz.openbmc_project.Configuration.LM75A",
+                                "xyz.openbmc_project.Configuration.TMP75",
+                                "xyz.openbmc_project.Configuration.W83773G",
+                                "xyz.openbmc_project.Configuration.JC42"})};
+>>>>>>> origin/master
 
 void createSensors(
     boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
@@ -70,9 +109,8 @@ void createSensors(
 {
     auto getter = std::make_shared<GetSensorConfiguration>(
         dbusConnection,
-        std::move([&io, &objectServer, &sensors, &dbusConnection,
-                   sensorsChanged](
-                      const ManagedObjectType& sensorConfigurations) {
+        [&io, &objectServer, &sensors, &dbusConnection,
+         sensorsChanged](const ManagedObjectType& sensorConfigurations) {
             bool firstScan = sensorsChanged == nullptr;
 
             std::vector<fs::path> paths;
@@ -90,7 +128,6 @@ void createSensors(
             for (auto& path : paths)
             {
                 std::smatch match;
-                const std::string& pathStr = path.string();
                 auto directory = path.parent_path();
 
                 auto ret = directories.insert(directory.string());
@@ -117,7 +154,7 @@ void createSensors(
                     bus = std::stoi(busStr);
                     addr = std::stoi(addrStr, nullptr, 16);
                 }
-                catch (std::invalid_argument&)
+                catch (const std::invalid_argument&)
                 {
                     continue;
                 }
@@ -190,16 +227,17 @@ void createSensors(
                 if (!firstScan && findSensor != sensors.end())
                 {
                     bool found = false;
-                    for (auto it = sensorsChanged->begin();
-                         it != sensorsChanged->end(); it++)
+                    auto it = sensorsChanged->begin();
+                    while (it != sensorsChanged->end())
                     {
                         if (boost::ends_with(*it, findSensor->second->name))
                         {
-                            sensorsChanged->erase(it);
+                            it = sensorsChanged->erase(it);
                             findSensor->second = nullptr;
                             found = true;
                             break;
                         }
+                        ++it;
                     }
                     if (!found)
                     {
@@ -296,9 +334,43 @@ void createSensors(
                     }
                 }
             }
-        }));
+        });
     getter->getConfiguration(
         std::vector<std::string>(sensorTypes.begin(), sensorTypes.end()));
+}
+
+void interfaceRemoved(
+    sdbusplus::message::message& message,
+    boost::container::flat_map<std::string, std::shared_ptr<HwmonTempSensor>>&
+        sensors)
+{
+    if (message.is_method_error())
+    {
+        std::cerr << "interfacesRemoved callback method error\n";
+        return;
+    }
+
+    sdbusplus::message::object_path path;
+    std::vector<std::string> interfaces;
+
+    message.read(path, interfaces);
+
+    // If the xyz.openbmc_project.Confguration.X interface was removed
+    // for one or more sensors, delete those sensor objects.
+    auto sensorIt = sensors.begin();
+    while (sensorIt != sensors.end())
+    {
+        if ((sensorIt->second->configurationPath == path) &&
+            (std::find(interfaces.begin(), interfaces.end(),
+                       sensorIt->second->objectType) != interfaces.end()))
+        {
+            sensorIt = sensors.erase(sensorIt);
+        }
+        else
+        {
+            sensorIt++;
+        }
+    }
 }
 
 int main()
@@ -356,5 +428,18 @@ int main()
     }
 
     setupManufacturingModeMatch(*systemBus);
+
+    // Watch for entity-manager to remove configuration interfaces
+    // so the corresponding sensors can be removed.
+    auto ifaceRemovedMatch = std::make_unique<sdbusplus::bus::match::match>(
+        static_cast<sdbusplus::bus::bus&>(*systemBus),
+        "type='signal',member='InterfacesRemoved',arg0path='" +
+            std::string(inventoryPath) + "/'",
+        [&sensors](sdbusplus::message::message& msg) {
+            interfaceRemoved(msg, sensors);
+        });
+
+    matches.emplace_back(std::move(ifaceRemovedMatch));
+
     io.run();
 }

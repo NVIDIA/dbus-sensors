@@ -5,7 +5,6 @@
 #include <unistd.h>
 
 #include <boost/algorithm/string/predicate.hpp>
-#include <boost/algorithm/string/replace.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -27,13 +26,8 @@ ExternalSensor::ExternalSensor(
     std::vector<thresholds::Threshold>&& thresholdsIn,
     const std::string& sensorConfiguration, double maxReading,
     double minReading, double timeoutSecs, const PowerState& powerState) :
-    // TODO(): When the Mutable feature is integrated,
-    // make sure all ExternalSensor instances are mutable,
-    // because that is the entire point of ExternalSensor,
-    // to accept sensor values written by an external source.
-    Sensor(boost::replace_all_copy(sensorName, " ", "_"),
-           std::move(thresholdsIn), sensorConfiguration, objectType, true,
-           maxReading, minReading, conn, powerState),
+    Sensor(escapeName(sensorName), std::move(thresholdsIn), sensorConfiguration,
+           objectType, true, true, maxReading, minReading, conn, powerState),
     std::enable_shared_from_this<ExternalSensor>(), objServer(objectServer),
     writeLast(std::chrono::steady_clock::now()),
     writeTimeout(
@@ -95,7 +89,7 @@ void ExternalSensor::initWriteHook(
 
     // Connect ExternalSensor with Sensor
     auto weakThis = weak_from_this();
-    externalSetHook = std::move([weakThis]() {
+    externalSetHook = [weakThis]() {
         auto lockThis = weakThis.lock();
         if (lockThis)
         {
@@ -106,7 +100,7 @@ void ExternalSensor::initWriteHook(
         {
             std::cerr << "ExternalSensor receive ignored, sensor gone\n";
         }
-    });
+    };
 }
 
 ExternalSensor::~ExternalSensor()

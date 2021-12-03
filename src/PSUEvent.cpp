@@ -14,13 +14,12 @@
 // limitations under the License.
 */
 
-#include <systemd/sd-journal.h>
-
 #include <PSUEvent.hpp>
 #include <SensorPaths.hpp>
 #include <boost/asio/io_service.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/container/flat_map.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
@@ -36,13 +35,14 @@ PSUCombineEvent::PSUCombineEvent(
     sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     boost::asio::io_service& io, const std::string& psuName,
+    const PowerState& powerState,
     boost::container::flat_map<std::string, std::vector<std::string>>&
         eventPathList,
     boost::container::flat_map<
         std::string,
         boost::container::flat_map<std::string, std::vector<std::string>>>&
         groupEventPathList,
-    const std::string& combineEventName) :
+    const std::string& combineEventName, double pollRate) :
     objServer(objectServer)
 {
     std::string psuNameEscaped = sensor_paths::escapePathForDbus(psuName);
@@ -70,8 +70,8 @@ PSUCombineEvent::PSUCombineEvent(
         for (const auto& path : pathList.second)
         {
             auto p = std::make_shared<PSUSubEvent>(
-                eventInterface, path, conn, io, eventName, eventName, assert,
-                combineEvent, state, psuName);
+                eventInterface, path, conn, io, powerState, eventName,
+                eventName, assert, combineEvent, state, psuName, pollRate);
             p->setupRead();
 
             events[eventPSUName].emplace_back(p);
@@ -93,8 +93,9 @@ PSUCombineEvent::PSUCombineEvent(
             for (const auto& path : pathList.second)
             {
                 auto p = std::make_shared<PSUSubEvent>(
-                    eventInterface, path, conn, io, groupEventName,
-                    groupPathList.first, assert, combineEvent, state, psuName);
+                    eventInterface, path, conn, io, powerState, groupEventName,
+                    groupPathList.first, assert, combineEvent, state, psuName,
+                    pollRate);
                 p->setupRead();
                 events[eventPSUName].emplace_back(p);
 
@@ -140,17 +141,22 @@ static boost::container::flat_map<std::string,
 PSUSubEvent::PSUSubEvent(
     std::shared_ptr<sdbusplus::asio::dbus_interface> eventInterface,
     const std::string& path, std::shared_ptr<sdbusplus::asio::connection>& conn,
-    boost::asio::io_service& io, const std::string& groupEventName,
-    const std::string& eventName,
+    boost::asio::io_service& io, const PowerState& powerState,
+    const std::string& groupEventName, const std::string& eventName,
     std::shared_ptr<std::set<std::string>> asserts,
     std::shared_ptr<std::set<std::string>> combineEvent,
-    std::shared_ptr<bool> state, const std::string& psuName) :
+    std::shared_ptr<bool> state, const std::string& psuName, double pollRate) :
     std::enable_shared_from_this<PSUSubEvent>(),
     eventInterface(std::move(eventInterface)), asserts(std::move(asserts)),
     combineEvent(std::move(combineEvent)), assertState(std::move(state)),
-    errCount(0), path(path), eventName(eventName), waitTimer(io), inputDev(io),
-    psuName(psuName), groupEventName(groupEventName), systemBus(conn)
+    errCount(0), path(path), eventName(eventName), readState(powerState),
+    waitTimer(io), inputDev(io), psuName(psuName),
+    groupEventName(groupEventName), systemBus(conn)
 {
+    if (pollRate > 0.0)
+    {
+        eventPollMs = static_cast<unsigned int>(pollRate * 1000);
+    }
     fd = open(path.c_str(), O_RDONLY);
     if (fd < 0)
     {
@@ -183,12 +189,25 @@ PSUSubEvent::PSUSubEvent(
     }
 }
 
+PSUSubEvent::~PSUSubEvent()
+{
+    waitTimer.cancel();
+    inputDev.close();
+}
+
 void PSUSubEvent::setupRead(void)
 {
+    if (!readingStateGood(readState))
+    {
+        // Deassert the event
+        updateValue(0);
+        restartRead();
+        return;
+    }
+
     std::shared_ptr<boost::asio::streambuf> buffer =
         std::make_shared<boost::asio::streambuf>();
     std::weak_ptr<PSUSubEvent> weakRef = weak_from_this();
-
     boost::asio::async_read_until(
         inputDev, *buffer, '\n',
         [weakRef, buffer](const boost::system::error_code& ec,
@@ -202,10 +221,21 @@ void PSUSubEvent::setupRead(void)
         });
 }
 
-PSUSubEvent::~PSUSubEvent()
+void PSUSubEvent::restartRead()
 {
-    waitTimer.cancel();
-    inputDev.close();
+    std::weak_ptr<PSUSubEvent> weakRef = weak_from_this();
+    waitTimer.expires_from_now(boost::posix_time::milliseconds(eventPollMs));
+    waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
+        if (ec == boost::asio::error::operation_aborted)
+        {
+            return;
+        }
+        std::shared_ptr<PSUSubEvent> self = weakRef.lock();
+        if (self)
+        {
+            self->setupRead();
+        }
+    });
 }
 
 void PSUSubEvent::handleResponse(const boost::system::error_code& err)
@@ -247,20 +277,7 @@ void PSUSubEvent::handleResponse(const boost::system::error_code& err)
         errCount++;
     }
     lseek(fd, 0, SEEK_SET);
-    waitTimer.expires_from_now(boost::posix_time::milliseconds(eventPollMs));
-
-    std::weak_ptr<PSUSubEvent> weakRef = weak_from_this();
-    waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
-        std::shared_ptr<PSUSubEvent> self = weakRef.lock();
-        if (ec == boost::asio::error::operation_aborted)
-        {
-            return;
-        }
-        if (self)
-        {
-            self->setupRead();
-        }
-    });
+    restartRead();
 }
 
 // Any of the sub events of one event is asserted, then the event will be
@@ -301,22 +318,18 @@ void PSUSubEvent::updateValue(const int& newValue)
             if (!deassertMessage.empty())
             {
                 // Fan Failed has two args
-                std::string sendMessage = eventName + " deassert";
                 if (deassertMessage == "OpenBMC.0.1.PowerSupplyFanRecovered")
                 {
-                    sd_journal_send(
-                        "MESSAGE=%s", sendMessage.c_str(), "PRIORITY=%i",
-                        LOG_INFO, "REDFISH_MESSAGE_ID=%s",
-                        deassertMessage.c_str(), "REDFISH_MESSAGE_ARGS=%s,%s",
-                        psuName.c_str(), fanName.c_str(), NULL);
+                    lg2::info("{EVENT} deassert", "EVENT", eventName,
+                              "REDFISH_MESSAGE_ID", deassertMessage,
+                              "REDFISH_MESSAGE_ARGS",
+                              (psuName + ',' + fanName));
                 }
                 else
                 {
-                    sd_journal_send(
-                        "MESSAGE=%s", sendMessage.c_str(), "PRIORITY=%i",
-                        LOG_INFO, "REDFISH_MESSAGE_ID=%s",
-                        deassertMessage.c_str(), "REDFISH_MESSAGE_ARGS=%s",
-                        psuName.c_str(), NULL);
+                    lg2::info("{EVENT} deassert", "EVENT", eventName,
+                              "REDFISH_MESSAGE_ID", deassertMessage,
+                              "REDFISH_MESSAGE_ARGS", psuName);
                 }
             }
 
@@ -328,6 +341,8 @@ void PSUSubEvent::updateValue(const int& newValue)
     }
     else
     {
+        std::cerr << "PSUSubEvent asserted by " << path << "\n";
+
         if ((*assertState == false) && ((*asserts).empty()))
         {
             *assertState = true;
@@ -343,22 +358,18 @@ void PSUSubEvent::updateValue(const int& newValue)
                 }
 
                 // Fan Failed has two args
-                std::string sendMessage = eventName + " assert";
                 if (assertMessage == "OpenBMC.0.1.PowerSupplyFanFailed")
                 {
-                    sd_journal_send(
-                        "MESSAGE=%s", sendMessage.c_str(), "PRIORITY=%i",
-                        LOG_WARNING, "REDFISH_MESSAGE_ID=%s",
-                        assertMessage.c_str(), "REDFISH_MESSAGE_ARGS=%s,%s",
-                        psuName.c_str(), fanName.c_str(), NULL);
+                    lg2::warning("{EVENT} assert", "EVENT", eventName,
+                                 "REDFISH_MESSAGE_ID", assertMessage,
+                                 "REDFISH_MESSAGE_ARGS",
+                                 (psuName + ',' + fanName));
                 }
                 else
                 {
-                    sd_journal_send(
-                        "MESSAGE=%s", sendMessage.c_str(), "PRIORITY=%i",
-                        LOG_WARNING, "REDFISH_MESSAGE_ID=%s",
-                        assertMessage.c_str(), "REDFISH_MESSAGE_ARGS=%s",
-                        psuName.c_str(), NULL);
+                    lg2::warning("{EVENT} assert", "EVENT", eventName,
+                                 "REDFISH_MESSAGE_ID", assertMessage,
+                                 "REDFISH_MESSAGE_ARGS", psuName);
                 }
             }
             if ((*combineEvent).empty())

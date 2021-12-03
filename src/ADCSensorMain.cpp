@@ -35,13 +35,13 @@
 #include <variant>
 #include <vector>
 
-static constexpr bool debug = false;
 static constexpr float pollRateDefault = 0.5;
+static constexpr float gpioBridgeSetupTimeDefault = 0.02;
 
 namespace fs = std::filesystem;
 
-static constexpr std::array<const char*, 1> sensorTypes = {
-    "xyz.openbmc_project.Configuration.ADC"};
+static constexpr auto sensorTypes{
+    std::to_array<const char*>({"xyz.openbmc_project.Configuration.ADC"})};
 static std::regex inputRegex(R"(in(\d+)_input)");
 
 static boost::container::flat_map<size_t, bool> cpuPresence;
@@ -74,15 +74,14 @@ void createSensors(
 {
     auto getter = std::make_shared<GetSensorConfiguration>(
         dbusConnection,
-        std::move([&io, &objectServer, &sensors, &dbusConnection,
-                   sensorsChanged](
-                      const ManagedObjectType& sensorConfigurations) {
+        [&io, &objectServer, &sensors, &dbusConnection,
+         sensorsChanged](const ManagedObjectType& sensorConfigurations) {
             bool firstScan = sensorsChanged == nullptr;
             std::vector<fs::path> paths;
             if (!findFiles(fs::path("/sys/class/hwmon"), R"(in\d+_input)",
                            paths))
             {
-                std::cerr << "No temperature sensors in system\n";
+                std::cerr << "No adc sensors in system\n";
                 return;
             }
 
@@ -281,7 +280,18 @@ void createSensors(
                                     polarity = gpiod::line::ACTIVE_LOW;
                                 }
                             }
-                            bridgeGpio = BridgeGpio(gpioName, polarity);
+
+                            float setupTime = gpioBridgeSetupTimeDefault;
+                            auto findSetupTime =
+                                suppConfig.second.find("SetupTime");
+                            if (findSetupTime != suppConfig.second.end())
+                            {
+                                setupTime = std::visit(VariantToFloatVisitor(),
+                                                       findSetupTime->second);
+                            }
+
+                            bridgeGpio =
+                                BridgeGpio(gpioName, polarity, setupTime);
                         }
 
                         break;
@@ -294,7 +304,7 @@ void createSensors(
                     readState, *interfacePath, std::move(bridgeGpio));
                 sensor->setupRead();
             }
-        }));
+        });
 
     getter->getConfiguration(
         std::vector<std::string>{sensorTypes.begin(), sensorTypes.end()});
@@ -357,7 +367,7 @@ int main()
             {
                 index = std::stoi(path.substr(path.size() - 1));
             }
-            catch (std::invalid_argument&)
+            catch (const std::invalid_argument&)
             {
                 std::cerr << "Found invalid path " << path << "\n";
                 return;

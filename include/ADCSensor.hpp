@@ -15,7 +15,9 @@
 class BridgeGpio
 {
   public:
-    BridgeGpio(const std::string& name, const int polarity)
+    BridgeGpio(const std::string& name, const int polarity,
+               const float setupTime) :
+        setupTimeMs(static_cast<unsigned int>(setupTime * 1000))
     {
         line = gpiod::find_line(name);
         if (!line)
@@ -32,7 +34,7 @@ class BridgeGpio
                                   ? 0
                                   : gpiod::line_request::FLAG_ACTIVE_LOW});
             }
-            catch (std::system_error&)
+            catch (const std::system_error&)
             {
                 std::cerr << "Error requesting gpio: " << name << "\n";
             }
@@ -47,12 +49,14 @@ class BridgeGpio
             {
                 line.set_value(value);
             }
-            catch (std::system_error& exc)
+            catch (const std::system_error& exc)
             {
                 std::cerr << "Error set_value: " << exc.what() << "\n";
             }
         }
     }
+
+    unsigned int setupTimeMs;
 
   private:
     gpiod::line line;

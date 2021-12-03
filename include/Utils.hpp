@@ -1,6 +1,7 @@
 #pragma once
 #include <VariantVisitors.hpp>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/algorithm/string/replace.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/container/flat_map.hpp>
 #include <sdbusplus/asio/connection.hpp>
@@ -41,6 +42,11 @@ using GetSubTreeType = std::vector<
               std::vector<std::pair<std::string, std::vector<std::string>>>>>;
 using Association = std::tuple<std::string, std::string, std::string>;
 
+inline std::string escapeName(const std::string& sensorName)
+{
+    return boost::replace_all_copy(sensorName, " ", "_");
+}
+
 std::optional<std::string> openAndRead(const std::string& hwmonFile);
 std::optional<std::string>
     getFullHwmonFilePath(const std::string& directory,
@@ -78,6 +84,8 @@ enum class PowerState
     biosPost,
     always
 };
+
+bool readingStateGood(const PowerState& powerState);
 
 namespace mapper
 {

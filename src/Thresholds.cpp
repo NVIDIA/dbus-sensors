@@ -100,6 +100,14 @@ bool parseThresholdsFromConfig(
             }
         }
 
+        double hysteresis = std::numeric_limits<double>::quiet_NaN();
+        auto hysteresisFind = item.second.find("Hysteresis");
+        if (hysteresisFind != item.second.end())
+        {
+            hysteresis =
+                std::visit(VariantToDoubleVisitor(), hysteresisFind->second);
+        }
+
         auto directionFind = item.second.find("Direction");
         auto severityFind = item.second.find("Severity");
         auto valueFind = item.second.find("Value");
@@ -133,7 +141,7 @@ bool parseThresholdsFromConfig(
         }
         double val = std::visit(VariantToDoubleVisitor(), valueFind->second);
 
-        thresholdVector.emplace_back(level, direction, val);
+        thresholdVector.emplace_back(level, direction, val, hysteresis);
     }
     return true;
 }
@@ -305,7 +313,7 @@ static std::vector<ChangeParam> checkThresholds(Sensor* sensor, double value)
                               << " raw data " << sensor->rawValue << "\n";
                 }
             }
-            else if (value < (threshold.value - sensor->hysteresisTrigger))
+            else if (value < (threshold.value - threshold.hysteresis))
             {
                 thresholdChanges.emplace_back(threshold, false, value);
                 ++cHiFalse;
@@ -328,7 +336,7 @@ static std::vector<ChangeParam> checkThresholds(Sensor* sensor, double value)
                               << sensor->rawValue << "\n";
                 }
             }
-            else if (value > (threshold.value + sensor->hysteresisTrigger))
+            else if (value > (threshold.value + threshold.hysteresis))
             {
                 thresholdChanges.emplace_back(threshold, false, value);
                 ++cLoFalse;
@@ -344,13 +352,13 @@ static std::vector<ChangeParam> checkThresholds(Sensor* sensor, double value)
         }
     }
 
-    if constexpr (debug)
+    // Throttle debug output, so that it does not continuously spam
+    ++cDebugThrottle;
+    if (cDebugThrottle >= 1000)
     {
-        // Throttle debug output, so that it does not continuously spam
-        ++cDebugThrottle;
-        if (cDebugThrottle >= 1000)
+        cDebugThrottle = 0;
+        if constexpr (debug)
         {
-            cDebugThrottle = 0;
             std::cerr << "checkThresholds: High T=" << cHiTrue
                       << " F=" << cHiFalse << " M=" << cHiMidstate
                       << ", Low T=" << cLoTrue << " F=" << cLoFalse

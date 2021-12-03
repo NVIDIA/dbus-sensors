@@ -18,7 +18,6 @@
 
 #include <HwmonTempSensor.hpp>
 #include <boost/algorithm/string/predicate.hpp>
-#include <boost/algorithm/string/replace.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <sdbusplus/asio/connection.hpp>
@@ -31,7 +30,16 @@
 #include <string>
 #include <vector>
 
-static constexpr unsigned int sensorScaleFactor = 1000;
+// Temperatures are read in milli degrees Celsius, we need degrees Celsius.
+// Pressures are read in kilopascal, we need Pascals.  On D-Bus for Open BMC
+// we use the International System of Units without prefixes.
+// Links to the kernel documentation:
+// https://www.kernel.org/doc/Documentation/hwmon/sysfs-interface
+// https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-bus-iio
+// For IIO RAW sensors we get a raw_value, an offset, and scale to compute
+// the value = (raw_value + offset) * scale
+static constexpr double sensorOffset = 0.0;
+static constexpr double sensorScale = 0.001;
 static constexpr size_t warnAfterErrorCount = 10;
 
 static constexpr double maxReading = 127;
@@ -44,9 +52,8 @@ HwmonTempSensor::HwmonTempSensor(
     boost::asio::io_service& io, const std::string& sensorName,
     std::vector<thresholds::Threshold>&& thresholdsIn, const float pollRate,
     const std::string& sensorConfiguration, const PowerState powerState) :
-    Sensor(boost::replace_all_copy(sensorName, " ", "_"),
-           std::move(thresholdsIn), sensorConfiguration, objectType, false,
-           maxReading, minReading, conn, powerState),
+    Sensor(escapeName(sensorName), std::move(thresholdsIn), sensorConfiguration,
+           objectType, false, false, maxReading, minReading, conn, powerState),
     std::enable_shared_from_this<HwmonTempSensor>(), objServer(objectServer),
     inputDev(io, open(path.c_str(), O_RDONLY)), waitTimer(io), path(path),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000))
@@ -86,8 +93,15 @@ HwmonTempSensor::~HwmonTempSensor()
 
 void HwmonTempSensor::setupRead(void)
 {
-    std::weak_ptr<HwmonTempSensor> weakRef = weak_from_this();
+    if (!readingStateGood())
+    {
+        markAvailable(false);
+        updateValue(std::numeric_limits<double>::quiet_NaN());
+        restartRead();
+        return;
+    }
 
+    std::weak_ptr<HwmonTempSensor> weakRef = weak_from_this();
     boost::asio::async_read_until(inputDev, readBuf, '\n',
                                   [weakRef](const boost::system::error_code& ec,
                                             std::size_t /*bytes_transfered*/) {
@@ -98,6 +112,24 @@ void HwmonTempSensor::setupRead(void)
                                           self->handleResponse(ec);
                                       }
                                   });
+}
+
+void HwmonTempSensor::restartRead()
+{
+    std::weak_ptr<HwmonTempSensor> weakRef = weak_from_this();
+    waitTimer.expires_from_now(boost::posix_time::milliseconds(sensorPollMs));
+    waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
+        if (ec == boost::asio::error::operation_aborted)
+        {
+            return; // we're being canceled
+        }
+        std::shared_ptr<HwmonTempSensor> self = weakRef.lock();
+        if (!self)
+        {
+            return;
+        }
+        self->setupRead();
+    });
 }
 
 void HwmonTempSensor::handleResponse(const boost::system::error_code& err)
@@ -117,7 +149,7 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err)
         try
         {
             rawValue = std::stod(response);
-            double nvalue = rawValue / sensorScaleFactor;
+            double nvalue = (rawValue + sensorOffset) * sensorScale;
             updateValue(nvalue);
         }
         catch (const std::invalid_argument&)
@@ -140,28 +172,7 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err)
         return; // we're no longer valid
     }
     inputDev.assign(fd);
-    waitTimer.expires_from_now(boost::posix_time::milliseconds(sensorPollMs));
-    std::weak_ptr<HwmonTempSensor> weakRef = weak_from_this();
-    waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
-        std::shared_ptr<HwmonTempSensor> self = weakRef.lock();
-        if (ec == boost::asio::error::operation_aborted)
-        {
-            if (self)
-            {
-                std::cerr << "Hwmon temp sensor " << self->name
-                          << " read cancelled " << self->path << "\n";
-            }
-            else
-            {
-                std::cerr << "Hwmon sensor read cancelled, no self\n";
-            }
-            return; // we're being canceled
-        }
-        if (self)
-        {
-            self->setupRead();
-        }
-    });
+    restartRead();
 }
 
 void HwmonTempSensor::checkThresholds(void)

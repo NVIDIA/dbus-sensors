@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <Utils.hpp>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/asio/io_service.hpp>
 #include <boost/asio/streambuf.hpp>
@@ -33,11 +34,12 @@ class PSUSubEvent : public std::enable_shared_from_this<PSUSubEvent>
     PSUSubEvent(std::shared_ptr<sdbusplus::asio::dbus_interface> eventInterface,
                 const std::string& path,
                 std::shared_ptr<sdbusplus::asio::connection>& conn,
-                boost::asio::io_service& io, const std::string& groupEventName,
-                const std::string& eventName,
+                boost::asio::io_service& io, const PowerState& readState,
+                const std::string& groupEventName, const std::string& eventName,
                 std::shared_ptr<std::set<std::string>> asserts,
                 std::shared_ptr<std::set<std::string>> combineEvent,
-                std::shared_ptr<bool> state, const std::string& psuName);
+                std::shared_ptr<bool> state, const std::string& psuName,
+                double pollRate);
     ~PSUSubEvent();
 
     std::shared_ptr<sdbusplus::asio::dbus_interface> eventInterface;
@@ -53,21 +55,24 @@ class PSUSubEvent : public std::enable_shared_from_this<PSUSubEvent>
     std::string path;
     std::string eventName;
 
+    PowerState readState;
     boost::asio::deadline_timer waitTimer;
     std::shared_ptr<boost::asio::streambuf> readBuf;
+    void restartRead();
     void handleResponse(const boost::system::error_code& err);
     void updateValue(const int& newValue);
     void beep(const uint8_t& beepPriority);
     static constexpr uint8_t beepPSUFailure = 2;
     boost::asio::posix::stream_descriptor inputDev;
-    static constexpr unsigned int eventPollMs = 1000;
-    static constexpr size_t warnAfterErrorCount = 10;
     std::string psuName;
     std::string groupEventName;
     std::string fanName;
     std::string assertMessage;
     std::string deassertMessage;
     std::shared_ptr<sdbusplus::asio::connection> systemBus;
+    unsigned int eventPollMs = defaultEventPollMs;
+    static constexpr unsigned int defaultEventPollMs = 1000;
+    static constexpr size_t warnAfterErrorCount = 10;
 };
 
 class PSUCombineEvent
@@ -77,13 +82,14 @@ class PSUCombineEvent
         sdbusplus::asio::object_server& objectSever,
         std::shared_ptr<sdbusplus::asio::connection>& conn,
         boost::asio::io_service& io, const std::string& psuName,
+        const PowerState& powerState,
         boost::container::flat_map<std::string, std::vector<std::string>>&
             eventPathList,
         boost::container::flat_map<
             std::string,
             boost::container::flat_map<std::string, std::vector<std::string>>>&
             groupEventPathList,
-        const std::string& combineEventName);
+        const std::string& combineEventName, double pollRate);
     ~PSUCombineEvent();
 
     sdbusplus::asio::object_server& objServer;

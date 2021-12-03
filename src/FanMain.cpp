@@ -39,15 +39,13 @@
 #include <variant>
 #include <vector>
 
-static constexpr bool debug = false;
-
 namespace fs = std::filesystem;
 
 // The following two structures need to be consistent
-static constexpr std::array<const char*, 3> sensorTypes = {
-    "xyz.openbmc_project.Configuration.AspeedFan",
-    "xyz.openbmc_project.Configuration.I2CFan",
-    "xyz.openbmc_project.Configuration.NuvotonFan"};
+static auto sensorTypes{std::to_array<const char*>(
+    {"xyz.openbmc_project.Configuration.AspeedFan",
+     "xyz.openbmc_project.Configuration.I2CFan",
+     "xyz.openbmc_project.Configuration.NuvotonFan"})};
 
 enum FanTypes
 {
@@ -163,9 +161,8 @@ void createSensors(
 {
     auto getter = std::make_shared<GetSensorConfiguration>(
         dbusConnection,
-        std::move([&io, &objectServer, &tachSensors, &pwmSensors,
-                   &dbusConnection, sensorsChanged](
-                      const ManagedObjectType& sensorConfigurations) {
+        [&io, &objectServer, &tachSensors, &pwmSensors, &dbusConnection,
+         sensorsChanged](const ManagedObjectType& sensorConfigurations) {
             bool firstScan = sensorsChanged == nullptr;
             std::vector<fs::path> paths;
             if (!findFiles(fs::path("/sys/class/hwmon"), R"(fan\d+_input)",
@@ -382,6 +379,8 @@ void createSensors(
                 std::string pwmName;
                 fs::path pwmPath;
 
+                // The Mutable parameter is optional, defaulting to false
+                bool isValueMutable = false;
                 if (connector != sensorData->end())
                 {
                     auto findPwm = connector->second.find("Pwm");
@@ -406,6 +405,18 @@ void createSensors(
                         else
                         {
                             pwmName = "Pwm_" + std::to_string(pwm + 1);
+                        }
+
+                        // Check PWM sensor mutability
+                        auto findMutable = connector->second.find("Mutable");
+                        if (findMutable != connector->second.end())
+                        {
+                            auto ptrMutable =
+                                std::get_if<bool>(&(findMutable->second));
+                            if (ptrMutable)
+                            {
+                                isValueMutable = *ptrMutable;
+                            }
                         }
                     }
                     else
@@ -443,12 +454,12 @@ void createSensors(
                 {
                     pwmSensors[pwmPath] = std::make_unique<PwmSensor>(
                         pwmName, pwmPath, dbusConnection, objectServer,
-                        *interfacePath, "Fan");
+                        *interfacePath, "Fan", isValueMutable);
                 }
             }
 
             createRedundancySensor(tachSensors, dbusConnection, objectServer);
-        }));
+        });
     getter->getConfiguration(
         std::vector<std::string>{sensorTypes.begin(), sensorTypes.end()},
         retries);
@@ -527,4 +538,5 @@ int main()
 
     setupManufacturingModeMatch(*systemBus);
     io.run();
+    return 0;
 }

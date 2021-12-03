@@ -19,7 +19,6 @@
 #include <TachSensor.hpp>
 #include <Utils.hpp>
 #include <boost/algorithm/string/predicate.hpp>
-#include <boost/algorithm/string/replace.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <gpiod.hpp>
@@ -38,7 +37,6 @@
 #include <vector>
 
 static constexpr unsigned int pwmPollMs = 500;
-static constexpr size_t warnAfterErrorCount = 10;
 
 TachSensor::TachSensor(const std::string& path, const std::string& objectType,
                        sdbusplus::asio::object_server& objectServer,
@@ -51,9 +49,9 @@ TachSensor::TachSensor(const std::string& path, const std::string& objectType,
                        const std::pair<size_t, size_t>& limits,
                        const PowerState& powerState,
                        const std::optional<std::string>& ledIn) :
-    Sensor(boost::replace_all_copy(fanName, " ", "_"), std::move(thresholdsIn),
-           sensorConfiguration, objectType, false, limits.second, limits.first,
-           conn, powerState),
+    Sensor(escapeName(fanName), std::move(thresholdsIn), sensorConfiguration,
+           objectType, false, false, limits.second, limits.first, conn,
+           powerState),
     objServer(objectServer), redundancy(redundancy),
     presence(std::move(presenceSensor)),
     inputDev(io, open(path.c_str(), O_RDONLY)), waitTimer(io), path(path),
@@ -204,8 +202,8 @@ void TachSensor::checkThresholds(void)
 PresenceSensor::PresenceSensor(const std::string& gpioName, bool inverted,
                                boost::asio::io_service& io,
                                const std::string& name) :
-    inverted(inverted),
-    gpioLine(gpiod::find_line(gpioName)), gpioFd(io), name(name)
+    gpioLine(gpiod::find_line(gpioName)),
+    gpioFd(io), name(name)
 {
     if (!gpioLine)
     {
@@ -229,7 +227,7 @@ PresenceSensor::PresenceSensor(const std::string& gpioName, bool inverted,
 
         gpioFd.assign(gpioLineFd);
     }
-    catch (std::system_error&)
+    catch (const std::system_error&)
     {
         std::cerr << "Error reading gpio: " << gpioName << "\n";
         status = false;

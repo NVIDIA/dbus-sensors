@@ -18,7 +18,6 @@
 
 #include <ADCSensor.hpp>
 #include <boost/algorithm/string/predicate.hpp>
-#include <boost/algorithm/string/replace.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <sdbusplus/asio/connection.hpp>
@@ -34,8 +33,6 @@
 #include <string>
 #include <vector>
 
-static constexpr size_t warnAfterErrorCount = 10;
-static constexpr unsigned int gpioBridgeEnableMs = 20;
 // scaling factor from hwmon
 static constexpr unsigned int sensorScaleFactor = 1000;
 
@@ -52,9 +49,8 @@ ADCSensor::ADCSensor(const std::string& path,
                      PowerState readState,
                      const std::string& sensorConfiguration,
                      std::optional<BridgeGpio>&& bridgeGpio) :
-    Sensor(boost::replace_all_copy(sensorName, " ", "_"),
-           std::move(thresholdsIn), sensorConfiguration,
-           "xyz.openbmc_project.Configuration.ADC", false,
+    Sensor(escapeName(sensorName), std::move(thresholdsIn), sensorConfiguration,
+           "xyz.openbmc_project.Configuration.ADC", false, false,
            maxVoltageReading / scaleFactor, minVoltageReading / scaleFactor,
            conn, readState),
     std::enable_shared_from_this<ADCSensor>(), objServer(objectServer),
@@ -110,7 +106,7 @@ void ADCSensor::setupRead(void)
         // value. Guarantee that the HW signal can be stable, the HW signal
         // could be instability.
         waitTimer.expires_from_now(
-            boost::posix_time::milliseconds(gpioBridgeEnableMs));
+            boost::posix_time::milliseconds(bridgeGpio->setupTimeMs));
         waitTimer.async_wait(
             [weakRef, buffer](const boost::system::error_code& ec) {
                 std::shared_ptr<ADCSensor> self = weakRef.lock();
@@ -174,7 +170,7 @@ void ADCSensor::handleResponse(const boost::system::error_code& err)
             nvalue = std::round(nvalue * roundFactor) / roundFactor;
             updateValue(nvalue);
         }
-        catch (std::invalid_argument&)
+        catch (const std::invalid_argument&)
         {
             incrementError();
         }

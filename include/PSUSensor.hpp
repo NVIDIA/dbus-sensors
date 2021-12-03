@@ -19,8 +19,9 @@ class PSUSensor : public Sensor, public std::enable_shared_from_this<PSUSensor>
               boost::asio::io_service& io, const std::string& sensorName,
               std::vector<thresholds::Threshold>&& thresholds,
               const std::string& sensorConfiguration,
-              const std::string& sensorUnits, unsigned int factor, double max,
-              double min, const std::string& label, size_t tSize);
+              const PowerState& powerState, const std::string& sensorUnits,
+              unsigned int factor, double max, double min, double offset,
+              const std::string& label, size_t tSize, double pollRate);
     ~PSUSensor() override;
     void setupRead(void);
 
@@ -28,27 +29,32 @@ class PSUSensor : public Sensor, public std::enable_shared_from_this<PSUSensor>
     sdbusplus::asio::object_server& objServer;
     boost::asio::posix::stream_descriptor inputDev;
     boost::asio::deadline_timer waitTimer;
-    std::shared_ptr<boost::asio::streambuf> readBuf;
     std::string path;
-    std::string pathRatedMax;
-    std::string pathRatedMin;
     unsigned int sensorFactor;
-    uint8_t minMaxReadCounter;
+    double sensorOffset;
+    thresholds::ThresholdTimer thresholdTimer;
+    void restartRead();
     void handleResponse(const boost::system::error_code& err);
     void checkThresholds(void) override;
-    void updateMinMaxValues(void);
+    unsigned int sensorPollMs = defaultSensorPollMs;
 
     int fd;
-    static constexpr unsigned int sensorPollMs = 1000;
     static constexpr size_t warnAfterErrorCount = 10;
+
+  public:
+    static constexpr double defaultSensorPoll = 1.0;
+    static constexpr unsigned int defaultSensorPollMs =
+        static_cast<unsigned int>(defaultSensorPoll * 1000);
 };
 
 class PSUProperty
 {
   public:
-    PSUProperty(std::string name, double max, double min, unsigned int factor) :
-        labelTypeName(std::move(name)), maxReading(max), minReading(min),
-        sensorScaleFactor(factor)
+    PSUProperty(std::string name, double max, double min, unsigned int factor,
+                double offset) :
+        labelTypeName(std::move(name)),
+        maxReading(max), minReading(min), sensorScaleFactor(factor),
+        sensorOffset(offset)
     {}
     ~PSUProperty() = default;
 
@@ -56,4 +62,5 @@ class PSUProperty
     double maxReading;
     double minReading;
     unsigned int sensorScaleFactor;
+    double sensorOffset;
 };

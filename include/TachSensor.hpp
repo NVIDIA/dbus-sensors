@@ -1,11 +1,10 @@
 #pragma once
-#include <systemd/sd-journal.h>
-
 #include <Thresholds.hpp>
 #include <boost/asio/streambuf.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
 #include <gpiod.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sensor.hpp>
 
@@ -28,7 +27,6 @@ class PresenceSensor
 
   private:
     bool status = true;
-    bool inverted;
     gpiod::line gpioLine;
     boost::asio::posix::stream_descriptor gpioFd;
     std::string name;
@@ -82,9 +80,9 @@ class TachSensor : public Sensor
     std::unique_ptr<PresenceSensor> presence;
     std::shared_ptr<sdbusplus::asio::dbus_interface> itemIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> itemAssoc;
+    boost::asio::streambuf readBuf;
     boost::asio::posix::stream_descriptor inputDev;
     boost::asio::deadline_timer waitTimer;
-    boost::asio::streambuf readBuf;
     std::string path;
     std::optional<std::string> led;
     bool ledState = false;
@@ -95,28 +93,26 @@ class TachSensor : public Sensor
 
 inline void logFanInserted(const std::string& device)
 {
-    sd_journal_send("MESSAGE=%s", "Fan Inserted", "PRIORITY=%i", LOG_ERR,
-                    "REDFISH_MESSAGE_ID=%s", "OpenBMC.0.1.FanInserted",
-                    "REDFISH_MESSAGE_ARGS=%s", device.c_str(), NULL);
+    auto msg = "OpenBMC.0.1.FanInserted";
+    lg2::error("Fan Inserted", "REDFISH_MESSAGE_ID", msg,
+               "REDFISH_MESSAGE_ARGS", device);
 }
 
 inline void logFanRemoved(const std::string& device)
 {
-    sd_journal_send("MESSAGE=%s", "Fan Removed", "PRIORITY=%i", LOG_ERR,
-                    "REDFISH_MESSAGE_ID=%s", "OpenBMC.0.1.FanRemoved",
-                    "REDFISH_MESSAGE_ARGS=%s", device.c_str(), NULL);
+    auto msg = "OpenBMC.0.1.FanRemoved";
+    lg2::error("Fan Removed", "REDFISH_MESSAGE_ID", msg, "REDFISH_MESSAGE_ARGS",
+               device);
 }
 
 inline void logFanRedundancyLost(void)
 {
-    sd_journal_send("MESSAGE=%s", "Fan Inserted", "PRIORITY=%i", LOG_ERR,
-                    "REDFISH_MESSAGE_ID=%s", "OpenBMC.0.1.FanRedundancyLost",
-                    NULL);
+    auto msg = "OpenBMC.0.1.FanRedundancyLost";
+    lg2::error("Fan Inserted", "REDFISH_MESSAGE_ID", msg);
 }
 
 inline void logFanRedundancyRestored(void)
 {
-    sd_journal_send("MESSAGE=%s", "Fan Removed", "PRIORITY=%i", LOG_ERR,
-                    "REDFISH_MESSAGE_ID=%s",
-                    "OpenBMC.0.1.FanRedundancyRegained", NULL);
+    auto msg = "OpenBMC.0.1.FanRedundancyRegained";
+    lg2::error("Fan Removed", "REDFISH_MESSAGE_ID", msg);
 }

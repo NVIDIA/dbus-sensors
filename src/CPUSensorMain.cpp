@@ -51,7 +51,7 @@
 
 static constexpr bool debug = false;
 
-boost::container::flat_map<std::string, std::unique_ptr<CPUSensor>> gCpuSensors;
+boost::container::flat_map<std::string, std::shared_ptr<CPUSensor>> gCpuSensors;
 boost::container::flat_map<std::string,
                            std::shared_ptr<sdbusplus::asio::dbus_interface>>
     inventoryIfaces;
@@ -89,9 +89,9 @@ namespace fs = std::filesystem;
 
 static constexpr const char* configPrefix =
     "xyz.openbmc_project.Configuration.";
-static constexpr std::array<const char*, 1> sensorTypes = {"XeonCPU"};
-static constexpr std::array<const char*, 3> hiddenProps = {
-    CPUSensor::labelTcontrol, "Tthrottle", "Tjmax"};
+static constexpr auto sensorTypes{std::to_array<const char*>({"XeonCPU"})};
+static constexpr auto hiddenProps{std::to_array<const char*>(
+    {CPUSensor::labelTcontrol, "Tthrottle", "Tjmax"})};
 
 void detectCpuAsync(
     boost::asio::deadline_timer& pingTimer,
@@ -181,7 +181,6 @@ bool createSensors(boost::asio::io_service& io,
 
     for (const fs::path& hwmonNamePath : hwmonNamePaths)
     {
-        const std::string& pathStr = hwmonNamePath.string();
         auto hwmonDirectory = hwmonNamePath.parent_path();
 
         auto ret = scannedDirectories.insert(hwmonDirectory.string());
@@ -209,7 +208,7 @@ bool createSensors(boost::asio::io_service& io,
             bus = std::stoi(busStr);
             addr = std::stoi(addrStr, nullptr, 16);
         }
-        catch (std::invalid_argument&)
+        catch (const std::invalid_argument&)
         {
             continue;
         }
@@ -382,10 +381,11 @@ bool createSensors(boost::asio::io_service& io,
             auto& sensorPtr = gCpuSensors[sensorName];
             // make sure destructor fires before creating a new one
             sensorPtr = nullptr;
-            sensorPtr = std::make_unique<CPUSensor>(
+            sensorPtr = std::make_shared<CPUSensor>(
                 inputPathStr, sensorType, objectServer, dbusConnection, io,
                 sensorName, std::move(sensorThresholds), *interfacePath, cpuId,
                 show, dtsOffset);
+            sensorPtr->setupRead();
             createdSensors.insert(sensorName);
             if (debug)
             {
@@ -775,4 +775,5 @@ int main()
 
     setupManufacturingModeMatch(*systemBus);
     io.run();
+    return 0;
 }

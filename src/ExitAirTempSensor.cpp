@@ -57,8 +57,8 @@ static constexpr double cfmMinReading = 0;
 
 static constexpr size_t minSystemCfm = 50;
 
-constexpr const std::array<const char*, 2> monitorIfaces = {exitAirIface,
-                                                            cfmIface};
+constexpr const auto monitorIfaces{
+    std::to_array<const char*>({exitAirIface, cfmIface})};
 
 static std::vector<std::shared_ptr<CFMSensor>> cfmSensors;
 
@@ -162,32 +162,31 @@ CFMSensor::CFMSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                      sdbusplus::asio::object_server& objectServer,
                      std::vector<thresholds::Threshold>&& thresholdData,
                      std::shared_ptr<ExitAirTempSensor>& parent) :
-    Sensor(boost::replace_all_copy(sensorName, " ", "_"),
-           std::move(thresholdData), sensorConfiguration,
-           "xyz.openbmc_project.Configuration.ExitAirTemp", false,
-           cfmMaxReading, cfmMinReading, conn, PowerState::on),
+    Sensor(escapeName(sensorName), std::move(thresholdData),
+           sensorConfiguration, "xyz.openbmc_project.Configuration.ExitAirTemp",
+           false, false, cfmMaxReading, cfmMinReading, conn, PowerState::on),
     std::enable_shared_from_this<CFMSensor>(), parent(parent),
     objServer(objectServer)
 {
-    sensorInterface =
-        objectServer.add_interface("/xyz/openbmc_project/sensors/cfm/" + name,
-                                   "xyz.openbmc_project.Sensor.Value");
+    sensorInterface = objectServer.add_interface(
+        "/xyz/openbmc_project/sensors/airflow/" + name,
+        "xyz.openbmc_project.Sensor.Value");
 
     if (thresholds::hasWarningInterface(thresholds))
     {
         thresholdInterfaceWarning = objectServer.add_interface(
-            "/xyz/openbmc_project/sensors/cfm/" + name,
+            "/xyz/openbmc_project/sensors/airflow/" + name,
             "xyz.openbmc_project.Sensor.Threshold.Warning");
     }
     if (thresholds::hasCriticalInterface(thresholds))
     {
         thresholdInterfaceCritical = objectServer.add_interface(
-            "/xyz/openbmc_project/sensors/cfm/" + name,
+            "/xyz/openbmc_project/sensors/airflow/" + name,
             "xyz.openbmc_project.Sensor.Threshold.Critical");
     }
 
     association = objectServer.add_interface(
-        "/xyz/openbmc_project/sensors/cfm/" + name, association::interface);
+        "/xyz/openbmc_project/sensors/airflow/" + name, association::interface);
 
     setInitialProperties(conn, sensor_paths::unitCFM);
 
@@ -203,27 +202,26 @@ void CFMSensor::setupMatches()
 {
 
     std::weak_ptr<CFMSensor> weakRef = weak_from_this();
-    setupSensorMatch(matches, *dbusConnection, "fan_tach",
-                     std::move([weakRef](const double& value,
-                                         sdbusplus::message::message& message) {
-                         auto self = weakRef.lock();
-                         if (!self)
-                         {
-                             return;
-                         }
-                         self->tachReadings[message.get_path()] = value;
-                         if (self->tachRanges.find(message.get_path()) ==
-                             self->tachRanges.end())
-                         {
-                             // calls update reading after updating ranges
-                             self->addTachRanges(message.get_sender(),
-                                                 message.get_path());
-                         }
-                         else
-                         {
-                             self->updateReading();
-                         }
-                     }));
+    setupSensorMatch(
+        matches, *dbusConnection, "fan_tach",
+        [weakRef](const double& value, sdbusplus::message::message& message) {
+            auto self = weakRef.lock();
+            if (!self)
+            {
+                return;
+            }
+            self->tachReadings[message.get_path()] = value;
+            if (self->tachRanges.find(message.get_path()) ==
+                self->tachRanges.end())
+            {
+                // calls update reading after updating ranges
+                self->addTachRanges(message.get_sender(), message.get_path());
+            }
+            else
+            {
+                self->updateReading();
+            }
+        });
 
     dbusConnection->async_method_call(
         [weakRef](const boost::system::error_code ec,
@@ -511,10 +509,10 @@ ExitAirTempSensor::ExitAirTempSensor(
     const std::string& sensorName, const std::string& sensorConfiguration,
     sdbusplus::asio::object_server& objectServer,
     std::vector<thresholds::Threshold>&& thresholdData) :
-    Sensor(boost::replace_all_copy(sensorName, " ", "_"),
-           std::move(thresholdData), sensorConfiguration,
-           "xyz.openbmc_project.Configuration.ExitAirTemp", false,
-           exitAirMaxReading, exitAirMinReading, conn, PowerState::on),
+    Sensor(escapeName(sensorName), std::move(thresholdData),
+           sensorConfiguration, "xyz.openbmc_project.Configuration.ExitAirTemp",
+           false, false, exitAirMaxReading, exitAirMinReading, conn,
+           PowerState::on),
     std::enable_shared_from_this<ExitAirTempSensor>(), objServer(objectServer)
 {
     sensorInterface = objectServer.add_interface(
@@ -549,8 +547,8 @@ ExitAirTempSensor::~ExitAirTempSensor()
 
 void ExitAirTempSensor::setupMatches(void)
 {
-    constexpr const std::array<const char*, 2> matchTypes = {
-        "power", inletTemperatureSensor};
+    constexpr const auto matchTypes{
+        std::to_array<const char*>({"power", inletTemperatureSensor})};
 
     std::weak_ptr<ExitAirTempSensor> weakRef = weak_from_this();
     for (const std::string type : matchTypes)
@@ -883,9 +881,8 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
         return;
     }
     auto getter = std::make_shared<GetSensorConfiguration>(
-        dbusConnection,
-        std::move([&objectServer, &dbusConnection,
-                   &exitAirSensor](const ManagedObjectType& resp) {
+        dbusConnection, [&objectServer, &dbusConnection,
+                         &exitAirSensor](const ManagedObjectType& resp) {
             cfmSensors.clear();
             for (const auto& pathPair : resp)
             {
@@ -955,7 +952,7 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
                 exitAirSensor->setupMatches();
                 exitAirSensor->updateReading();
             }
-        }));
+        });
     getter->getConfiguration(
         std::vector<std::string>(monitorIfaces.begin(), monitorIfaces.end()));
 }
@@ -1001,5 +998,7 @@ int main()
         matches.emplace_back(std::move(match));
     }
 
+    setupManufacturingModeMatch(*systemBus);
     io.run();
+    return 0;
 }

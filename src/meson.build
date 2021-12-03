@@ -9,16 +9,14 @@ if get_option('adc').enabled()
         'ADCSensor.cpp',
         'ADCSensorMain.cpp',
         dependencies: [
+            default_deps,
             gpiodcxx,
-            sdbusplus,
+            thresholds_dep,
+            utils_dep,
         ],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
-        link_with: [
-            thresholds_a,
-            utils_a,
-        ],
     )
 endif
 
@@ -28,18 +26,16 @@ if get_option('cpu').enabled()
         'CPUSensorMain.cpp',
         'CPUSensor.cpp',
         dependencies: [
+            default_deps,
             gpiodcxx,
-            sdbusplus,
+            thresholds_dep,
+            utils_dep,
         ],
         implicit_include_directories: false,
         include_directories: [
             '../include'
         ] + peci_incdirs,
         install: true,
-        link_with: [
-            thresholds_a,
-            utils_a,
-        ],
     )
 endif
 
@@ -48,15 +44,13 @@ if get_option('exit-air').enabled()
         'exitairtempsensor',
         'ExitAirTempSensor.cpp',
         dependencies: [
-            sdbusplus,
+            default_deps,
+            thresholds_dep,
+            utils_dep,
         ],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
-        link_with: [
-            thresholds_a,
-            utils_a,
-        ],
     )
 endif
 
@@ -67,16 +61,14 @@ if get_option('fan').enabled()
         'TachSensor.cpp',
         'PwmSensor.cpp',
         dependencies: [
-            sdbusplus,
-            gpiodcxx
+            default_deps,
+            gpiodcxx,
+            thresholds_dep,
+            utils_dep,
         ],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
-        link_with: [
-            thresholds_a,
-            utils_a,
-        ],
     )
 endif
 
@@ -86,15 +78,13 @@ if get_option('hwmon-temp').enabled()
         'HwmonTempMain.cpp',
         'HwmonTempSensor.cpp',
         dependencies: [
-            sdbusplus,
+            default_deps,
+            thresholds_dep,
+            utils_dep,
         ],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
-        link_with: [
-            thresholds_a,
-            utils_a,
-        ],
     )
 endif
 
@@ -104,16 +94,14 @@ if get_option('intrusion').enabled()
         'ChassisIntrusionSensor.cpp',
         'IntrusionSensorMain.cpp',
         dependencies: [
-            i2c,
-            sdbusplus,
+            default_deps,
             gpiodcxx,
+            i2c,
+            utils_dep,
         ],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
-        link_with: [
-            utils_a,
-        ],
     )
 endif
 
@@ -122,15 +110,13 @@ if get_option('ipmb').enabled()
         'ipmbsensor',
         'IpmbSensor.cpp',
         dependencies: [
-            sdbusplus,
+            default_deps,
+            thresholds_dep,
+            utils_dep,
         ],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
-        link_with: [
-            thresholds_a,
-            utils_a,
-        ],
     )
 endif
 
@@ -139,38 +125,38 @@ if get_option('mcu').enabled()
         'mcutempsensor',
         'MCUTempSensor.cpp',
         dependencies: [
+            default_deps,
             i2c,
-            sdbusplus,
+            thresholds_dep,
+            utils_dep,
         ],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
-        link_with: [
-            utils_a,
-            thresholds_a,
-        ],
     )
 endif
 
 if get_option('nvme').enabled()
-    mctp = meson.get_compiler('cpp').find_library('libmctp')
+    nvme_srcs = files('NVMeSensorMain.cpp', 'NVMeSensor.cpp')
+    nvme_srcs += files('NVMeBasicContext.cpp')
+
+    nvme_deps = [ default_deps, i2c, thresholds_dep, utils_dep, threads ]
+
+    mi_mctp = get_option('nvme-mi-mctp')
+    if mi_mctp.enabled()
+        nvme_srcs += files('NVMeMCTPContext.cpp')
+        nvme_deps += meson.get_compiler('cpp').find_library('libmctp')
+        conf_data = configuration_data()
+        conf_data.set('HAVE_NVME_MI_MCTP', true)
+    endif
+
     executable(
         'nvmesensor',
-        'NVMeSensorMain.cpp',
-        'NVMeSensor.cpp',
-        'NVMeMCTPContext.cpp',
-        dependencies: [
-            i2c,
-            sdbusplus,
-            mctp,
-	],
+        sources: nvme_srcs,
+        dependencies: nvme_deps,
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
-        link_with: [
-            utils_a,
-            thresholds_a,
-        ],
     )
 endif
 
@@ -181,16 +167,14 @@ if get_option('psu').enabled()
         'PSUSensor.cpp',
         'PSUSensorMain.cpp',
         dependencies: [
-            sdbusplus,
+            default_deps,
+            pwmsensor_dep,
+            thresholds_dep,
+            utils_dep,
         ],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
-        link_with: [
-            pwmsensor_a,
-            thresholds_a,
-            utils_a,
-        ],
     )
 endif
 
@@ -200,14 +184,12 @@ if get_option('external').enabled()
         'ExternalSensor.cpp',
         'ExternalSensorMain.cpp',
         dependencies: [
-            sdbusplus,
+            default_deps,
+            thresholds_dep,
+            utils_dep,
         ],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
-        link_with: [
-            thresholds_a,
-            utils_a,
-        ],
     )
 endif
