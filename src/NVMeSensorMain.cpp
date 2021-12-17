@@ -20,10 +20,8 @@
 #include <NVMeSensor.hpp>
 #include <boost/asio/deadline_timer.hpp>
 
+#include <optional>
 #include <regex>
-
-static constexpr const char* sensorType =
-    "xyz.openbmc_project.Configuration.NVME1000";
 
 static NVMEMap nvmeDeviceMap;
 
@@ -32,6 +30,143 @@ static constexpr bool debug = false;
 NVMEMap& getNVMEMap()
 {
     return nvmeDeviceMap;
+}
+
+static std::optional<int>
+    extractBusNumber(const std::string& path,
+                     const SensorBaseConfigMap& properties)
+{
+    auto findBus = properties.find("Bus");
+    if (findBus == properties.end())
+    {
+        std::cerr << "could not determine bus number for " << path << "\n";
+        return std::nullopt;
+    }
+
+    return std::visit(VariantToIntVisitor(), findBus->second);
+}
+
+static std::optional<std::string>
+    extractSensorName(const std::string& path,
+                      const SensorBaseConfigMap& properties)
+{
+    auto findSensorName = properties.find("Name");
+    if (findSensorName == properties.end())
+    {
+        std::cerr << "could not determine configuration name for " << path
+                  << "\n";
+        return std::nullopt;
+    }
+
+    return std::get<std::string>(findSensorName->second);
+}
+
+static std::filesystem::path deriveRootBusPath(int busNumber)
+{
+    return "/sys/bus/i2c/devices/i2c-" + std::to_string(busNumber) +
+           "/mux_device";
+}
+
+static std::optional<int> deriveRootBus(std::optional<int> busNumber)
+{
+    if (!busNumber)
+    {
+        return std::nullopt;
+    }
+
+    std::filesystem::path muxPath = deriveRootBusPath(*busNumber);
+
+    if (!std::filesystem::is_symlink(muxPath))
+    {
+        return *busNumber;
+    }
+
+    std::string rootName = std::filesystem::read_symlink(muxPath).filename();
+    size_t dash = rootName.find('-');
+    if (dash == std::string::npos)
+    {
+        std::cerr << "Error finding root bus for " << rootName << "\n";
+        return std::nullopt;
+    }
+
+    return std::stoi(rootName.substr(0, dash));
+}
+
+static std::shared_ptr<NVMeContext>
+    provideRootBusContext(boost::asio::io_service& io, NVMEMap& map,
+                          int rootBus)
+{
+    auto findRoot = map.find(rootBus);
+    if (findRoot != map.end())
+    {
+        return findRoot->second;
+    }
+
+    std::shared_ptr<NVMeContext> context =
+#if HAVE_NVME_MI_MCTP
+        std::make_shared<NVMeMCTPContext>(io, rootBus);
+#else
+        std::make_shared<NVMeBasicContext>(io, rootBus);
+#endif
+    map[rootBus] = context;
+
+    return context;
+}
+
+static void handleSensorConfigurations(
+    boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
+    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
+    const ManagedObjectType& sensorConfigurations)
+{
+    // todo: it'd be better to only update the ones we care about
+    for (const auto& [_, nvmeContextPtr] : nvmeDeviceMap)
+    {
+        if (nvmeContextPtr)
+        {
+            nvmeContextPtr->close();
+        }
+    }
+    nvmeDeviceMap.clear();
+
+    // iterate through all found configurations
+    for (const auto& [interfacePath, sensorData] : sensorConfigurations)
+    {
+        // find base configuration
+        auto sensorBase = sensorData.find(NVMeSensor::CONFIG_TYPE);
+        if (sensorBase != sensorData.end())
+        {
+            const SensorBaseConfigMap& sensorConfig = sensorBase->second;
+            std::optional<int> busNumber =
+                extractBusNumber(interfacePath, sensorConfig);
+            std::optional<std::string> sensorName =
+                extractSensorName(interfacePath, sensorConfig);
+            std::optional<int> rootBus = deriveRootBus(busNumber);
+
+            if (!(busNumber && sensorName && rootBus))
+            {
+                continue;
+            }
+
+            std::vector<thresholds::Threshold> sensorThresholds;
+            if (!parseThresholdsFromConfig(sensorData, sensorThresholds))
+            {
+                std::cerr << "error populating thresholds for " << *sensorName
+                          << "\n";
+            }
+
+            std::shared_ptr<NVMeSensor> sensorPtr =
+                std::make_shared<NVMeSensor>(
+                    objectServer, io, dbusConnection, *sensorName,
+                    std::move(sensorThresholds), interfacePath, *busNumber);
+
+            provideRootBusContext(io, nvmeDeviceMap, *rootBus)
+                ->addSensor(sensorPtr);
+        }
+    }
+    for (const auto& [_, context] : nvmeDeviceMap)
+    {
+        context->pollNVMeDevices();
+    }
 }
 
 void createSensors(boost::asio::io_service& io,
@@ -43,113 +178,44 @@ void createSensors(boost::asio::io_service& io,
         dbusConnection,
         std::move([&io, &objectServer, &dbusConnection](
                       const ManagedObjectType& sensorConfigurations) {
-            // todo: it'd be better to only update the ones we care about
-            for (const auto& [_, nvmeContextPtr] : nvmeDeviceMap)
-            {
-                if (nvmeContextPtr)
-                {
-                    nvmeContextPtr->close();
-                }
-            }
-            nvmeDeviceMap.clear();
-
-            // iterate through all found configurations
-            for (const std::pair<sdbusplus::message::object_path, SensorData>&
-                     sensor : sensorConfigurations)
-            {
-                const SensorData& sensorData = sensor.second;
-                const std::string& interfacePath = sensor.first.str;
-                const std::pair<
-                    std::string,
-                    boost::container::flat_map<std::string, BasicVariantType>>*
-                    baseConfiguration = nullptr;
-
-                // find base configuration
-                auto sensorBase = sensor.second.find(sensorType);
-                if (sensorBase != sensor.second.end())
-                {
-                    baseConfiguration = &(*sensorBase);
-                }
-
-                if (baseConfiguration == nullptr)
-                {
-                    continue;
-                }
-                auto findBus = baseConfiguration->second.find("Bus");
-                if (findBus == baseConfiguration->second.end())
-                {
-                    continue;
-                }
-
-                int busNumber =
-                    std::visit(VariantToIntVisitor(), findBus->second);
-
-                auto findSensorName = baseConfiguration->second.find("Name");
-                if (findSensorName == baseConfiguration->second.end())
-                {
-                    std::cerr << "could not determine configuration name for "
-                              << interfacePath << "\n";
-                    continue;
-                }
-                std::string sensorName =
-                    std::get<std::string>(findSensorName->second);
-
-                std::vector<thresholds::Threshold> sensorThresholds;
-
-                if (!parseThresholdsFromConfig(sensorData, sensorThresholds))
-                {
-                    std::cerr << "error populating thresholds for "
-                              << sensorName << "\n";
-                }
-
-                int rootBus = busNumber;
-
-                std::string muxPath = "/sys/bus/i2c/devices/i2c-" +
-                                      std::to_string(busNumber) + "/mux_device";
-
-                if (std::filesystem::is_symlink(muxPath))
-                {
-                    std::string rootName =
-                        std::filesystem::read_symlink(muxPath).filename();
-                    size_t dash = rootName.find('-');
-                    if (dash == std::string::npos)
-                    {
-                        std::cerr << "Error finding root bus for " << rootName
-                                  << "\n";
-                        continue;
-                    }
-                    rootBus = std::stoi(rootName.substr(0, dash));
-                }
-
-                std::shared_ptr<NVMeContext> context;
-                auto findRoot = nvmeDeviceMap.find(rootBus);
-                if (findRoot != nvmeDeviceMap.end())
-                {
-                    context = findRoot->second;
-                }
-                else
-                {
-#if HAVE_NVME_MI_MCTP
-                    context = std::make_shared<NVMeMCTPContext>(io, rootBus);
-#else
-                    context = std::make_shared<NVMeBasicContext>(io, rootBus);
-#endif
-                    nvmeDeviceMap[rootBus] = context;
-                }
-
-                std::shared_ptr<NVMeSensor> sensorPtr =
-                    std::make_shared<NVMeSensor>(
-                        objectServer, io, dbusConnection, sensorName,
-                        std::move(sensorThresholds), interfacePath, busNumber);
-
-                context->addSensor(sensorPtr);
-            }
-            for (const auto& [_, context] : nvmeDeviceMap)
-            {
-                context->pollNVMeDevices();
-            }
+            handleSensorConfigurations(io, objectServer, dbusConnection,
+                                       sensorConfigurations);
         }));
-    getter->getConfiguration(std::vector<std::string>{sensorType});
+    getter->getConfiguration(std::vector<std::string>{NVMeSensor::CONFIG_TYPE});
+}
+
+static void interfaceRemoved(sdbusplus::message::message& message,
+                             NVMEMap& contexts)
+{
+    if (message.is_method_error())
+    {
+        std::cerr << "interfacesRemoved callback method error\n";
+        return;
+    }
+
+    sdbusplus::message::object_path path;
+    std::vector<std::string> interfaces;
+
+    message.read(path, interfaces);
+
+    for (auto& [_, context] : contexts)
+    {
+        std::optional<std::shared_ptr<NVMeSensor>> sensor =
+            context->getSensorAtPath(path);
+        if (!sensor)
+        {
+            continue;
+        }
+
+        auto interface = std::find(interfaces.begin(), interfaces.end(),
+                                   (*sensor)->objectType);
+        if (interface == interfaces.end())
+        {
+            continue;
+        }
+
+        context->removeSensor(sensor.value());
+    }
 }
 
 int main()
@@ -191,8 +257,18 @@ int main()
         static_cast<sdbusplus::bus::bus&>(*systemBus),
         "type='signal',member='PropertiesChanged',path_namespace='" +
             std::string(inventoryPath) + "',arg0namespace='" +
-            std::string(sensorType) + "'",
+            std::string(NVMeSensor::CONFIG_TYPE) + "'",
         eventHandler);
+
+    // Watch for entity-manager to remove configuration interfaces
+    // so the corresponding sensors can be removed.
+    auto ifaceRemovedMatch = std::make_unique<sdbusplus::bus::match::match>(
+        static_cast<sdbusplus::bus::bus&>(*systemBus),
+        "type='signal',member='InterfacesRemoved',arg0path='" +
+            std::string(inventoryPath) + "/'",
+        [](sdbusplus::message::message& msg) {
+            interfaceRemoved(msg, nvmeDeviceMap);
+        });
 
     setupManufacturingModeMatch(*systemBus);
     io.run();
