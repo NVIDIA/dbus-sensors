@@ -76,15 +76,11 @@ IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
     sensorInterface = objectServer.add_interface(
         dbusPath, "xyz.openbmc_project.Sensor.Value");
 
-    if (thresholds::hasWarningInterface(thresholds))
+    for (const auto& threshold : thresholds)
     {
-        thresholdInterfaceWarning = objectServer.add_interface(
-            dbusPath, "xyz.openbmc_project.Sensor.Threshold.Warning");
-    }
-    if (thresholds::hasCriticalInterface(thresholds))
-    {
-        thresholdInterfaceCritical = objectServer.add_interface(
-            dbusPath, "xyz.openbmc_project.Sensor.Threshold.Critical");
+        std::string interface = thresholds::getInterface(threshold.level);
+        thresholdInterfaces[static_cast<size_t>(threshold.level)] =
+            objectServer.add_interface(dbusPath, interface);
     }
     association = objectServer.add_interface(dbusPath, association::interface);
 }
@@ -92,8 +88,10 @@ IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
 IpmbSensor::~IpmbSensor()
 {
     waitTimer.cancel();
-    objectServer.remove_interface(thresholdInterfaceWarning);
-    objectServer.remove_interface(thresholdInterfaceCritical);
+    for (const auto& iface : thresholdInterfaces)
+    {
+        objectServer.remove_interface(iface);
+    }
     objectServer.remove_interface(sensorInterface);
     objectServer.remove_interface(association);
 }
@@ -190,11 +188,11 @@ void IpmbSensor::loadDefaults()
     else if (type == IpmbType::ADM1278HSC)
     {
         commandAddress = meAddress;
+        uint8_t snsNum = 0;
         switch (subType)
         {
             case IpmbSubType::temp:
             case IpmbSubType::curr:
-                uint8_t snsNum;
                 if (subType == IpmbSubType::temp)
                 {
                     snsNum = 0x8d;

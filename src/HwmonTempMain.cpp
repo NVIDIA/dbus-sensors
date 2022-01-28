@@ -41,33 +41,47 @@ static constexpr float pollRateDefault = 0.5;
 static constexpr double maxValuePressure = 120000; // Pascals
 static constexpr double minValuePressure = 30000;  // Pascals
 
+static constexpr double maxValueRelativeHumidity = 100; // PercentRH
+static constexpr double minValueRelativeHumidity = 0;   // PercentRH
+
 static constexpr double maxValueTemperature = 127;  // DegreesC
 static constexpr double minValueTemperature = -128; // DegreesC
 
 namespace fs = std::filesystem;
 static auto sensorTypes{
-    std::to_array<const char*>({"xyz.openbmc_project.Configuration.EMC1412",
+    std::to_array<const char*>({"xyz.openbmc_project.Configuration.DPS310",
+                                "xyz.openbmc_project.Configuration.EMC1412",
                                 "xyz.openbmc_project.Configuration.EMC1413",
                                 "xyz.openbmc_project.Configuration.EMC1414",
+<<<<<<< HEAD
                                 "xyz.openbmc_project.Configuration.EMC1424",
+||||||| 0b207a6
+=======
+                                "xyz.openbmc_project.Configuration.HDC1080",
+                                "xyz.openbmc_project.Configuration.JC42",
+                                "xyz.openbmc_project.Configuration.LM75A",
+                                "xyz.openbmc_project.Configuration.LM95234",
+>>>>>>> origin/master
                                 "xyz.openbmc_project.Configuration.MAX31725",
                                 "xyz.openbmc_project.Configuration.MAX31730",
                                 "xyz.openbmc_project.Configuration.MAX6581",
                                 "xyz.openbmc_project.Configuration.MAX6654",
                                 "xyz.openbmc_project.Configuration.NCT7802",
                                 "xyz.openbmc_project.Configuration.SBTSI",
+<<<<<<< HEAD
                                 "xyz.openbmc_project.Configuration.LM95234",
                                 "xyz.openbmc_project.Configuration.TMP102",
+||||||| 0b207a6
+                                "xyz.openbmc_project.Configuration.LM95234",
+=======
+                                "xyz.openbmc_project.Configuration.SI7020",
+>>>>>>> origin/master
                                 "xyz.openbmc_project.Configuration.TMP112",
                                 "xyz.openbmc_project.Configuration.TMP175",
                                 "xyz.openbmc_project.Configuration.TMP421",
                                 "xyz.openbmc_project.Configuration.TMP441",
-                                "xyz.openbmc_project.Configuration.LM75A",
                                 "xyz.openbmc_project.Configuration.TMP75",
-                                "xyz.openbmc_project.Configuration.W83773G",
-                                "xyz.openbmc_project.Configuration.DPS310",
-                                "xyz.openbmc_project.Configuration.SI7020",
-                                "xyz.openbmc_project.Configuration.JC42"})};
+                                "xyz.openbmc_project.Configuration.W83773G"})};
 
 static struct SensorParams
     getSensorParameters(const std::filesystem::path& path)
@@ -131,6 +145,16 @@ static struct SensorParams
         tmpSensorParameters.typeName = "pressure";
         tmpSensorParameters.units = sensor_paths::unitPascals;
     }
+    else if (path.filename() == "in_humidityrelative_input" ||
+             path.filename() == "in_humidityrelative_raw")
+    {
+        tmpSensorParameters.minValue = minValueRelativeHumidity;
+        tmpSensorParameters.maxValue = maxValueRelativeHumidity;
+        // Relative Humidity are read in milli-percent, we need percent.
+        tmpSensorParameters.scaleValue *= 0.001;
+        tmpSensorParameters.typeName = "humidity";
+        tmpSensorParameters.units = "PercentRH";
+    }
     else
     {
         // Temperatures are read in milli degrees Celsius,
@@ -167,6 +191,7 @@ void createSensors(
             fs::path root("/sys/bus/iio/devices");
             findFiles(root, R"(in_temp\d*_(input|raw))", paths);
             findFiles(root, R"(in_pressure\d*_(input|raw))", paths);
+            findFiles(root, R"(in_humidityrelative\d*_(input|raw))", paths);
             findFiles(fs::path("/sys/class/hwmon"), R"(temp\d+_input)", paths);
 
             if (paths.empty())
@@ -266,14 +291,13 @@ void createSensors(
                 }
                 if (interfacePath == nullptr)
                 {
-                    std::cerr << "failed to find match for " << deviceName
-                              << "\n";
                     continue;
                 }
 
                 // Temperature has "Name", pressure has "Name1"
                 auto findSensorName = baseConfigMap->find("Name");
-                if (thisSensorParameters.typeName == "pressure")
+                if (thisSensorParameters.typeName == "pressure" ||
+                    thisSensorParameters.typeName == "humidity")
                 {
                     findSensorName = baseConfigMap->find("Name1");
                 }

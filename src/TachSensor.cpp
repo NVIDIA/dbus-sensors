@@ -46,7 +46,7 @@ TachSensor::TachSensor(const std::string& path, const std::string& objectType,
                        boost::asio::io_service& io, const std::string& fanName,
                        std::vector<thresholds::Threshold>&& thresholdsIn,
                        const std::string& sensorConfiguration,
-                       const std::pair<size_t, size_t>& limits,
+                       const std::pair<double, double>& limits,
                        const PowerState& powerState,
                        const std::optional<std::string>& ledIn) :
     Sensor(escapeName(fanName), std::move(thresholdsIn), sensorConfiguration,
@@ -61,17 +61,12 @@ TachSensor::TachSensor(const std::string& path, const std::string& objectType,
         "/xyz/openbmc_project/sensors/fan_tach/" + name,
         "xyz.openbmc_project.Sensor.Value");
 
-    if (thresholds::hasWarningInterface(thresholds))
+    for (const auto& threshold : thresholds)
     {
-        thresholdInterfaceWarning = objectServer.add_interface(
-            "/xyz/openbmc_project/sensors/fan_tach/" + name,
-            "xyz.openbmc_project.Sensor.Threshold.Warning");
-    }
-    if (thresholds::hasCriticalInterface(thresholds))
-    {
-        thresholdInterfaceCritical = objectServer.add_interface(
-            "/xyz/openbmc_project/sensors/fan_tach/" + name,
-            "xyz.openbmc_project.Sensor.Threshold.Critical");
+        std::string interface = thresholds::getInterface(threshold.level);
+        thresholdInterfaces[static_cast<size_t>(threshold.level)] =
+            objectServer.add_interface(
+                "/xyz/openbmc_project/sensors/fan_tach/" + name, interface);
     }
     association = objectServer.add_interface(
         "/xyz/openbmc_project/sensors/fan_tach/" + name,
@@ -104,8 +99,10 @@ TachSensor::~TachSensor()
     // close the input dev to cancel async operations
     inputDev.close();
     waitTimer.cancel();
-    objServer.remove_interface(thresholdInterfaceWarning);
-    objServer.remove_interface(thresholdInterfaceCritical);
+    for (const auto& iface : thresholdInterfaces)
+    {
+        objServer.remove_interface(iface);
+    }
     objServer.remove_interface(sensorInterface);
     objServer.remove_interface(association);
     objServer.remove_interface(itemIface);

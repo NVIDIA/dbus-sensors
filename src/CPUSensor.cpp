@@ -43,20 +43,19 @@ CPUSensor::CPUSensor(const std::string& path, const std::string& objectType,
     Sensor(escapeName(sensorName), std::move(thresholdsIn), sensorConfiguration,
            objectType, false, false, 0, 0, conn, PowerState::on),
     std::enable_shared_from_this<CPUSensor>(), objServer(objectServer),
-    inputDev(io), waitTimer(io), path(path),
+    inputDev(io), waitTimer(io),
+    nameTcontrol("Tcontrol CPU" + std::to_string(cpuId)), path(path),
     privTcontrol(std::numeric_limits<double>::quiet_NaN()),
     dtsOffset(dtsOffset), show(show), pollTime(CPUSensor::sensorPollMs),
     minMaxReadCounter(0)
 {
-    nameTcontrol = labelTcontrol;
-    nameTcontrol += " CPU" + std::to_string(cpuId);
     if (show)
     {
         if (auto fileParts = splitFileName(path))
         {
             auto& [type, nr, item] = *fileParts;
             std::string interfacePath;
-            const char* units;
+            const char* units = nullptr;
             if (type.compare("power") == 0)
             {
                 interfacePath = "/xyz/openbmc_project/sensors/power/" + name;
@@ -75,17 +74,12 @@ CPUSensor::CPUSensor(const std::string& path, const std::string& objectType,
 
             sensorInterface = objectServer.add_interface(
                 interfacePath, "xyz.openbmc_project.Sensor.Value");
-            if (thresholds::hasWarningInterface(thresholds))
+            for (const auto& threshold : thresholds)
             {
-                thresholdInterfaceWarning = objectServer.add_interface(
-                    interfacePath,
-                    "xyz.openbmc_project.Sensor.Threshold.Warning");
-            }
-            if (thresholds::hasCriticalInterface(thresholds))
-            {
-                thresholdInterfaceCritical = objectServer.add_interface(
-                    interfacePath,
-                    "xyz.openbmc_project.Sensor.Threshold.Critical");
+                std::string interface =
+                    thresholds::getInterface(threshold.level);
+                thresholdInterfaces[static_cast<size_t>(threshold.level)] =
+                    objectServer.add_interface(interfacePath, interface);
             }
             association = objectServer.add_interface(interfacePath,
                                                      association::interface);
@@ -105,8 +99,10 @@ CPUSensor::~CPUSensor()
     waitTimer.cancel();
     if (show)
     {
-        objServer.remove_interface(thresholdInterfaceWarning);
-        objServer.remove_interface(thresholdInterfaceCritical);
+        for (const auto& iface : thresholdInterfaces)
+        {
+            objServer.remove_interface(iface);
+        }
         objServer.remove_interface(sensorInterface);
         objServer.remove_interface(association);
         objServer.remove_interface(availableInterface);
