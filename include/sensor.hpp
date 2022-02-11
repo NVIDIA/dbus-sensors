@@ -94,39 +94,15 @@ struct Sensor
     // construction of your Sensor subclass. See ExternalSensor for example.
     std::function<void()> externalSetHook;
 
-    struct ThresholdProperty
-    {
-        thresholds::Level level;
-        thresholds::Direction direction;
-        uint8_t sevOrder;
-        const char* levelProperty;
-        const char* alarmProperty;
-        const char* dirOrder;
-    };
+    using Level = thresholds::Level;
+    using Direction = thresholds::Direction;
 
-    constexpr static std::array<ThresholdProperty, 8> thresProp = {
-        {{thresholds::Level::WARNING, thresholds::Direction::HIGH, 0,
-          "WarningHigh", "WarningAlarmHigh", "greater than"},
-         {thresholds::Level::WARNING, thresholds::Direction::LOW, 0,
-          "WarningLow", "WarningAlarmLow", "less than"},
-         {thresholds::Level::CRITICAL, thresholds::Direction::HIGH, 1,
-          "CriticalHigh", "CriticalAlarmHigh", "greater than"},
-         {thresholds::Level::CRITICAL, thresholds::Direction::LOW, 1,
-          "CriticalLow", "CriticalAlarmLow", "less than"},
-         {thresholds::Level::SOFTSHUTDOWN, thresholds::Direction::HIGH, 2,
-          "SoftShutdownHigh", "SoftShutdownAlarmHigh", "greater than"},
-         {thresholds::Level::SOFTSHUTDOWN, thresholds::Direction::LOW, 2,
-          "SoftShutdownLow", "SoftShutdownAlarmLow", "less than"},
-         {thresholds::Level::HARDSHUTDOWN, thresholds::Direction::HIGH, 3,
-          "HardShutdownHigh", "HardShutdownAlarmHigh", "greater than"},
-         {thresholds::Level::HARDSHUTDOWN, thresholds::Direction::LOW, 3,
-          "HardShutdownLow", "HardShutdownAlarmLow", "less than"}}};
-
-    std::array<std::shared_ptr<sdbusplus::asio::dbus_interface>, 4>
+    std::array<std::shared_ptr<sdbusplus::asio::dbus_interface>,
+               thresholds::thresProp.size()>
         thresholdInterfaces;
 
     std::shared_ptr<sdbusplus::asio::dbus_interface>
-        getThresholdInterface(thresholds::Level lev)
+        getThresholdInterface(Level lev)
     {
         size_t index = static_cast<size_t>(lev);
         if (index >= thresholdInterfaces.size())
@@ -261,15 +237,13 @@ struct Sensor
         return 1;
     }
 
-    void
-        setInitialProperties(std::shared_ptr<sdbusplus::asio::connection>& conn,
-                             const std::string& unit,
-                             const std::string& label = std::string(),
-                             size_t thresholdSize = 0)
+    void setInitialProperties(const std::string& unit,
+                              const std::string& label = std::string(),
+                              size_t thresholdSize = 0)
     {
         if (readState == PowerState::on || readState == PowerState::biosPost)
         {
-            setupPowerMatch(conn);
+            setupPowerMatch(dbusConnection);
         }
 
         createAssociation(association, configurationPath);
@@ -287,7 +261,7 @@ struct Sensor
             {
                 threshold.hysteresis = hysteresisTrigger;
             }
-            if (!(thresholds::findOrder(threshold.level, threshold.direction)))
+            if (!thresholds::isValidLevel(threshold.level))
             {
                 continue;
             }
@@ -317,8 +291,8 @@ struct Sensor
                     oldValue = request; // todo, just let the config do this?
                     threshold.value = request;
                     thresholds::persistThreshold(configurationPath, objectType,
-                                                 threshold, conn, thresSize,
-                                                 label);
+                                                 threshold, dbusConnection,
+                                                 thresSize, label);
                     // Invalidate previously remembered value,
                     // so new thresholds will be checked during next update,
                     // even if sensor reading remains unchanged.
@@ -352,7 +326,7 @@ struct Sensor
         {
             valueMutabilityInterface =
                 std::make_shared<sdbusplus::asio::dbus_interface>(
-                    conn, sensorInterface->get_object_path(),
+                    dbusConnection, sensorInterface->get_object_path(),
                     valueMutabilityInterfaceName);
             valueMutabilityInterface->register_property("Mutable", true);
             if (!valueMutabilityInterface->initialize())
@@ -367,7 +341,7 @@ struct Sensor
         {
             availableInterface =
                 std::make_shared<sdbusplus::asio::dbus_interface>(
-                    conn, sensorInterface->get_object_path(),
+                    dbusConnection, sensorInterface->get_object_path(),
                     availableInterfaceName);
             availableInterface->register_property(
                 "Available", true, [this](const bool propIn, bool& old) {
@@ -388,34 +362,48 @@ struct Sensor
         {
             operationalInterface =
                 std::make_shared<sdbusplus::asio::dbus_interface>(
-                    conn, sensorInterface->get_object_path(),
+                    dbusConnection, sensorInterface->get_object_path(),
                     operationalInterfaceName);
             operationalInterface->register_property("Functional", true);
             operationalInterface->initialize();
         }
     }
 
-    std::string propertyLevel(const thresholds::Level lev,
-                              const thresholds::Direction dir)
+    std::string propertyLevel(const Level lev, const Direction dir)
     {
-        for (ThresholdProperty prop : thresProp)
+        for (const thresholds::ThresholdDefinition& prop :
+             thresholds::thresProp)
         {
-            if ((prop.level == lev) && (prop.direction == dir))
+            if (prop.level == lev)
             {
-                return prop.levelProperty;
+                if (dir == Direction::HIGH)
+                {
+                    return std::string(prop.levelName) + "High";
+                }
+                if (dir == Direction::LOW)
+                {
+                    return std::string(prop.levelName) + "Low";
+                }
             }
         }
         return "";
     }
 
-    std::string propertyAlarm(const thresholds::Level lev,
-                              const thresholds::Direction dir)
+    std::string propertyAlarm(const Level lev, const Direction dir)
     {
-        for (ThresholdProperty prop : thresProp)
+        for (const thresholds::ThresholdDefinition& prop :
+             thresholds::thresProp)
         {
-            if ((prop.level == lev) && (prop.direction == dir))
+            if (prop.level == lev)
             {
-                return prop.alarmProperty;
+                if (dir == Direction::HIGH)
+                {
+                    return std::string(prop.levelName) + "AlarmHigh";
+                }
+                if (dir == Direction::LOW)
+                {
+                    return std::string(prop.levelName) + "AlarmLow";
+                }
             }
         }
         return "";
