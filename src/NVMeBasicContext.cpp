@@ -96,7 +96,9 @@ static ssize_t execBasicQuery(int bus, uint8_t addr, uint8_t cmd,
     size = i2c_smbus_read_block_data(dev, cmd, resp.data());
     if (size < 0)
     {
-        rc = size;
+        rc = NVME_MI_BASIC_STATUS_LEN;
+        resp[2] = NVME_MI_BASIC_CTEMP_TEMP_SENSOR_FAILURE;
+
         std::cerr << "Failed to read block data from device 0x" << std::hex
                   << (int)addr << " on bus " << std::dec << bus << ": "
                   << strerror(errno) << "\n";
@@ -296,12 +298,14 @@ void NVMeBasicContext::readAndProcessNVMeSensor()
         return;
     }
 
-    std::shared_ptr<NVMeSensor>& sensor = sensors.front();
+    std::shared_ptr<NVMeSensor> sensor = sensors.front();
 
     if (!sensor->readingStateGood())
     {
         sensor->markAvailable(false);
         sensor->updateValue(std::numeric_limits<double>::quiet_NaN());
+        sensors.pop_front();
+        sensors.emplace_back(sensor);
         return;
     }
 

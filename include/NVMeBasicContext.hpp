@@ -5,6 +5,9 @@
 #include <boost/asio/io_service.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 
+#define NVME_MI_BASIC_STATUS_LEN 6
+#define NVME_MI_BASIC_CTEMP_TEMP_SENSOR_FAILURE 0x81
+
 class NVMeBasicContext : public NVMeContext
 {
   public:
