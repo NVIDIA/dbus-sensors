@@ -193,3 +193,35 @@ if get_option('external').enabled()
         install: true,
     )
 endif
+
+if get_option('procstatus').enabled()
+    executable(
+        'processorstatus',
+        'ProcessorStatus.cpp',
+        'ProcessorStatusMain.cpp',
+        dependencies: [
+            default_deps,
+            gpiodcxx,
+            utils_dep,
+        ],
+        implicit_include_directories: false,
+        include_directories: '../include',
+        install: true,
+    )
+endif
+
+if get_option('nvmeu2').enabled()
+    executable(
+        'nvmestatus',
+        'NvmeStatus.cpp',
+        'NvmeStatusMain.cpp',
+        dependencies: [
+            default_deps,
+            i2c,
+            utils_dep,
+        ],
+        implicit_include_directories: false,
+        include_directories: '../include',
+        install: true,
+    )
+endif
