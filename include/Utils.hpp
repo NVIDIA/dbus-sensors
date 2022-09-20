@@ -42,8 +42,6 @@ using GetSubTreeType = std::vector<
     std::pair<std::string,
               std::vector<std::pair<std::string, std::vector<std::string>>>>>;
 using Association = std::tuple<std::string, std::string, std::string>;
-using AssociationList =
-    std::vector<std::tuple<std::string, std::string, std::string>>;
 
 inline std::string escapeName(const std::string& sensorName)
 {
