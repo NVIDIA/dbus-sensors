@@ -1,6 +1,6 @@
 #include <unistd.h>
 
-#include <NvmeStatus.hpp>
+#include <NVMeStatus.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 
@@ -18,20 +18,22 @@ extern "C"
 #include <linux/i2c-dev.h>
 }
 
-NvmeStatus::NvmeStatus(sdbusplus::asio::object_server& objectServer,
+NVMeStatus::NVMeStatus(sdbusplus::asio::object_server& objectServer,
                        std::shared_ptr<sdbusplus::asio::connection>& conn,
                        boost::asio::io_service& io,
                        const std::string& sensorName,
-                       const std::string& sensorConfiguration, uint8_t index,
-                       uint8_t busId, uint8_t cpldAddress, uint8_t statusReg) :
+                       const std::string& sensorConfiguration,
+                       unsigned int pollRate, uint8_t index, uint8_t busId,
+                       uint8_t cpldAddress, uint8_t statusReg) :
     ItemInterface(static_cast<sdbusplus::bus::bus&>(*conn),
                   ("/xyz/openbmc_project/sensors/motherboard/drive/" +
                    escapeName(sensorName))
                       .c_str(),
                   ItemInterface::action::defer_emit),
-    std::enable_shared_from_this<NvmeStatus>(), name(sensorName), index(index),
-    busId(busId), cpldAddress(cpldAddress), statusReg(statusReg),
-    objServer(objectServer), waitTimer(io)
+    std::enable_shared_from_this<NVMeStatus>(), name(sensorName),
+    sensorPollSec(pollRate), index(index), busId(busId),
+    cpldAddress(cpldAddress), statusReg(statusReg), objServer(objectServer),
+    waitTimer(io)
 {
     sensorInterface = objectServer.add_interface(
         ("/xyz/openbmc_project/sensors/motherboard/drive/" +
@@ -52,13 +54,13 @@ NvmeStatus::NvmeStatus(sdbusplus::asio::object_server& objectServer,
     monitor();
 }
 
-NvmeStatus::~NvmeStatus()
+NVMeStatus::~NVMeStatus()
 {
     waitTimer.cancel();
     objServer.remove_interface(sensorInterface);
 }
 
-int NvmeStatus::getCPLDRegsInfo(uint8_t regs, int16_t* pu16data)
+int NVMeStatus::getCPLDRegsInfo(uint8_t regs, int16_t* pu16data)
 {
     std::string i2cBus = "/dev/i2c-" + std::to_string(busId);
     int fd = open(i2cBus.c_str(), O_RDWR);
@@ -106,11 +108,10 @@ int NvmeStatus::getCPLDRegsInfo(uint8_t regs, int16_t* pu16data)
     return 0;
 }
 
-void NvmeStatus::monitor(void)
+void NVMeStatus::monitor(void)
 {
-    static constexpr size_t pollTime = 1; // in seconds
 
-    waitTimer.expires_from_now(boost::posix_time::seconds(pollTime));
+    waitTimer.expires_from_now(boost::posix_time::seconds(sensorPollSec));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {

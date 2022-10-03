@@ -229,8 +229,9 @@ endif
 if get_option('nvmeu2').enabled()
     executable(
         'nvmestatus',
-        'NvmeStatus.cpp',
-        'NvmeStatusMain.cpp',
+        'NVMeStatus.cpp',
+	'NVMeMIStatus.cpp',
+        'NVMeStatusMain.cpp',
         dependencies: [
             default_deps,
             i2c,

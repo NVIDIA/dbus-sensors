@@ -24,21 +24,23 @@ using ItemInterface = sdbusplus::server::object::object<
 using DriveInterface =
     sdbusplus::xyz::openbmc_project::Inventory::Item::server::Drive;
 
-class NvmeStatus :
+class NVMeStatus :
     public ItemInterface,
-    public std::enable_shared_from_this<NvmeStatus>
+    public std::enable_shared_from_this<NVMeStatus>
 {
   public:
-    NvmeStatus(sdbusplus::asio::object_server& objectServer,
+    NVMeStatus(sdbusplus::asio::object_server& objectServer,
                std::shared_ptr<sdbusplus::asio::connection>& conn,
                boost::asio::io_service& io, const std::string& sensorName,
-               const std::string& sensorConfiguration, uint8_t index,
-               uint8_t busId, uint8_t cpldAddress, uint8_t statusReg);
-    ~NvmeStatus() override;
+               const std::string& sensorConfiguration, unsigned int pollRate,
+               uint8_t index, uint8_t busId, uint8_t cpldAddress,
+               uint8_t statusReg);
+    ~NVMeStatus() override;
 
     void monitor(void);
 
     std::string name;
+    unsigned int sensorPollSec;
     uint8_t index;
     uint8_t busId;
     uint8_t cpldAddress;

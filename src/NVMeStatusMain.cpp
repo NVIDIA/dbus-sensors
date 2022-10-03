@@ -1,4 +1,5 @@
-#include <NvmeStatus.hpp>
+#include <NVMeMIStatus.hpp>
+#include <NVMeStatus.hpp>
 #include <VariantVisitors.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/predicate.hpp>
@@ -14,20 +15,25 @@
 #include <variant>
 #include <vector>
 
+static constexpr unsigned int pollRateDefault = 1;
+
 static constexpr auto sensorTypes{
-    std::to_array<const char*>({"xyz.openbmc_project.Configuration.Nvmecpld"})};
+    std::to_array<const char*>({"xyz.openbmc_project.Configuration.Nvmecpld",
+                                "xyz.openbmc_project.Configuration.Nvmem2"})};
 
 void createSensors(
     boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
-    boost::container::flat_map<std::string, std::shared_ptr<NvmeStatus>>&
-        sensors,
+    boost::container::flat_map<std::string, std::shared_ptr<NVMeStatus>>&
+        u2Sensors,
+    boost::container::flat_map<std::string, std::shared_ptr<NVMeMIStatus>>&
+        m2Sensors,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
     const std::shared_ptr<boost::container::flat_set<std::string>>&
         sensorsChanged)
 {
     auto getter = std::make_shared<GetSensorConfiguration>(
         dbusConnection,
-        [&io, &objectServer, &sensors, &dbusConnection,
+        [&io, &objectServer, &u2Sensors, &m2Sensors, &dbusConnection,
          sensorsChanged](const ManagedObjectType& sensorConfigurations) {
             bool firstScan = sensorsChanged == nullptr;
             const SensorData* sensorData = nullptr;
@@ -84,18 +90,18 @@ void createSensors(
                     std::get<std::string>(findSensorName->second);
 
                 // on rescans, only update sensors we were signaled by
-                auto findSensor = sensors.find(sensorName);
-                if (!firstScan && findSensor != sensors.end())
+                auto findU2Sensor = u2Sensors.find(sensorName);
+                if (!firstScan && findU2Sensor != u2Sensors.end())
                 {
                     bool found = false;
                     for (auto it = sensorsChanged->begin();
                          it != sensorsChanged->end(); it++)
                     {
-                        if (findSensor->second &&
-                            boost::ends_with(*it, findSensor->second->name))
+                        if (findU2Sensor->second &&
+                            boost::ends_with(*it, findU2Sensor->second->name))
                         {
                             sensorsChanged->erase(it);
-                            findSensor->second = nullptr;
+                            findU2Sensor->second = nullptr;
                             found = true;
                             break;
                         }
@@ -104,6 +110,36 @@ void createSensors(
                     {
                         continue;
                     }
+                }
+
+                auto findM2Sensor = m2Sensors.find(sensorName);
+                if (!firstScan && findM2Sensor != m2Sensors.end())
+                {
+                    bool found = false;
+                    for (auto it = sensorsChanged->begin();
+                         it != sensorsChanged->end(); it++)
+                    {
+                        if (findM2Sensor->second &&
+                            boost::ends_with(*it, findM2Sensor->second->name))
+                        {
+                            sensorsChanged->erase(it);
+                            findM2Sensor->second = nullptr;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found)
+                    {
+                        continue;
+                    }
+                }
+
+                auto findPollRate = baseConfiguration->second.find("PollRate");
+                unsigned int pollRate = pollRateDefault;
+                if (findPollRate != baseConfiguration->second.end())
+                {
+                    pollRate = std::visit(VariantToUnsignedIntVisitor(),
+                                          findPollRate->second);
                 }
 
                 auto findBusId = baseConfiguration->second.find("Bus");
@@ -128,27 +164,45 @@ void createSensors(
                 unsigned int address = std::visit(VariantToUnsignedIntVisitor(),
                                                   findAddress->second);
 
-                auto findRegister = baseConfiguration->second.find("Register");
-                if (findRegister == baseConfiguration->second.end())
+                if (sensor.second.find(
+                        "xyz.openbmc_project.Configuration.Nvmecpld") !=
+                    sensor.second.end())
                 {
-                    std::cerr
-                        << "could not determine configuration register for "
-                        << "\n";
-                    continue;
+                    auto findRegister =
+                        baseConfiguration->second.find("Register");
+                    if (findRegister == baseConfiguration->second.end())
+                    {
+                        std::cerr
+                            << "could not determine configuration register for "
+                            << "\n";
+                        continue;
+                    }
+                    unsigned int reg = std::visit(VariantToUnsignedIntVisitor(),
+                                                  findRegister->second);
+
+                    for (uint8_t nvmeIndex = 0; nvmeIndex < 8; nvmeIndex++)
+                    {
+                        std::string nameWithIndex =
+                            sensorName + "_" + std::to_string(nvmeIndex);
+                        auto& u2SensorConstruct = u2Sensors[nameWithIndex];
+                        u2SensorConstruct = nullptr;
+
+                        u2SensorConstruct = std::make_shared<NVMeStatus>(
+                            objectServer, dbusConnection, io, nameWithIndex,
+                            *interfacePath, pollRate, nvmeIndex, busId, address,
+                            reg);
+                    }
                 }
-                unsigned int reg = std::visit(VariantToUnsignedIntVisitor(),
-                                              findRegister->second);
-
-                for (uint8_t nvmeIndex = 0; nvmeIndex < 8; nvmeIndex++)
+                else if (sensor.second.find(
+                             "xyz.openbmc_project.Configuration.Nvmem2") !=
+                         sensor.second.end())
                 {
-                    std::string nameWithIndex =
-                        sensorName + "_" + std::to_string(nvmeIndex);
-                    auto& sensorConstruct = sensors[nameWithIndex];
-                    sensorConstruct = nullptr;
+                    auto& m2SensorConstruct = m2Sensors[sensorName];
+                    m2SensorConstruct = nullptr;
 
-                    sensorConstruct = std::make_shared<NvmeStatus>(
-                        objectServer, dbusConnection, io, nameWithIndex,
-                        *interfacePath, nvmeIndex, busId, address, reg);
+                    m2SensorConstruct = std::make_shared<NVMeMIStatus>(
+                        objectServer, dbusConnection, io, sensorName,
+                        *interfacePath, pollRate, busId, address);
                 }
             }
         });
@@ -163,14 +217,17 @@ int main()
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     systemBus->request_name("xyz.openbmc_project.NvmeStatus");
     sdbusplus::asio::object_server objectServer(systemBus);
-    boost::container::flat_map<std::string, std::shared_ptr<NvmeStatus>>
-        sensors;
+    boost::container::flat_map<std::string, std::shared_ptr<NVMeStatus>>
+        u2Sensors;
+    boost::container::flat_map<std::string, std::shared_ptr<NVMeMIStatus>>
+        m2Sensors;
     std::vector<std::unique_ptr<sdbusplus::bus::match::match>> matches;
     auto sensorsChanged =
         std::make_shared<boost::container::flat_set<std::string>>();
 
     io.post([&]() {
-        createSensors(io, objectServer, sensors, systemBus, nullptr);
+        createSensors(io, objectServer, u2Sensors, m2Sensors, systemBus,
+                      nullptr);
     });
 
     boost::asio::deadline_timer filterTimer(io);
@@ -197,7 +254,7 @@ int main()
                     std::cerr << "timer error\n";
                     return;
                 }
-                createSensors(io, objectServer, sensors, systemBus,
+                createSensors(io, objectServer, u2Sensors, m2Sensors, systemBus,
                               sensorsChanged);
             });
         };
