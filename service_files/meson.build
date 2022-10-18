@@ -4,7 +4,6 @@ unit_files = [
     ['exit-air', 'xyz.openbmc_project.exitairsensor.service'],
     ['fan', 'xyz.openbmc_project.fansensor.service'],
     ['hwmon-temp', 'xyz.openbmc_project.hwmontempsensor.service'],
-    ['plx-temp', 'xyz.openbmc_project.plxtempsensor.service'],
     ['ipmb', 'xyz.openbmc_project.ipmbsensor.service'],
     ['intrusion', 'xyz.openbmc_project.intrusionsensor.service'],
     ['mcu', 'xyz.openbmc_project.mcutempsensor.service'],
