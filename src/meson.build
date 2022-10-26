@@ -88,6 +88,22 @@ if get_option('hwmon-temp').enabled()
     )
 endif
 
+if get_option('plx-temp').enabled()
+    executable(
+        'plxtempsensor',
+        'PLXTempMain.cpp',
+        'PLXTempSensor.cpp',
+        dependencies: [
+            default_deps,
+            thresholds_dep,
+            utils_dep,
+        ],
+        implicit_include_directories: false,
+        include_directories: '../include',
+        install: true,
+    )
+endif
+
 if get_option('intrusion').enabled()
     executable(
         'intrusionsensor',
