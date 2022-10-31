@@ -13,6 +13,7 @@ option('psu', type: 'feature', value: 'enabled', description: 'Enable PSU sensor
 option('external', type: 'feature', value: 'enabled', description: 'Enable External sensor.',)
 option('procstatus', type: 'feature', value: 'enabled', description: 'Enable processor status sensor.',)
 option('nvmeu2', type: 'feature', value: 'enabled', description: 'Enable nvme u2 status sensor.',)
+option('system', type: 'feature', value: 'disabled', description: 'Enable system sensor like watchdog2 status sensor.',)
 option('tests', type: 'feature', value: 'enabled', description: 'Build tests.',)
 option('validate-unsecure-feature', type : 'feature', value : 'disabled', description : 'Enables unsecure features required by validation. Note: mustbe turned off for production images.',)
 option('insecure-sensor-override', type : 'feature', value : 'disabled', description : 'Enables Sensor override feature without any check.',)

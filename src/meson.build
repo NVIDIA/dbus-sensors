@@ -241,3 +241,18 @@ if get_option('nvmeu2').enabled()
         install: true,
     )
 endif
+
+if get_option('system').enabled()
+    executable(
+        'watchdogsensor',
+        'WatchdogSensor.cpp',
+        'SystemSensorMain.cpp',
+        dependencies: [
+            default_deps,
+            utils_dep,
+        ],
+        implicit_include_directories: false,
+        include_directories: '../include',
+        install: true,
+    )
+endif
