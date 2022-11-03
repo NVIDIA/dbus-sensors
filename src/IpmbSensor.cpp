@@ -42,7 +42,7 @@ constexpr const char* configInterface =
 static constexpr double ipmbMaxReading = 0xFF;
 static constexpr double ipmbMinReading = 0;
 
-static constexpr uint8_t meAddress = 1;
+static constexpr uint8_t meAddressDefault = 1;
 static constexpr uint8_t lun = 0;
 static constexpr uint8_t hostSMbusIndexDefault = 0x03;
 static constexpr float pollRateDefault = 1; // in seconds
@@ -62,12 +62,14 @@ IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                        const std::string& sensorConfiguration,
                        sdbusplus::asio::object_server& objectServer,
                        std::vector<thresholds::Threshold>&& thresholdData,
-                       uint8_t deviceAddress, uint8_t hostSMbusIndex,
-                       const float pollRate, std::string& sensorTypeName) :
+                       uint8_t deviceAddress, uint8_t channelAddress,
+                       uint8_t hostSMbusIndex, const float pollRate,
+                       std::string& sensorTypeName) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
            sensorConfiguration, "xyz.openbmc_project.Configuration.ExitAirTemp",
            false, false, ipmbMaxReading, ipmbMinReading, conn, PowerState::on),
-    deviceAddress(deviceAddress), hostSMbusIndex(hostSMbusIndex),
+    deviceAddress(deviceAddress), channelAddress(channelAddress),
+    hostSMbusIndex(hostSMbusIndex),
     sensorPollMs(static_cast<int>(pollRate * 1000)), objectServer(objectServer),
     waitTimer(io)
 {
@@ -152,7 +154,7 @@ void IpmbSensor::loadDefaults()
 {
     if (type == IpmbType::meSensor)
     {
-        commandAddress = meAddress;
+        commandAddress = channelAddress;
         netfn = ipmi::sensor::netFn;
         command = ipmi::sensor::getSensorReading;
         commandData = {deviceAddress};
@@ -160,7 +162,7 @@ void IpmbSensor::loadDefaults()
     }
     else if (type == IpmbType::PXE1410CVR)
     {
-        commandAddress = meAddress;
+        commandAddress = channelAddress;
         netfn = ipmi::me_bridge::netFn;
         command = ipmi::me_bridge::sendRawPmbus;
         initCommand = ipmi::me_bridge::sendRawPmbus;
@@ -176,7 +178,7 @@ void IpmbSensor::loadDefaults()
     }
     else if (type == IpmbType::IR38363VR)
     {
-        commandAddress = meAddress;
+        commandAddress = channelAddress;
         netfn = ipmi::me_bridge::netFn;
         command = ipmi::me_bridge::sendRawPmbus;
         // pmbus read temp
@@ -187,7 +189,7 @@ void IpmbSensor::loadDefaults()
     }
     else if (type == IpmbType::ADM1278HSC)
     {
-        commandAddress = meAddress;
+        commandAddress = channelAddress;
         uint8_t snsNum = 0;
         switch (subType)
         {
@@ -220,7 +222,7 @@ void IpmbSensor::loadDefaults()
     }
     else if (type == IpmbType::mpsVR)
     {
-        commandAddress = meAddress;
+        commandAddress = channelAddress;
         netfn = ipmi::me_bridge::netFn;
         command = ipmi::me_bridge::sendRawPmbus;
         initCommand = ipmi::me_bridge::sendRawPmbus;
@@ -456,6 +458,14 @@ void createSensors(
                             VariantToUnsignedIntVisitor(), findSmType->second);
                     }
 
+                    uint8_t channelAddress = meAddressDefault;
+                    auto findmType = entry.second.find("ChannelAddress");
+                    if (findmType != entry.second.end())
+                    {
+                        channelAddress = std::visit(
+                            VariantToUnsignedIntVisitor(), findmType->second);
+                    }
+
                     float pollRate = pollRateDefault;
                     auto findPollRate = entry.second.find("PollRate");
                     if (findPollRate != entry.second.end())
@@ -481,7 +491,8 @@ void createSensors(
                     sensor = std::make_unique<IpmbSensor>(
                         dbusConnection, io, name, pathPair.first, objectServer,
                         std::move(sensorThresholds), deviceAddress,
-                        hostSMbusIndex, pollRate, sensorTypeName);
+                        channelAddress, hostSMbusIndex, pollRate,
+                        sensorTypeName);
 
                     /* Initialize scale and offset value */
                     sensor->scaleVal = 1;
