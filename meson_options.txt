@@ -12,6 +12,7 @@ option('nvme-mi-mctp', type: 'feature', value: 'disabled', description: 'Manage 
 option('psu', type: 'feature', value: 'enabled', description: 'Enable PSU sensor.',)
 option('external', type: 'feature', value: 'enabled', description: 'Enable External sensor.',)
 option('procstatus', type: 'feature', value: 'enabled', description: 'Enable processor status sensor.',)
+option('ipmbstatus', type: 'feature', value: 'enabled', description: 'Enable ipmb status sensor.',)
 option('nvmeu2', type: 'feature', value: 'enabled', description: 'Enable nvme u2 status sensor.',)
 option('system', type: 'feature', value: 'disabled', description: 'Enable system sensor like watchdog2 status sensor.',)
 option('tests', type: 'feature', value: 'enabled', description: 'Build tests.',)

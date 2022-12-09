@@ -244,6 +244,21 @@ if get_option('nvmeu2').enabled()
     )
 endif
 
+if get_option('ipmbstatus').enabled()
+    executable(
+        'ipmbstatus',
+        'IpmbStatus.cpp',
+        dependencies: [
+            default_deps,
+            thresholds_dep,
+            utils_dep,
+        ],
+        implicit_include_directories: false,
+        include_directories: '../include',
+        install: true,
+    )
+endif
+
 if get_option('system').enabled()
     executable(
         'watchdogsensor',
