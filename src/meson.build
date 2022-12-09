@@ -247,6 +247,7 @@ if get_option('system').enabled()
     executable(
         'watchdogsensor',
         'WatchdogSensor.cpp',
+	'SELSensor.cpp',
         'SystemSensorMain.cpp',
         dependencies: [
             default_deps,

@@ -1,3 +1,4 @@
+#include <SELSensor.hpp>
 #include <VariantVisitors.hpp>
 #include <WatchdogSensor.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
@@ -15,19 +16,22 @@
 #include <vector>
 
 static constexpr auto sensorTypes{
-    std::to_array<const char*>({"xyz.openbmc_project.Configuration.watchdog"})};
+    std::to_array<const char*>({"xyz.openbmc_project.Configuration.watchdog",
+                                "xyz.openbmc_project.Configuration.SEL"})};
 
 void createSensors(
     boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
     boost::container::flat_map<std::string, std::shared_ptr<WatchdogSensor>>&
-        sensors,
+        watchdogSensors,
+    boost::container::flat_map<std::string, std::shared_ptr<SELSensor>>&
+        selSensors,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
     const std::shared_ptr<boost::container::flat_set<std::string>>&
         sensorsChanged)
 {
     auto getter = std::make_shared<GetSensorConfiguration>(
         dbusConnection,
-        [&io, &objectServer, &sensors, &dbusConnection,
+        [&io, &objectServer, &watchdogSensors, &selSensors, &dbusConnection,
          sensorsChanged](const ManagedObjectType& sensorConfigurations) {
             bool firstScan = sensorsChanged == nullptr;
             const SensorData* sensorData = nullptr;
@@ -84,18 +88,19 @@ void createSensors(
                     std::get<std::string>(findSensorName->second);
 
                 // on rescans, only update sensors we were signaled by
-                auto findSensor = sensors.find(sensorName);
-                if (!firstScan && findSensor != sensors.end())
+                auto findWatchdogSensor = watchdogSensors.find(sensorName);
+                if (!firstScan && findWatchdogSensor != watchdogSensors.end())
                 {
                     bool found = false;
                     for (auto it = sensorsChanged->begin();
                          it != sensorsChanged->end(); it++)
                     {
-                        if (findSensor->second &&
-                            boost::ends_with(*it, findSensor->second->name))
+                        if (findWatchdogSensor->second &&
+                            boost::ends_with(*it,
+                                             findWatchdogSensor->second->name))
                         {
                             sensorsChanged->erase(it);
-                            findSensor->second = nullptr;
+                            findWatchdogSensor->second = nullptr;
                             found = true;
                             break;
                         }
@@ -106,12 +111,50 @@ void createSensors(
                     }
                 }
 
-                auto& sensorConstruct = sensors[sensorName];
-                sensorConstruct = nullptr;
+                auto findSelSensor = selSensors.find(sensorName);
+                if (!firstScan && findSelSensor != selSensors.end())
+                {
+                    bool found = false;
+                    for (auto it = sensorsChanged->begin();
+                         it != sensorsChanged->end(); it++)
+                    {
+                        if (findSelSensor->second &&
+                            boost::ends_with(*it, findSelSensor->second->name))
+                        {
+                            sensorsChanged->erase(it);
+                            findSelSensor->second = nullptr;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found)
+                    {
+                        continue;
+                    }
+                }
 
-                sensorConstruct = std::make_shared<WatchdogSensor>(
-                    objectServer, dbusConnection, /*io,*/ sensorName,
-                    *interfacePath);
+                if (sensor.second.find(
+                        "xyz.openbmc_project.Configuration.watchdog") !=
+                    sensor.second.end())
+                {
+                    auto& watchdogSensorConstruct = watchdogSensors[sensorName];
+                    watchdogSensorConstruct = nullptr;
+
+                    watchdogSensorConstruct = std::make_shared<WatchdogSensor>(
+                        objectServer, dbusConnection, /*io,*/ sensorName,
+                        *interfacePath);
+                }
+                else if (sensor.second.find(
+                             "xyz.openbmc_project.Configuration.SEL") !=
+                         sensor.second.end())
+                {
+                    auto& selSensorConstruct = selSensors[sensorName];
+                    selSensorConstruct = nullptr;
+
+                    selSensorConstruct = std::make_shared<SELSensor>(
+                        objectServer, dbusConnection, /*io,*/ sensorName,
+                        *interfacePath);
+                }
             }
         });
 
@@ -126,13 +169,16 @@ int main()
     systemBus->request_name("xyz.openbmc_project.SystemSensor");
     sdbusplus::asio::object_server objectServer(systemBus);
     boost::container::flat_map<std::string, std::shared_ptr<WatchdogSensor>>
-        sensors;
+        watchdogSensors;
+    boost::container::flat_map<std::string, std::shared_ptr<SELSensor>>
+        selSensors;
     std::vector<std::unique_ptr<sdbusplus::bus::match::match>> matches;
     auto sensorsChanged =
         std::make_shared<boost::container::flat_set<std::string>>();
 
     io.post([&]() {
-        createSensors(io, objectServer, sensors, systemBus, nullptr);
+        createSensors(io, objectServer, watchdogSensors, selSensors, systemBus,
+                      nullptr);
     });
 
     boost::asio::deadline_timer filterTimer(io);
@@ -158,8 +204,8 @@ int main()
                     std::cerr << "timer error\n";
                     return;
                 }
-                createSensors(io, objectServer, sensors, systemBus,
-                              sensorsChanged);
+                createSensors(io, objectServer, watchdogSensors, selSensors,
+                              systemBus, sensorsChanged);
             });
         };
 
