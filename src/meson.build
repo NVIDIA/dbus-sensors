@@ -274,3 +274,18 @@ if get_option('system').enabled()
         install: true,
     )
 endif
+
+if get_option('gpu').enabled()
+    executable(
+        'gpustatus',
+        'GPUStatus.cpp',
+        'GPUStatusMain.cpp',
+        dependencies: [
+            default_deps,
+            utils_dep,
+        ],
+        implicit_include_directories: false,
+        include_directories: '../include',
+        install: true,
+    )
+endif
