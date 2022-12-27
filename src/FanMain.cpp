@@ -372,6 +372,21 @@ void createSensors(
                 std::pair<double, double> limits =
                     std::make_pair(defaultMinReading, defaultMaxReading);
 
+                std::optional<uint8_t> ledReg;
+                std::optional<uint8_t> offset;
+                auto findLedReg = baseConfiguration->second.find("LedRegister");
+                if (findLedReg != baseConfiguration->second.end())
+                {
+                    ledReg = std::visit(VariantToUnsignedIntVisitor(),
+                                        findLedReg->second);
+                }
+                auto findLedOffset = baseConfiguration->second.find("Offset");
+                if (findLedOffset != baseConfiguration->second.end())
+                {
+                    offset = std::visit(VariantToUnsignedIntVisitor(),
+                                        findLedOffset->second);
+                }
+
                 auto connector =
                     sensorData->find(baseType + std::string(".Connector"));
 
@@ -447,7 +462,7 @@ void createSensors(
                     path.string(), baseType, objectServer, dbusConnection,
                     std::move(presenceSensor), redundancy, io, sensorName,
                     std::move(sensorThresholds), *interfacePath, limits,
-                    powerState, led);
+                    powerState, led, ledReg, offset);
 
                 if (!pwmPath.empty() && fs::exists(pwmPath) &&
                     !pwmSensors.count(pwmPath))

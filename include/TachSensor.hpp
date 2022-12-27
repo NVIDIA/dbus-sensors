@@ -71,7 +71,9 @@ class TachSensor : public Sensor
                const std::string& sensorConfiguration,
                const std::pair<double, double>& limits,
                const PowerState& powerState,
-               const std::optional<std::string>& led);
+               const std::optional<std::string>& led,
+               const std::optional<uint8_t> ledReg,
+               const std::optional<uint8_t> offset);
     ~TachSensor() override;
 
   private:
@@ -85,6 +87,8 @@ class TachSensor : public Sensor
     boost::asio::deadline_timer waitTimer;
     std::string path;
     std::optional<std::string> led;
+    std::optional<uint8_t> ledReg;
+    std::optional<uint8_t> offset;
     bool ledState = false;
     void setupRead(void);
     void handleResponse(const boost::system::error_code& err);

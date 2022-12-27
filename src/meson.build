@@ -63,6 +63,7 @@ if get_option('fan').enabled()
         dependencies: [
             default_deps,
             gpiodcxx,
+            i2c,
             thresholds_dep,
             utils_dep,
         ],

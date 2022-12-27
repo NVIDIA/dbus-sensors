@@ -21,6 +21,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
+#include <LedUtils.hpp>
 #include <gpiod.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -48,14 +49,16 @@ TachSensor::TachSensor(const std::string& path, const std::string& objectType,
                        const std::string& sensorConfiguration,
                        const std::pair<double, double>& limits,
                        const PowerState& powerState,
-                       const std::optional<std::string>& ledIn) :
+                       const std::optional<std::string>& ledIn,
+                       const std::optional<uint8_t> ledReg,
+                       const std::optional<uint8_t> offset) :
     Sensor(escapeName(fanName), std::move(thresholdsIn), sensorConfiguration,
            objectType, false, false, limits.second, limits.first, conn,
            powerState),
     objServer(objectServer), redundancy(redundancy),
     presence(std::move(presenceSensor)),
     inputDev(io, open(path.c_str(), O_RDONLY)), waitTimer(io), path(path),
-    led(ledIn)
+    led(ledIn), ledReg(ledReg), offset(offset)
 {
     sensorInterface = objectServer.add_interface(
         "/xyz/openbmc_project/sensors/fan_tach/" + name,
@@ -193,6 +196,12 @@ void TachSensor::checkThresholds(void)
     {
         ledState = curLed;
         setLed(dbusConnection, *led, curLed);
+    }
+
+    if (ledReg && offset && ledState != curLed)
+    {
+        ledState = curLed;
+        setLedReg(*ledReg, *offset, status);
     }
 }
 
