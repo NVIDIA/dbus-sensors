@@ -289,3 +289,18 @@ if get_option('gpu').enabled()
         install: true,
     )
 endif
+
+if get_option('psuredundancy').enabled()
+    executable(
+        'psuredundancy',
+        'PSURedundancy.cpp',
+        'PSURedundancyMain.cpp',
+        dependencies: [
+            default_deps,
+            utils_dep,
+        ],
+        implicit_include_directories: false,
+        include_directories: '../include',
+        install: true,
+    )
+endif

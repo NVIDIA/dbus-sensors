@@ -16,6 +16,7 @@ unit_files = [
     ['nvmeu2', 'xyz.openbmc_project.nvmestatus.service'],
     ['system', 'xyz.openbmc_project.systemsensor.service'],
     ['gpu', 'xyz.openbmc_project.gpustatus.service'],
+    ['psuredundancy', 'xyz.openbmc_project.psuredundancy.service'],
 
 ]
 
