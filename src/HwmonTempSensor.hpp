@@ -1,9 +1,11 @@
 #pragma once
 
-#include <Thresholds.hpp>
-#include <boost/asio/streambuf.hpp>
+#include "DeviceMgmt.hpp"
+#include "Thresholds.hpp"
+#include "sensor.hpp"
+
+#include <boost/asio/random_access_file.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <sensor.hpp>
 
 #include <string>
 #include <vector>
@@ -29,23 +31,35 @@ class HwmonTempSensor :
                     boost::asio::io_service& io, const std::string& sensorName,
                     std::vector<thresholds::Threshold>&& thresholds,
                     const struct SensorParams& thisSensorParameters,
-                    const float pollRate,
-                    const std::string& sensorConfiguration,
-                    const PowerState powerState);
+                    float pollRate, const std::string& sensorConfiguration,
+                    PowerState powerState,
+                    const std::shared_ptr<I2CDevice>& i2cDevice);
     ~HwmonTempSensor() override;
     void setupRead(void);
+    void activate(const std::string& newPath,
+                  const std::shared_ptr<I2CDevice>& newI2CDevice);
+    void deactivate(void);
+    bool isActive(void);
+
+    std::shared_ptr<I2CDevice> getI2CDevice() const
+    {
+        return i2cDevice;
+    }
 
   private:
+    // Ordering is important here; readBuf is first so that it's not destroyed
+    // while async operations from other member fields might still be using it.
+    std::array<char, 128> readBuf{};
+    std::shared_ptr<I2CDevice> i2cDevice;
     sdbusplus::asio::object_server& objServer;
-    boost::asio::posix::stream_descriptor inputDev;
-    boost::asio::deadline_timer waitTimer;
-    boost::asio::streambuf readBuf;
+    boost::asio::random_access_file inputDev;
+    boost::asio::steady_timer waitTimer;
     std::string path;
     double offsetValue;
     double scaleValue;
     unsigned int sensorPollMs;
 
-    void handleResponse(const boost::system::error_code& err);
+    void handleResponse(const boost::system::error_code& err, size_t bytesRead);
     void restartRead();
     void checkThresholds(void) override;
 };

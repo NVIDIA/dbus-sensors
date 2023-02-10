@@ -14,10 +14,10 @@
 // limitations under the License.
 */
 
-#include <PSUEvent.hpp>
-#include <PSUSensor.hpp>
-#include <Utils.hpp>
-#include <boost/algorithm/string/predicate.hpp>
+#include "PSUEvent.hpp"
+#include "PSUSensor.hpp"
+#include "Utils.hpp"
+
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
@@ -41,35 +41,15 @@
 static constexpr bool debug = false;
 
 static constexpr auto sensorTypes{std::to_array<const char*>(
-    {"xyz.openbmc_project.Configuration.ADM1266",
-     "xyz.openbmc_project.Configuration.ADM1272",
-     "xyz.openbmc_project.Configuration.ADM1275",
-     "xyz.openbmc_project.Configuration.ADM1278",
-     "xyz.openbmc_project.Configuration.DPS800",
-     "xyz.openbmc_project.Configuration.INA219",
-     "xyz.openbmc_project.Configuration.INA230",
-     "xyz.openbmc_project.Configuration.IPSPS",
-     "xyz.openbmc_project.Configuration.ISL68137",
-     "xyz.openbmc_project.Configuration.ISL68220",
-     "xyz.openbmc_project.Configuration.ISL68223",
-     "xyz.openbmc_project.Configuration.ISL68225",
-     "xyz.openbmc_project.Configuration.ISL69243",
-     "xyz.openbmc_project.Configuration.ISL69260",
-     "xyz.openbmc_project.Configuration.LM25066",
-     "xyz.openbmc_project.Configuration.MAX16601",
-     "xyz.openbmc_project.Configuration.MAX20710",
-     "xyz.openbmc_project.Configuration.MAX20730",
-     "xyz.openbmc_project.Configuration.MAX20734",
-     "xyz.openbmc_project.Configuration.MAX20796",
-     "xyz.openbmc_project.Configuration.MAX34451",
-     "xyz.openbmc_project.Configuration.MP5023",
-     "xyz.openbmc_project.Configuration.pmbus",
-     "xyz.openbmc_project.Configuration.PXE1610",
-     "xyz.openbmc_project.Configuration.RAA228000",
-     "xyz.openbmc_project.Configuration.RAA228228",
-     "xyz.openbmc_project.Configuration.RAA229004",
-     "xyz.openbmc_project.Configuration.TPS546D24",
-     "xyz.openbmc_project.Configuration.XDPE12284"})};
+    {"ADM1266",   "ADM1272",     "ADM1275",   "ADM1278",   "ADM1293",
+     "ADS7830",   "AHE50DC_FAN", "BMR490",    "DPS800",    "INA219",
+     "INA230",    "IPSPS",       "IR38060",   "IR38164",   "IR38263",
+     "ISL68137",  "ISL68220",    "ISL68223",  "ISL69225",  "ISL69243",
+     "ISL69260",  "LM25066",     "MAX16601",  "MAX20710",  "MAX20730",
+     "MAX20734",  "MAX20796",    "MAX34451",  "MP2971",    "MP2973",
+     "MP5023",    "PLI1209BC",   "pmbus",     "PXE1610",   "RAA228000",
+     "RAA228228", "RAA228620",   "RAA229001", "RAA229004", "RAA229126",
+     "TPS53679",  "TPS546D24",   "XDPE11280", "XDPE12284"})};
 
 // clang-format off
 static constexpr auto pmbusNames{std::to_array<const char*>({
@@ -77,11 +57,22 @@ static constexpr auto pmbusNames{std::to_array<const char*>({
     "adm1272",
     "adm1275",
     "adm1278",
+<<<<<<< HEAD
     "bmr453",
+||||||| 51ad667
+=======
+    "adm1293",
+    "ads7830",
+    "ahe50dc_fan",
+    "bmr490",
+>>>>>>> origin/master
     "dps800",
     "ina219",
     "ina230",
     "ipsps1",
+    "ir38060",
+    "ir38164",
+    "ir38263",
     "isl68137",
     "isl68220",
     "isl68223",
@@ -95,13 +86,21 @@ static constexpr auto pmbusNames{std::to_array<const char*>({
     "max20734",
     "max20796",
     "max34451",
+    "mp2971",
+    "mp2973",
     "mp5023",
+    "pli1209bc",
     "pmbus",
     "pxe1610",
     "raa228000",
     "raa228228",
+    "raa228620",
+    "raa229001",
     "raa229004",
+    "raa229126",
+    "tps53679",
     "tps546d24",
+    "xdpe11280",
     "xdpe12284"
 })};
 //clang-format on
@@ -251,9 +250,9 @@ static void
                    sdbusplus::asio::object_server& objectServer,
                    const std::string& psuName)
 {
-    for (const auto& pwmName : pwmTable)
+    for (const auto& [pwmLabel, pwmName] : pwmTable)
     {
-        if (pwmName.first != labelHead)
+        if (pwmLabel != labelHead)
         {
             continue;
         }
@@ -273,9 +272,17 @@ static void
             continue;
         }
 
+        std::string name = "Pwm_";
+        name += psuName;
+        name += "_";
+        name += pwmName;
+
+        std::string objPath = interfacePath;
+        objPath += "_";
+        objPath += pwmName;
+
         pwmSensors[psuName + labelHead] = std::make_unique<PwmSensor>(
-            "Pwm_" + psuName + "_" + pwmName.second, pwmPathStr, dbusConnection,
-            objectServer, interfacePath + "_" + pwmName.second, "PSU");
+            name, pwmPathStr, dbusConnection, objectServer, objPath, "PSU");
     }
 }
 
@@ -362,24 +369,21 @@ static void createSensorsCallback(
             continue;
         }
 
-        const std::pair<std::string, boost::container::flat_map<
-                                         std::string, BasicVariantType>>*
-            baseConfig = nullptr;
+        const SensorBaseConfigMap* baseConfig = nullptr;
         const SensorData* sensorData = nullptr;
         const std::string* interfacePath = nullptr;
         const char* sensorType = nullptr;
         size_t thresholdConfSize = 0;
 
-        for (const std::pair<sdbusplus::message::object_path, SensorData>&
-                 sensor : sensorConfigs)
+        for (const auto& [path, cfgData] : sensorConfigs)
         {
-            sensorData = &(sensor.second);
+            sensorData = &cfgData;
             for (const char* type : sensorTypes)
             {
-                auto sensorBase = sensorData->find(type);
+                auto sensorBase = sensorData->find(configInterfaceName(type));
                 if (sensorBase != sensorData->end())
                 {
-                    baseConfig = &(*sensorBase);
+                    baseConfig = &sensorBase->second;
                     sensorType = type;
                     break;
                 }
@@ -391,18 +395,20 @@ static void createSensorsCallback(
                 continue;
             }
 
-            auto configBus = baseConfig->second.find("Bus");
-            auto configAddress = baseConfig->second.find("Address");
+            auto configBus = baseConfig->find("Bus");
+            auto configAddress = baseConfig->find("Address");
 
-            if (configBus == baseConfig->second.end() ||
-                configAddress == baseConfig->second.end())
+            if (configBus == baseConfig->end() ||
+                configAddress == baseConfig->end())
             {
                 std::cerr << "error finding necessary entry in configuration\n";
                 continue;
             }
 
-            const uint64_t* confBus = std::get_if<uint64_t>(&(configBus->second));
-            const uint64_t* confAddr = std::get_if<uint64_t>(&(configAddress->second));
+            const uint64_t* confBus =
+                std::get_if<uint64_t>(&(configBus->second));
+            const uint64_t* confAddr =
+                std::get_if<uint64_t>(&(configAddress->second));
             if (confBus == nullptr || confAddr == nullptr)
             {
                 std::cerr
@@ -421,11 +427,11 @@ static void createSensorsCallback(
             std::vector<thresholds::Threshold> confThresholds;
             if (!parseThresholdsFromConfig(*sensorData, confThresholds))
             {
-                std::cerr << "error populating totoal thresholds\n";
+                std::cerr << "error populating total thresholds\n";
             }
             thresholdConfSize = confThresholds.size();
 
-            interfacePath = &(sensor.first.str);
+            interfacePath = &path.str;
             break;
         }
         if (interfacePath == nullptr)
@@ -436,14 +442,15 @@ static void createSensorsCallback(
             continue;
         }
 
-        auto findPSUName = baseConfig->second.find("Name");
-        if (findPSUName == baseConfig->second.end())
+        auto findPSUName = baseConfig->find("Name");
+        if (findPSUName == baseConfig->end())
         {
             std::cerr << "could not determine configuration name for "
                       << deviceName << "\n";
             continue;
         }
-        const std::string* psuName = std::get_if<std::string>(&(findPSUName->second));
+        const std::string* psuName =
+            std::get_if<std::string>(&(findPSUName->second));
         if (psuName == nullptr)
         {
             std::cerr << "Cannot find psu name, invalid configuration\n";
@@ -457,8 +464,8 @@ static void createSensorsCallback(
             auto it =
                 std::find_if(sensorsChanged->begin(), sensorsChanged->end(),
                              [psuNameStr](std::string& s) {
-                                 return boost::ends_with(s, psuNameStr);
-                             });
+                return s.ends_with(psuNameStr);
+                });
 
             if (it == sensorsChanged->end())
             {
@@ -470,14 +477,7 @@ static void createSensorsCallback(
         checkGroupEvent(directory.string(), groupEventMatch,
                         groupEventPathList);
 
-        PowerState readState = PowerState::always;
-        auto findPowerOn = baseConfig->second.find("PowerState");
-        if (findPowerOn != baseConfig->second.end())
-        {
-            std::string powerState =
-                std::visit(VariantToStringVisitor(), findPowerOn->second);
-            setReadState(powerState, readState);
-        }
+        PowerState readState = getPowerState(*baseConfig);
 
         /* Check if there are more sensors in the same interface */
         int i = 1;
@@ -487,8 +487,8 @@ static void createSensorsCallback(
             // Individual string fields: Name, Name1, Name2, Name3, ...
             psuNames.push_back(
                 escapeName(std::get<std::string>(findPSUName->second)));
-            findPSUName = baseConfig->second.find("Name" + std::to_string(i++));
-        } while (findPSUName != baseConfig->second.end());
+            findPSUName = baseConfig->find("Name" + std::to_string(i++));
+        } while (findPSUName != baseConfig->end());
 
         std::vector<fs::path> sensorPaths;
         if (!findFiles(directory, R"(\w\d+_input$)", sensorPaths, 0))
@@ -506,24 +506,12 @@ static void createSensorsCallback(
             }
         }
 
-        /* The poll rate for the sensors */
-        double pollRate = 0.0;
-        auto pollRateObj = baseConfig->second.find("PollRate");
-
-        if (pollRateObj != baseConfig->second.end())
-        {
-            pollRate =
-                std::visit(VariantToDoubleVisitor(), pollRateObj->second);
-            if (pollRate <= 0.0)
-            {
-                pollRate = PSUSensor::defaultSensorPoll;
-            }
-        }
+        float pollRate = getPollRate(*baseConfig, PSUSensor::defaultSensorPoll);
 
         /* Find array of labels to be exposed if it is defined in config */
         std::vector<std::string> findLabels;
-        auto findLabelObj = baseConfig->second.find("Labels");
-        if (findLabelObj != baseConfig->second.end())
+        auto findLabelObj = baseConfig->find("Labels");
+        if (findLabelObj != baseConfig->end())
         {
             findLabels =
                 std::get<std::vector<std::string>>(findLabelObj->second);
@@ -538,7 +526,7 @@ static void createSensorsCallback(
             std::string labelHead;
             std::string sensorPathStr = sensorPath.string();
             std::string sensorNameStr = sensorPath.filename();
-            std::string sensorNameSubStr{""};
+            std::string sensorNameSubStr;
             if (std::regex_search(sensorNameStr, matches, sensorNameRegEx))
             {
                 // hwmon *_input filename without number:
@@ -560,7 +548,7 @@ static void createSensorsCallback(
             {
 
                 std::string sensorPathStrMax = sensorPathStr.substr(pos);
-                if (sensorPathStrMax.compare("_max") == 0)
+                if (sensorPathStrMax == "_max")
                 {
                     labelPath =
                         boost::replace_all_copy(sensorPathStr, "max", "label");
@@ -664,8 +652,8 @@ static void createSensorsCallback(
             std::string keyPowerState = labelHead + "_PowerState";
 
             bool customizedName = false;
-            auto findCustomName = baseConfig->second.find(keyName);
-            if (findCustomName != baseConfig->second.end())
+            auto findCustomName = baseConfig->find(keyName);
+            if (findCustomName != baseConfig->end())
             {
                 try
                 {
@@ -683,8 +671,8 @@ static void createSensorsCallback(
             }
 
             bool customizedScale = false;
-            auto findCustomScale = baseConfig->second.find(keyScale);
-            if (findCustomScale != baseConfig->second.end())
+            auto findCustomScale = baseConfig->find(keyScale);
+            if (findCustomScale != baseConfig->end())
             {
                 try
                 {
@@ -709,8 +697,8 @@ static void createSensorsCallback(
                 }
             }
 
-            auto findCustomMin = baseConfig->second.find(keyMin);
-            if (findCustomMin != baseConfig->second.end())
+            auto findCustomMin = baseConfig->find(keyMin);
+            if (findCustomMin != baseConfig->end())
             {
                 try
                 {
@@ -724,8 +712,8 @@ static void createSensorsCallback(
                 }
             }
 
-            auto findCustomMax = baseConfig->second.find(keyMax);
-            if (findCustomMax != baseConfig->second.end())
+            auto findCustomMax = baseConfig->find(keyMax);
+            if (findCustomMax != baseConfig->end())
             {
                 try
                 {
@@ -739,8 +727,8 @@ static void createSensorsCallback(
                 }
             }
 
-            auto findCustomOffset = baseConfig->second.find(keyOffset);
-            if (findCustomOffset != baseConfig->second.end())
+            auto findCustomOffset = baseConfig->find(keyOffset);
+            if (findCustomOffset != baseConfig->end())
             {
                 try
                 {
@@ -755,8 +743,8 @@ static void createSensorsCallback(
             }
 
             // if we find label head power state set ，override the powerstate.
-            auto findPowerState = baseConfig->second.find(keyPowerState);
-            if (findPowerState != baseConfig->second.end())
+            auto findPowerState = baseConfig->find(keyPowerState);
+            if (findPowerState != baseConfig->end())
             {
                 std::string powerState = std::visit(VariantToStringVisitor(),
                                                     findPowerState->second);
@@ -831,8 +819,8 @@ static void createSensorsCallback(
 
                 // Preserve existing configs by accepting earlier syntax,
                 // example CurrScaleFactor, PowerScaleFactor, ...
-                auto findScaleFactor = baseConfig->second.find(strScaleFactor);
-                if (findScaleFactor != baseConfig->second.end())
+                auto findScaleFactor = baseConfig->find(strScaleFactor);
+                if (findScaleFactor != baseConfig->end())
                 {
                     factor = std::visit(VariantToIntVisitor(),
                                         findScaleFactor->second);
@@ -926,7 +914,6 @@ static void createSensorsCallback(
     {
         std::cerr << "Created total of " << numCreated << " sensors\n";
     }
-    return;
 }
 
 void createSensors(
@@ -955,10 +942,21 @@ void propertyInitialize(void)
 
     labelMatch = {
         {"pin", PSUProperty("Input Power", 3000, 0, 6, 0)},
+<<<<<<< HEAD
         {"pout1", PSUProperty("PWR", 3000, 0, 6, 0)},
+||||||| 51ad667
+        {"pout1", PSUProperty("Output Power", 3000, 0, 6, 0)},
+=======
+        {"pin1", PSUProperty("Input Power", 3000, 0, 6, 0)},
+        {"pin2", PSUProperty("Input Power", 3000, 0, 6, 0)},
+        {"pout1", PSUProperty("Output Power", 3000, 0, 6, 0)},
+>>>>>>> origin/master
         {"pout2", PSUProperty("Output Power", 3000, 0, 6, 0)},
         {"pout3", PSUProperty("Output Power", 3000, 0, 6, 0)},
         {"power1", PSUProperty("Output Power", 3000, 0, 6, 0)},
+        {"power2", PSUProperty("Output Power", 3000, 0, 6, 0)},
+        {"power3", PSUProperty("Output Power", 3000, 0, 6, 0)},
+        {"power4", PSUProperty("Output Power", 3000, 0, 6, 0)},
         {"maxpin", PSUProperty("Max Input Power", 3000, 0, 6, 0)},
         {"vin", PSUProperty("Input Voltage", 300, 0, 3, 0)},
         {"maxvin", PSUProperty("Max Input Voltage", 300, 0, 3, 0)},
@@ -995,8 +993,17 @@ void propertyInitialize(void)
         {"vout31", PSUProperty("Output Voltage", 255, 0, 3, 0)},
         {"vout32", PSUProperty("Output Voltage", 255, 0, 3, 0)},
         {"vmon", PSUProperty("Auxiliary Input Voltage", 255, 0, 3, 0)},
+        {"in0", PSUProperty("Output Voltage", 255, 0, 3, 0)},
         {"in1", PSUProperty("Output Voltage", 255, 0, 3, 0)},
+        {"in2", PSUProperty("Output Voltage", 255, 0, 3, 0)},
+        {"in3", PSUProperty("Output Voltage", 255, 0, 3, 0)},
+        {"in4", PSUProperty("Output Voltage", 255, 0, 3, 0)},
+        {"in5", PSUProperty("Output Voltage", 255, 0, 3, 0)},
+        {"in6", PSUProperty("Output Voltage", 255, 0, 3, 0)},
+        {"in7", PSUProperty("Output Voltage", 255, 0, 3, 0)},
         {"iin", PSUProperty("Input Current", 20, 0, 3, 0)},
+        {"iin1", PSUProperty("Input Current", 20, 0, 3, 0)},
+        {"iin2", PSUProperty("Input Current", 20, 0, 3, 0)},
         {"iout1", PSUProperty("Output Current", 255, 0, 3, 0)},
         {"iout2", PSUProperty("Output Current", 255, 0, 3, 0)},
         {"iout3", PSUProperty("Output Current", 255, 0, 3, 0)},
@@ -1012,6 +1019,9 @@ void propertyInitialize(void)
         {"iout13", PSUProperty("Output Current", 255, 0, 3, 0)},
         {"iout14", PSUProperty("Output Current", 255, 0, 3, 0)},
         {"curr1", PSUProperty("Output Current", 255, 0, 3, 0)},
+        {"curr2", PSUProperty("Output Current", 255, 0, 3, 0)},
+        {"curr3", PSUProperty("Output Current", 255, 0, 3, 0)},
+        {"curr4", PSUProperty("Output Current", 255, 0, 3, 0)},
         {"maxiout1", PSUProperty("Max Output Current", 255, 0, 3, 0)},
         {"temp1", PSUProperty("TEMP", 127, -128, 3, 0)},
         {"temp2", PSUProperty("TEMP", 127, -128, 3, 0)},
@@ -1020,10 +1030,23 @@ void propertyInitialize(void)
         {"temp5", PSUProperty("TEMP", 127, -128, 3, 0)},
         {"temp6", PSUProperty("TEMP", 127, -128, 3, 0)},
         {"maxtemp1", PSUProperty("Max Temperature", 127, -128, 3, 0)},
+<<<<<<< HEAD
         {"fan1", PSUProperty("SPD FAN", 30000, 0, 0, 0)},
         {"fan2", PSUProperty("Fan Speed 2", 30000, 0, 0, 0)}};
+||||||| 51ad667
+        {"fan1", PSUProperty("Fan Speed 1", 30000, 0, 0, 0)},
+        {"fan2", PSUProperty("Fan Speed 2", 30000, 0, 0, 0)}};
+=======
+        {"fan1", PSUProperty("Fan Speed 1", 30000, 0, 0, 0)},
+        {"fan2", PSUProperty("Fan Speed 2", 30000, 0, 0, 0)},
+        {"fan3", PSUProperty("Fan Speed 3", 30000, 0, 0, 0)},
+        {"fan4", PSUProperty("Fan Speed 4", 30000, 0, 0, 0)}};
+>>>>>>> origin/master
 
-    pwmTable = {{"fan1", "Fan_1"}, {"fan2", "Fan_2"}};
+    pwmTable = {{"fan1", "Fan_1"},
+                {"fan2", "Fan_2"},
+                {"fan3", "Fan_3"},
+                {"fan4", "Fan_4"}};
 
     limitEventMatch = {{"PredictiveFailure", {"max_alarm", "min_alarm"}},
                        {"Failure", {"crit_alarm", "lcrit_alarm"}}};
@@ -1035,7 +1058,9 @@ void propertyInitialize(void)
 
     groupEventMatch = {{"FanFault",
                         {{"fan1", {"fan1_alarm", "fan1_fault"}},
-                         {"fan2", {"fan2_alarm", "fan2_fault"}}}}};
+                         {"fan2", {"fan2_alarm", "fan2_fault"}},
+                         {"fan3", {"fan3_alarm", "fan3_fault"}},
+                         {"fan4", {"fan4_alarm", "fan4_fault"}}}}};
 }
 
 int main()
@@ -1043,48 +1068,41 @@ int main()
     boost::asio::io_service io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
 
+    sdbusplus::asio::object_server objectServer(systemBus, true);
+    objectServer.add_manager("/xyz/openbmc_project/sensors");
+    objectServer.add_manager("/xyz/openbmc_project/control");
     systemBus->request_name("xyz.openbmc_project.PSUSensor");
-    sdbusplus::asio::object_server objectServer(systemBus);
-    std::vector<std::unique_ptr<sdbusplus::bus::match::match>> matches;
     auto sensorsChanged =
         std::make_shared<boost::container::flat_set<std::string>>();
 
     propertyInitialize();
 
     io.post([&]() { createSensors(io, objectServer, systemBus, nullptr); });
-    boost::asio::deadline_timer filterTimer(io);
-    std::function<void(sdbusplus::message::message&)> eventHandler =
-        [&](sdbusplus::message::message& message) {
-            if (message.is_method_error())
+    boost::asio::steady_timer filterTimer(io);
+    std::function<void(sdbusplus::message_t&)> eventHandler =
+        [&](sdbusplus::message_t& message) {
+        if (message.is_method_error())
+        {
+            std::cerr << "callback method error\n";
+            return;
+        }
+        sensorsChanged->insert(message.get_path());
+        filterTimer.expires_from_now(std::chrono::seconds(3));
+        filterTimer.async_wait([&](const boost::system::error_code& ec) {
+            if (ec == boost::asio::error::operation_aborted)
             {
-                std::cerr << "callback method error\n";
                 return;
             }
-            sensorsChanged->insert(message.get_path());
-            filterTimer.expires_from_now(boost::posix_time::seconds(3));
-            filterTimer.async_wait([&](const boost::system::error_code& ec) {
-                if (ec == boost::asio::error::operation_aborted)
-                {
-                    return;
-                }
-                if (ec)
-                {
-                    std::cerr << "timer error\n";
-                }
-                createSensors(io, objectServer, systemBus, sensorsChanged);
-            });
-        };
+            if (ec)
+            {
+                std::cerr << "timer error\n";
+            }
+            createSensors(io, objectServer, systemBus, sensorsChanged);
+        });
+    };
 
-    for (const char* type : sensorTypes)
-    {
-        auto match = std::make_unique<sdbusplus::bus::match::match>(
-            static_cast<sdbusplus::bus::bus&>(*systemBus),
-            "type='signal',member='PropertiesChanged',path_namespace='" +
-                std::string(inventoryPath) + "',arg0namespace='" + type + "'",
-            eventHandler);
-        matches.emplace_back(std::move(match));
-    }
-
+    std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
+        setupPropertiesChangedMatches(*systemBus, sensorTypes, eventHandler);
     setupManufacturingModeMatch(*systemBus);
     io.run();
 }

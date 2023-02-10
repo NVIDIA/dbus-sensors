@@ -1,8 +1,10 @@
-#include <Thresholds.hpp>
-#include <VariantVisitors.hpp>
+#include "Thresholds.hpp"
+
+#include "VariantVisitors.hpp"
+#include "sensor.hpp"
+
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/container/flat_map.hpp>
-#include <sensor.hpp>
 
 #include <array>
 #include <cmath>
@@ -44,33 +46,21 @@ Direction findThresholdDirection(const std::string& direct)
     return Direction::ERROR;
 }
 
-bool isValidLevel(Level lev)
-{
-    for (const ThresholdDefinition& prop : thresProp)
-    {
-        if (prop.level == lev)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool parseThresholdsFromConfig(
     const SensorData& sensorData,
     std::vector<thresholds::Threshold>& thresholdVector,
     const std::string* matchLabel, const int* sensorIndex)
 {
-    for (const auto& item : sensorData)
+    for (const auto& [intf, cfg] : sensorData)
     {
-        if (item.first.find("Thresholds") == std::string::npos)
+        if (intf.find("Thresholds") == std::string::npos)
         {
             continue;
         }
         if (matchLabel != nullptr)
         {
-            auto labelFind = item.second.find("Label");
-            if (labelFind == item.second.end())
+            auto labelFind = cfg.find("Label");
+            if (labelFind == cfg.end())
             {
                 continue;
             }
@@ -83,15 +73,15 @@ bool parseThresholdsFromConfig(
 
         if (sensorIndex != nullptr)
         {
-            auto indexFind = item.second.find("Index");
+            auto indexFind = cfg.find("Index");
 
             // If we're checking for index 1, a missing Index is OK.
-            if ((indexFind == item.second.end()) && (*sensorIndex != 1))
+            if ((indexFind == cfg.end()) && (*sensorIndex != 1))
             {
                 continue;
             }
 
-            if ((indexFind != item.second.end()) &&
+            if ((indexFind != cfg.end()) &&
                 (std::visit(VariantToIntVisitor(), indexFind->second) !=
                  *sensorIndex))
             {
@@ -100,22 +90,21 @@ bool parseThresholdsFromConfig(
         }
 
         double hysteresis = std::numeric_limits<double>::quiet_NaN();
-        auto hysteresisFind = item.second.find("Hysteresis");
-        if (hysteresisFind != item.second.end())
+        auto hysteresisFind = cfg.find("Hysteresis");
+        if (hysteresisFind != cfg.end())
         {
             hysteresis =
                 std::visit(VariantToDoubleVisitor(), hysteresisFind->second);
         }
 
-        auto directionFind = item.second.find("Direction");
-        auto severityFind = item.second.find("Severity");
-        auto valueFind = item.second.find("Value");
-        if (valueFind == item.second.end() ||
-            severityFind == item.second.end() ||
-            directionFind == item.second.end())
+        auto directionFind = cfg.find("Direction");
+        auto severityFind = cfg.find("Severity");
+        auto valueFind = cfg.find("Value");
+        if (valueFind == cfg.end() || severityFind == cfg.end() ||
+            directionFind == cfg.end())
         {
             std::cerr << "Malformed threshold on configuration interface "
-                      << item.first << "\n";
+                      << intf << "\n";
             return false;
         }
         unsigned int severity =
@@ -148,62 +137,60 @@ void persistThreshold(const std::string& path, const std::string& baseInterface,
         std::string thresholdInterface =
             baseInterface + ".Thresholds" + std::to_string(ii);
         conn->async_method_call(
-            [&, path, threshold, thresholdInterface, labelMatch](
-                const boost::system::error_code& ec,
-                const boost::container::flat_map<std::string, BasicVariantType>&
-                    result) {
-                if (ec)
-                {
-                    return; // threshold not supported
-                }
+            [&, path, threshold, thresholdInterface,
+             labelMatch](const boost::system::error_code& ec,
+                         const SensorBaseConfigMap& result) {
+            if (ec)
+            {
+                return; // threshold not supported
+            }
 
-                if (!labelMatch.empty())
+            if (!labelMatch.empty())
+            {
+                auto labelFind = result.find("Label");
+                if (labelFind == result.end())
                 {
-                    auto labelFind = result.find("Label");
-                    if (labelFind == result.end())
-                    {
-                        std::cerr << "No label in threshold configuration\n";
-                        return;
-                    }
-                    std::string label =
-                        std::visit(VariantToStringVisitor(), labelFind->second);
-                    if (label != labelMatch)
-                    {
-                        return;
-                    }
-                }
-
-                auto directionFind = result.find("Direction");
-                auto severityFind = result.find("Severity");
-                auto valueFind = result.find("Value");
-                if (valueFind == result.end() || severityFind == result.end() ||
-                    directionFind == result.end())
-                {
-                    std::cerr << "Malformed threshold in configuration\n";
+                    std::cerr << "No label in threshold configuration\n";
                     return;
                 }
-                unsigned int severity = std::visit(
-                    VariantToUnsignedIntVisitor(), severityFind->second);
-
-                std::string dir =
-                    std::visit(VariantToStringVisitor(), directionFind->second);
-                if ((findThresholdLevel(severity) != threshold.level) ||
-                    (findThresholdDirection(dir) != threshold.direction))
+                std::string label =
+                    std::visit(VariantToStringVisitor(), labelFind->second);
+                if (label != labelMatch)
                 {
-                    return; // not the droid we're looking for
+                    return;
                 }
+            }
 
-                std::variant<double> value(threshold.value);
-                conn->async_method_call(
-                    [](const boost::system::error_code& ec) {
-                        if (ec)
-                        {
-                            std::cerr << "Error setting threshold " << ec
-                                      << "\n";
-                        }
-                    },
-                    entityManagerName, path, "org.freedesktop.DBus.Properties",
-                    "Set", thresholdInterface, "Value", value);
+            auto directionFind = result.find("Direction");
+            auto severityFind = result.find("Severity");
+            auto valueFind = result.find("Value");
+            if (valueFind == result.end() || severityFind == result.end() ||
+                directionFind == result.end())
+            {
+                std::cerr << "Malformed threshold in configuration\n";
+                return;
+            }
+            unsigned int severity =
+                std::visit(VariantToUnsignedIntVisitor(), severityFind->second);
+
+            std::string dir =
+                std::visit(VariantToStringVisitor(), directionFind->second);
+            if ((findThresholdLevel(severity) != threshold.level) ||
+                (findThresholdDirection(dir) != threshold.direction))
+            {
+                return; // not the droid we're looking for
+            }
+
+            std::variant<double> value(threshold.value);
+            conn->async_method_call(
+                [](const boost::system::error_code& ec) {
+                if (ec)
+                {
+                    std::cerr << "Error setting threshold " << ec << "\n";
+                }
+                },
+                entityManagerName, path, "org.freedesktop.DBus.Properties",
+                "Set", thresholdInterface, "Value", value);
             },
             entityManagerName, path, "org.freedesktop.DBus.Properties",
             "GetAll", thresholdInterface);
@@ -214,10 +201,6 @@ void updateThresholds(Sensor* sensor)
 {
     for (const auto& threshold : sensor->thresholds)
     {
-        if (!isValidLevel(threshold.level))
-        {
-            continue;
-        }
         std::shared_ptr<sdbusplus::asio::dbus_interface> interface =
             sensor->getThresholdInterface(threshold.level);
 
@@ -227,7 +210,7 @@ void updateThresholds(Sensor* sensor)
         }
 
         std::string property =
-            sensor->propertyLevel(threshold.level, threshold.direction);
+            Sensor::propertyLevel(threshold.level, threshold.direction);
         if (property.empty())
         {
             continue;
@@ -358,14 +341,14 @@ void ThresholdTimer::startTimer(const std::weak_ptr<Sensor>& weakSensor,
     }
     if (pair == nullptr)
     {
-        pair = &timers.emplace_back(timerUsed, boost::asio::deadline_timer(io));
+        pair = &timers.emplace_back(timerUsed, boost::asio::steady_timer(io));
     }
 
     pair->first.used = true;
     pair->first.level = threshold.level;
     pair->first.direction = threshold.direction;
     pair->first.assert = assert;
-    pair->second.expires_from_now(boost::posix_time::seconds(waitTime));
+    pair->second.expires_from_now(std::chrono::seconds(waitTime));
     pair->second.async_wait([weakSensor, pair, threshold, assert,
                              assertValue](boost::system::error_code ec) {
         auto sensorPtr = weakSensor.lock();
@@ -454,11 +437,6 @@ void assertThresholds(Sensor* sensor, double assertValue,
                       thresholds::Level level, thresholds::Direction direction,
                       bool assert)
 {
-    if (!isValidLevel(level))
-    {
-        return;
-    }
-
     std::shared_ptr<sdbusplus::asio::dbus_interface> interface =
         sensor->getThresholdInterface(level);
 
@@ -468,7 +446,7 @@ void assertThresholds(Sensor* sensor, double assertValue,
         return;
     }
 
-    std::string property = sensor->propertyAlarm(level, direction);
+    std::string property = Sensor::propertyAlarm(level, direction);
     if (property.empty())
     {
         std::cout << "Alarm property is empty \n";
@@ -479,14 +457,14 @@ void assertThresholds(Sensor* sensor, double assertValue,
         try
         {
             // msg.get_path() is interface->get_object_path()
-            sdbusplus::message::message msg =
+            sdbusplus::message_t msg =
                 interface->new_signal("ThresholdAsserted");
 
             msg.append(sensor->name, interface->get_interface_name(), property,
                        assert, assertValue);
             msg.signal_send();
         }
-        catch (const sdbusplus::exception::exception& e)
+        catch (const sdbusplus::exception_t& e)
         {
             std::cerr
                 << "Failed to send thresholdAsserted signal with assertValue\n";
@@ -527,7 +505,7 @@ bool parseThresholdsFromAttr(
         {
             for (const auto& t : map.at(item))
             {
-                auto& [suffix, level, direction, offset] = t;
+                const auto& [suffix, level, direction, offset] = t;
                 auto attrPath =
                     boost::replace_all_copy(inputPath, item, suffix);
                 if (auto val = readFile(attrPath, scaleFactor))

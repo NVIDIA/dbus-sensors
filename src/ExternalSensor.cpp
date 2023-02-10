@@ -4,8 +4,6 @@
 
 #include <unistd.h>
 
-#include <boost/algorithm/string/predicate.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
@@ -28,12 +26,11 @@ ExternalSensor::ExternalSensor(
     double minReading, double timeoutSecs, const PowerState& powerState) :
     Sensor(escapeName(sensorName), std::move(thresholdsIn), sensorConfiguration,
            objectType, true, true, maxReading, minReading, conn, powerState),
-    std::enable_shared_from_this<ExternalSensor>(), objServer(objectServer),
-    writeLast(std::chrono::steady_clock::now()),
+    objServer(objectServer), writeLast(std::chrono::steady_clock::now()),
     writeTimeout(
         std::chrono::duration_cast<std::chrono::steady_clock::duration>(
             std::chrono::duration<double>(timeoutSecs))),
-    writeAlive(false), writePerishable(timeoutSecs > 0.0)
+    writePerishable(timeoutSecs > 0.0)
 {
     // The caller must specify what physical characteristic
     // an external sensor is expected to be measuring, such as temperature,

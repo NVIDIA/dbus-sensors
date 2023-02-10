@@ -14,18 +14,16 @@
 // limitations under the License.
 */
 
-#include <NVMeBasicContext.hpp>
-#include <NVMeContext.hpp>
-#include <NVMeMCTPContext.hpp>
-#include <NVMeSensor.hpp>
-#include <boost/asio/deadline_timer.hpp>
+#include "NVMeBasicContext.hpp"
+#include "NVMeContext.hpp"
+#include "NVMeSensor.hpp"
+
+#include <boost/asio/steady_timer.hpp>
 
 #include <optional>
 #include <regex>
 
 static NVMEMap nvmeDeviceMap;
-
-static constexpr bool debug = false;
 
 NVMEMap& getNVMEMap()
 {
@@ -103,11 +101,7 @@ static std::shared_ptr<NVMeContext>
     }
 
     std::shared_ptr<NVMeContext> context =
-#if HAVE_NVME_MI_MCTP
-        std::make_shared<NVMeMCTPContext>(io, rootBus);
-#else
         std::make_shared<NVMeBasicContext>(io, rootBus);
-#endif
     map[rootBus] = context;
 
     return context;
@@ -132,35 +126,52 @@ static void handleSensorConfigurations(
     for (const auto& [interfacePath, sensorData] : sensorConfigurations)
     {
         // find base configuration
-        auto sensorBase = sensorData.find(NVMeSensor::configType);
-        if (sensorBase != sensorData.end())
+        auto sensorBase =
+            sensorData.find(configInterfaceName(NVMeSensor::sensorType));
+        if (sensorBase == sensorData.end())
         {
-            const SensorBaseConfigMap& sensorConfig = sensorBase->second;
-            std::optional<int> busNumber =
-                extractBusNumber(interfacePath, sensorConfig);
-            std::optional<std::string> sensorName =
-                extractSensorName(interfacePath, sensorConfig);
-            std::optional<int> rootBus = deriveRootBus(busNumber);
+            continue;
+        }
 
-            if (!(busNumber && sensorName && rootBus))
-            {
-                continue;
-            }
+        const SensorBaseConfigMap& sensorConfig = sensorBase->second;
+        std::optional<int> busNumber =
+            extractBusNumber(interfacePath, sensorConfig);
+        std::optional<std::string> sensorName =
+            extractSensorName(interfacePath, sensorConfig);
+        std::optional<int> rootBus = deriveRootBus(busNumber);
 
-            std::vector<thresholds::Threshold> sensorThresholds;
-            if (!parseThresholdsFromConfig(sensorData, sensorThresholds))
-            {
-                std::cerr << "error populating thresholds for " << *sensorName
-                          << "\n";
-            }
+        if (!(busNumber && sensorName && rootBus))
+        {
+            continue;
+        }
 
+        std::vector<thresholds::Threshold> sensorThresholds;
+        if (!parseThresholdsFromConfig(sensorData, sensorThresholds))
+        {
+            std::cerr << "error populating thresholds for " << *sensorName
+                      << "\n";
+        }
+
+        try
+        {
+            // May throw for an invalid rootBus
+            std::shared_ptr<NVMeContext> context =
+                provideRootBusContext(io, nvmeDeviceMap, *rootBus);
+
+            // Construct the sensor after grabbing the context so we don't
+            // glitch D-Bus May throw for an invalid busNumber
             std::shared_ptr<NVMeSensor> sensorPtr =
                 std::make_shared<NVMeSensor>(
                     objectServer, io, dbusConnection, *sensorName,
                     std::move(sensorThresholds), interfacePath, *busNumber);
 
-            provideRootBusContext(io, nvmeDeviceMap, *rootBus)
-                ->addSensor(sensorPtr);
+            context->addSensor(sensorPtr);
+        }
+        catch (const std::invalid_argument& ex)
+        {
+            std::cerr << "Failed to add sensor for "
+                      << std::string(interfacePath) << ": " << ex.what()
+                      << "\n";
         }
     }
     for (const auto& [_, context] : nvmeDeviceMap)
@@ -175,17 +186,15 @@ void createSensors(boost::asio::io_service& io,
 {
 
     auto getter = std::make_shared<GetSensorConfiguration>(
-        dbusConnection,
-        std::move([&io, &objectServer, &dbusConnection](
-                      const ManagedObjectType& sensorConfigurations) {
+        dbusConnection, [&io, &objectServer, &dbusConnection](
+                            const ManagedObjectType& sensorConfigurations) {
             handleSensorConfigurations(io, objectServer, dbusConnection,
                                        sensorConfigurations);
-        }));
-    getter->getConfiguration(std::vector<std::string>{NVMeSensor::configType});
+        });
+    getter->getConfiguration(std::vector<std::string>{NVMeSensor::sensorType});
 }
 
-static void interfaceRemoved(sdbusplus::message::message& message,
-                             NVMEMap& contexts)
+static void interfaceRemoved(sdbusplus::message_t& message, NVMEMap& contexts)
 {
     if (message.is_method_error())
     {
@@ -223,51 +232,46 @@ int main()
     boost::asio::io_service io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     systemBus->request_name("xyz.openbmc_project.NVMeSensor");
-    sdbusplus::asio::object_server objectServer(systemBus);
-#if HAVE_NVME_MI_MCTP
-    nvmeMCTP::init();
-#endif
+    sdbusplus::asio::object_server objectServer(systemBus, true);
+    objectServer.add_manager("/xyz/openbmc_project/sensors");
 
     io.post([&]() { createSensors(io, objectServer, systemBus); });
 
-    boost::asio::deadline_timer filterTimer(io);
-    std::function<void(sdbusplus::message::message&)> eventHandler =
-        [&filterTimer, &io, &objectServer,
-         &systemBus](sdbusplus::message::message&) {
-            // this implicitly cancels the timer
-            filterTimer.expires_from_now(boost::posix_time::seconds(1));
+    boost::asio::steady_timer filterTimer(io);
+    std::function<void(sdbusplus::message_t&)> eventHandler =
+        [&filterTimer, &io, &objectServer, &systemBus](sdbusplus::message_t&) {
+        // this implicitly cancels the timer
+        filterTimer.expires_from_now(std::chrono::seconds(1));
 
-            filterTimer.async_wait([&](const boost::system::error_code& ec) {
-                if (ec == boost::asio::error::operation_aborted)
-                {
-                    return; // we're being canceled
-                }
+        filterTimer.async_wait([&](const boost::system::error_code& ec) {
+            if (ec == boost::asio::error::operation_aborted)
+            {
+                return; // we're being canceled
+            }
 
-                if (ec)
-                {
-                    std::cerr << "Error: " << ec.message() << "\n";
-                    return;
-                }
+            if (ec)
+            {
+                std::cerr << "Error: " << ec.message() << "\n";
+                return;
+            }
 
-                createSensors(io, objectServer, systemBus);
-            });
-        };
+            createSensors(io, objectServer, systemBus);
+        });
+    };
 
-    sdbusplus::bus::match::match configMatch(
-        static_cast<sdbusplus::bus::bus&>(*systemBus),
-        "type='signal',member='PropertiesChanged',path_namespace='" +
-            std::string(inventoryPath) + "',arg0namespace='" +
-            std::string(NVMeSensor::configType) + "'",
-        eventHandler);
+    std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
+        setupPropertiesChangedMatches(
+            *systemBus, std::to_array<const char*>({NVMeSensor::sensorType}),
+            eventHandler);
 
     // Watch for entity-manager to remove configuration interfaces
     // so the corresponding sensors can be removed.
-    auto ifaceRemovedMatch = std::make_unique<sdbusplus::bus::match::match>(
-        static_cast<sdbusplus::bus::bus&>(*systemBus),
+    auto ifaceRemovedMatch = std::make_unique<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*systemBus),
         "type='signal',member='InterfacesRemoved',arg0path='" +
             std::string(inventoryPath) + "/'",
-        [](sdbusplus::message::message& msg) {
-            interfaceRemoved(msg, nvmeDeviceMap);
+        [](sdbusplus::message_t& msg) {
+        interfaceRemoved(msg, nvmeDeviceMap);
         });
 
     setupManufacturingModeMatch(*systemBus);

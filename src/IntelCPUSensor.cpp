@@ -14,17 +14,18 @@
 // limitations under the License.
 */
 
+#include "IntelCPUSensor.hpp"
+
+#include "Utils.hpp"
+
 #include <unistd.h>
 
-#include <CPUSensor.hpp>
-#include <Utils.hpp>
-#include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/asio/read_until.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <cstddef>
 #include <iostream>
 #include <istream>
 #include <limits>
@@ -33,21 +34,21 @@
 #include <string>
 #include <vector>
 
-CPUSensor::CPUSensor(const std::string& path, const std::string& objectType,
-                     sdbusplus::asio::object_server& objectServer,
-                     std::shared_ptr<sdbusplus::asio::connection>& conn,
-                     boost::asio::io_service& io, const std::string& sensorName,
-                     std::vector<thresholds::Threshold>&& thresholdsIn,
-                     const std::string& sensorConfiguration, int cpuId,
-                     bool show, double dtsOffset) :
+IntelCPUSensor::IntelCPUSensor(
+    const std::string& path, const std::string& objectType,
+    sdbusplus::asio::object_server& objectServer,
+    std::shared_ptr<sdbusplus::asio::connection>& conn,
+    boost::asio::io_service& io, const std::string& sensorName,
+    std::vector<thresholds::Threshold>&& thresholdsIn,
+    const std::string& sensorConfiguration, int cpuId, bool show,
+    double dtsOffset) :
     Sensor(escapeName(sensorName), std::move(thresholdsIn), sensorConfiguration,
            objectType, false, false, 0, 0, conn, PowerState::on),
-    std::enable_shared_from_this<CPUSensor>(), objServer(objectServer),
-    inputDev(io), waitTimer(io),
+    objServer(objectServer), inputDev(io), waitTimer(io),
     nameTcontrol("Tcontrol CPU" + std::to_string(cpuId)), path(path),
     privTcontrol(std::numeric_limits<double>::quiet_NaN()),
-    dtsOffset(dtsOffset), show(show), pollTime(CPUSensor::sensorPollMs),
-    minMaxReadCounter(0)
+    dtsOffset(dtsOffset), show(show), pollTime(IntelCPUSensor::sensorPollMs)
+
 {
     if (show)
     {
@@ -56,7 +57,7 @@ CPUSensor::CPUSensor(const std::string& path, const std::string& objectType,
             auto& [type, nr, item] = *fileParts;
             std::string interfacePath;
             const char* units = nullptr;
-            if (type.compare("power") == 0)
+            if (type == "power")
             {
                 interfacePath = "/xyz/openbmc_project/sensors/power/" + name;
                 units = sensor_paths::unitWatts;
@@ -92,7 +93,7 @@ CPUSensor::CPUSensor(const std::string& path, const std::string& objectType,
     setupPowerMatch(conn);
 }
 
-CPUSensor::~CPUSensor()
+IntelCPUSensor::~IntelCPUSensor()
 {
     // close the input dev to cancel async operations
     inputDev.close();
@@ -110,57 +111,62 @@ CPUSensor::~CPUSensor()
     }
 }
 
-void CPUSensor::setupRead(void)
+void IntelCPUSensor::restartRead(void)
 {
-    std::weak_ptr<CPUSensor> weakRef = weak_from_this();
-
-    if (readingStateGood())
-    {
-        inputDev.close();
-        int fd = open(path.c_str(), O_RDONLY);
-        if (fd >= 0)
-        {
-            inputDev.assign(fd);
-
-            boost::asio::async_read_until(
-                inputDev, readBuf, '\n',
-                [weakRef](const boost::system::error_code& ec,
-                          std::size_t /*bytes_transfered*/) {
-                    std::shared_ptr<CPUSensor> self = weakRef.lock();
-                    if (!self)
-                    {
-                        return;
-                    }
-                    self->handleResponse(ec);
-                });
-        }
-        else
-        {
-            std::cerr << name << " unable to open fd!\n";
-            pollTime = sensorFailedPollTimeMs;
-        }
-    }
-    else
-    {
-        pollTime = sensorFailedPollTimeMs;
-        markAvailable(false);
-    }
-    waitTimer.expires_from_now(boost::posix_time::milliseconds(pollTime));
+    std::weak_ptr<IntelCPUSensor> weakRef = weak_from_this();
+    waitTimer.expires_from_now(std::chrono::milliseconds(pollTime));
     waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
-            return; // we're being canceled
-        }
-        std::shared_ptr<CPUSensor> self = weakRef.lock();
-        if (!self)
-        {
+            std::cerr << "Failed to reschedule\n";
             return;
         }
-        self->setupRead();
+        std::shared_ptr<IntelCPUSensor> self = weakRef.lock();
+
+        if (self)
+        {
+            self->setupRead();
+        }
     });
 }
 
-void CPUSensor::updateMinMaxValues(void)
+void IntelCPUSensor::setupRead(void)
+{
+    if (readingStateGood())
+    {
+        inputDev.close();
+
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+        fd = open(path.c_str(), O_RDONLY | O_NONBLOCK);
+        if (fd < 0)
+        {
+            std::cerr << name << " unable to open fd!\n";
+            return;
+        }
+
+        inputDev.assign(fd);
+    }
+    else
+    {
+        markAvailable(false);
+        updateValue(std::numeric_limits<double>::quiet_NaN());
+        restartRead();
+        return;
+    }
+
+    std::weak_ptr<IntelCPUSensor> weakRef = weak_from_this();
+    inputDev.async_wait(boost::asio::posix::descriptor_base::wait_read,
+                        [weakRef](const boost::system::error_code& ec) {
+        std::shared_ptr<IntelCPUSensor> self = weakRef.lock();
+
+        if (self)
+        {
+            self->handleResponse(ec);
+        }
+    });
+}
+
+void IntelCPUSensor::updateMinMaxValues(void)
 {
     const boost::container::flat_map<
         std::string,
@@ -184,10 +190,10 @@ void CPUSensor::updateMinMaxValues(void)
         {
             for (const auto& vectorItem : mapIt->second)
             {
-                auto& [suffix, oldValue, dbusName] = vectorItem;
+                const auto& [suffix, oldValue, dbusName] = vectorItem;
                 auto attrPath = boost::replace_all_copy(path, fileItem, suffix);
                 if (auto newVal =
-                        readFile(attrPath, CPUSensor::sensorScaleFactor))
+                        readFile(attrPath, IntelCPUSensor::sensorScaleFactor))
                 {
                     updateProperty(sensorInterface, oldValue, *newVal,
                                    dbusName);
@@ -210,10 +216,10 @@ void CPUSensor::updateMinMaxValues(void)
     }
 }
 
-void CPUSensor::handleResponse(const boost::system::error_code& err)
+void IntelCPUSensor::handleResponse(const boost::system::error_code& err)
 {
-
-    if (err == boost::system::errc::bad_file_descriptor)
+    if ((err == boost::system::errc::bad_file_descriptor) ||
+        (err == boost::asio::error::misc_errors::not_found))
     {
         return; // we're being destroyed
     }
@@ -226,23 +232,37 @@ void CPUSensor::handleResponse(const boost::system::error_code& err)
                 std::cerr << name << " interface down!\n";
                 loggedInterfaceDown = true;
             }
-            pollTime = CPUSensor::sensorPollMs * 10u;
+            pollTime = static_cast<size_t>(IntelCPUSensor::sensorPollMs) * 10U;
             markFunctional(false);
         }
         return;
     }
     loggedInterfaceDown = false;
-    pollTime = CPUSensor::sensorPollMs;
-    std::istream responseStream(&readBuf);
-    if (!err)
+
+    if (err)
     {
-        std::string response;
+        pollTime = sensorFailedPollTimeMs;
+        incrementError();
+        return;
+    }
+
+    static constexpr uint32_t bufLen = 128;
+    std::string response;
+    response.resize(bufLen);
+    int rdLen = 0;
+
+    if (fd >= 0)
+    {
+        rdLen = pread(fd, response.data(), bufLen, 0);
+    }
+
+    if (rdLen > 0)
+    {
+
         try
         {
-            std::getline(responseStream, response);
             rawValue = std::stod(response);
-            responseStream.clear();
-            double nvalue = rawValue / CPUSensor::sensorScaleFactor;
+            double nvalue = rawValue / IntelCPUSensor::sensorScaleFactor;
 
             if (show)
             {
@@ -267,9 +287,9 @@ void CPUSensor::handleResponse(const boost::system::error_code& err)
                 if (!thresholds.empty())
                 {
                     std::vector<thresholds::Threshold> newThresholds;
-                    if (parseThresholdsFromAttr(newThresholds, path,
-                                                CPUSensor::sensorScaleFactor,
-                                                dtsOffset))
+                    if (parseThresholdsFromAttr(
+                            newThresholds, path,
+                            IntelCPUSensor::sensorScaleFactor, dtsOffset))
                     {
                         if (!std::equal(thresholds.begin(), thresholds.end(),
                                         newThresholds.begin(),
@@ -300,11 +320,10 @@ void CPUSensor::handleResponse(const boost::system::error_code& err)
         pollTime = sensorFailedPollTimeMs;
         incrementError();
     }
-
-    responseStream.clear();
+    restartRead();
 }
 
-void CPUSensor::checkThresholds(void)
+void IntelCPUSensor::checkThresholds(void)
 {
     if (show)
     {

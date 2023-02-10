@@ -1,10 +1,13 @@
 #pragma once
+
 #include "dbus-sensor_config.h"
 
-#include <SensorPaths.hpp>
-#include <Thresholds.hpp>
-#include <Utils.hpp>
+#include "SensorPaths.hpp"
+#include "Thresholds.hpp"
+#include "Utils.hpp"
+
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/exception.hpp>
 
 #include <limits>
 #include <memory>
@@ -37,6 +40,22 @@ struct SensorInstrumentation
     double maxCollected = 0.0;
 };
 
+struct SetSensorError : sdbusplus::exception_t
+{
+    const char* name() const noexcept override
+    {
+        return "xyz.openbmc_project.Common.Errors.NotAllowed";
+    }
+    const char* description() const noexcept override
+    {
+        return "Not allowed to set property value.";
+    }
+    int get_errno() const noexcept override
+    {
+        return EACCES;
+    }
+};
+
 struct Sensor
 {
     Sensor(const std::string& name,
@@ -46,12 +65,13 @@ struct Sensor
            std::shared_ptr<sdbusplus::asio::connection>& conn,
            PowerState readState = PowerState::always) :
         name(sensor_paths::escapePathForDbus(name)),
-        configurationPath(configurationPath), objectType(objectType),
+        configurationPath(configurationPath),
+        objectType(configInterfaceName(objectType)),
         isSensorSettable(isSettable), isValueMutable(isMutable), maxValue(max),
         minValue(min), thresholds(std::move(thresholdData)),
         hysteresisTrigger((max - min) * 0.01),
         hysteresisPublish((max - min) * 0.0001), dbusConnection(conn),
-        readState(readState), errCount(0),
+        readState(readState),
         instrumentation(enableInstrumentation
                             ? std::make_unique<SensorInstrumentation>()
                             : nullptr)
@@ -85,7 +105,7 @@ struct Sensor
     double hysteresisPublish;
     std::shared_ptr<sdbusplus::asio::connection> dbusConnection;
     PowerState readState;
-    size_t errCount;
+    size_t errCount{0};
     std::unique_ptr<SensorInstrumentation> instrumentation;
 
     // This member variable provides a hook that can be used to receive
@@ -115,7 +135,7 @@ struct Sensor
         return interface;
     }
 
-    void updateInstrumentation(double readValue)
+    void updateInstrumentation(double readValue) const
     {
         // Do nothing if this feature is not enabled
         if constexpr (!enableInstrumentation)
@@ -205,17 +225,10 @@ struct Sensor
     {
         if (!internalSet)
         {
-            if (insecureSensorOverride == 0)
-            { // insecure sesnor override.
-                if (isSensorSettable == false)
-                { // sensor is not settable.
-                    if (getManufacturingMode() == false)
-                    { // manufacture mode is not enable.
-                        std::cerr << "Sensor " << name
-                                  << ": Not allowed to set property value.\n";
-                        return -EACCES;
-                    }
-                }
+            if (insecureSensorOverride == 0 && !isSensorSettable &&
+                !getManufacturingMode())
+            {
+                throw SetSensorError();
             }
 
             oldValue = newValue;
@@ -241,7 +254,8 @@ struct Sensor
                               const std::string& label = std::string(),
                               size_t thresholdSize = 0)
     {
-        if (readState == PowerState::on || readState == PowerState::biosPost)
+        if (readState == PowerState::on || readState == PowerState::biosPost ||
+            readState == PowerState::chassisOn)
         {
             setupPowerMatch(dbusConnection);
         }
@@ -252,19 +266,19 @@ struct Sensor
         sensorInterface->register_property("MaxValue", maxValue);
         sensorInterface->register_property("MinValue", minValue);
         sensorInterface->register_property(
-            "Value", value, [&](const double& newValue, double& oldValue) {
+            "Value", value, [this](const double& newValue, double& oldValue) {
                 return setSensorValue(newValue, oldValue);
             });
+
+        fillMissingThresholds();
+
         for (auto& threshold : thresholds)
         {
             if (std::isnan(threshold.hysteresis))
             {
                 threshold.hysteresis = hysteresisTrigger;
             }
-            if (!thresholds::isValidLevel(threshold.level))
-            {
-                continue;
-            }
+
             std::shared_ptr<sdbusplus::asio::dbus_interface> iface =
                 getThresholdInterface(threshold.level);
 
@@ -288,21 +302,21 @@ struct Sensor
             iface->register_property(
                 level, threshold.value,
                 [&, label, thresSize](const double& request, double& oldValue) {
-                    oldValue = request; // todo, just let the config do this?
-                    threshold.value = request;
-                    thresholds::persistThreshold(configurationPath, objectType,
-                                                 threshold, dbusConnection,
-                                                 thresSize, label);
-                    // Invalidate previously remembered value,
-                    // so new thresholds will be checked during next update,
-                    // even if sensor reading remains unchanged.
-                    value = std::numeric_limits<double>::quiet_NaN();
+                oldValue = request; // todo, just let the config do this?
+                threshold.value = request;
+                thresholds::persistThreshold(configurationPath, objectType,
+                                             threshold, dbusConnection,
+                                             thresSize, label);
+                // Invalidate previously remembered value,
+                // so new thresholds will be checked during next update,
+                // even if sensor reading remains unchanged.
+                value = std::numeric_limits<double>::quiet_NaN();
 
-                    // Although tempting, don't call checkThresholds() from here
-                    // directly. Let the regular sensor monitor call the same
-                    // using updateValue(), which can check conditions like
-                    // poweron, etc., before raising any event.
-                    return 1;
+                // Although tempting, don't call checkThresholds() from here
+                // directly. Let the regular sensor monitor call the same
+                // using updateValue(), which can check conditions like
+                // poweron, etc., before raising any event.
+                return 1;
                 });
             iface->register_property(alarm, false);
         }
@@ -369,7 +383,7 @@ struct Sensor
         }
     }
 
-    std::string propertyLevel(const Level lev, const Direction dir)
+    static std::string propertyLevel(const Level lev, const Direction dir)
     {
         for (const thresholds::ThresholdDefinition& prop :
              thresholds::thresProp)
@@ -389,7 +403,7 @@ struct Sensor
         return "";
     }
 
-    std::string propertyAlarm(const Level lev, const Direction dir)
+    static std::string propertyAlarm(const Level lev, const Direction dir)
     {
         for (const thresholds::ThresholdDefinition& prop :
              thresholds::thresProp)
@@ -409,19 +423,9 @@ struct Sensor
         return "";
     }
 
-    bool readingStateGood()
+    bool readingStateGood() const
     {
-        if (readState == PowerState::on && !isPowerOn())
-        {
-            return false;
-        }
-        if (readState == PowerState::biosPost &&
-            (!hasBiosPost() || !isPowerOn()))
-        {
-            return false;
-        }
-
-        return true;
+        return ::readingStateGood(readState);
     }
 
     void markFunctional(bool isFunctional)
@@ -470,6 +474,11 @@ struct Sensor
         }
     }
 
+    bool inError() const
+    {
+        return errCount >= errorThreshold;
+    }
+
     void updateValue(const double& newValue)
     {
         // Ignore if overriding is enabled
@@ -503,7 +512,8 @@ struct Sensor
 
     void updateProperty(
         std::shared_ptr<sdbusplus::asio::dbus_interface>& interface,
-        double& oldValue, const double& newValue, const char* dbusPropertyName)
+        double& oldValue, const double& newValue,
+        const char* dbusPropertyName) const
     {
         if (requiresUpdate(oldValue, newValue))
         {
@@ -517,21 +527,53 @@ struct Sensor
         }
     }
 
-    bool requiresUpdate(const double& lVal, const double& rVal)
+    bool requiresUpdate(const double& lVal, const double& rVal) const
     {
-        if (std::isnan(lVal) || std::isnan(rVal))
+        const auto lNan = std::isnan(lVal);
+        const auto rNan = std::isnan(rVal);
+        if (lNan || rNan)
         {
-            return true;
+            return (lNan != rNan);
         }
-        double diff = std::abs(lVal - rVal);
-        if (diff > hysteresisPublish)
-        {
-            return true;
-        }
-        return false;
+        return std::abs(lVal - rVal) > hysteresisPublish;
     }
 
   private:
+    // If one of the thresholds for a dbus interface is provided
+    // we have to set the other one as dbus properties are never
+    // optional.
+    void fillMissingThresholds()
+    {
+        for (thresholds::Threshold& thisThreshold : thresholds)
+        {
+            bool foundOpposite = false;
+            thresholds::Direction opposite = thresholds::Direction::HIGH;
+            if (thisThreshold.direction == thresholds::Direction::HIGH)
+            {
+                opposite = thresholds::Direction::LOW;
+            }
+            for (thresholds::Threshold& otherThreshold : thresholds)
+            {
+                if (thisThreshold.level != otherThreshold.level)
+                {
+                    continue;
+                }
+                if (otherThreshold.direction != opposite)
+                {
+                    continue;
+                }
+                foundOpposite = true;
+                break;
+            }
+            if (foundOpposite)
+            {
+                continue;
+            }
+            thresholds.emplace_back(thisThreshold.level, opposite,
+                                    std::numeric_limits<double>::quiet_NaN());
+        }
+    }
+
     void updateValueProperty(const double& newValue)
     {
         // Indicate that it is internal set call, not an external overwrite

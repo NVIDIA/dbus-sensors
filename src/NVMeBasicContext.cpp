@@ -4,6 +4,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <FileHandle.hpp>
 #include <boost/asio/read.hpp>
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/write.hpp>
@@ -14,7 +15,6 @@
 #include <cstdio>
 #include <cstring>
 #include <system_error>
-#include <thread>
 
 extern "C"
 {
@@ -58,40 +58,30 @@ static void decodeBasicQuery(const std::array<uint8_t, 6>& req, int& bus,
     offset = req[sizeof(busle) + 1];
 }
 
-static ssize_t execBasicQuery(int bus, uint8_t addr, uint8_t cmd,
-                              std::vector<uint8_t>& resp)
+static void execBasicQuery(int bus, uint8_t addr, uint8_t cmd,
+                           std::vector<uint8_t>& resp)
 {
-    std::array<char, PATH_MAX> devpath{};
     int32_t size = 0;
+    std::filesystem::path devpath = "/dev/i2c-" + std::to_string(bus);
 
-    ssize_t rc =
-        snprintf(devpath.data(), devpath.size(), "/dev/i2c-%" PRIu32, bus);
-    if ((size_t)rc > sizeof(devpath))
+    try
     {
-        std::cerr << "Failed to format device path for bus " << bus << "\n";
-        return -EINVAL;
-    }
+        FileHandle fileHandle(devpath);
 
-    int dev = ::open(devpath.data(), O_RDWR);
-    if (dev == -1)
-    {
-        std::cerr << "Failed to open bus device " << devpath.data() << ": "
-                  << strerror(errno) << "\n";
-        return -errno;
-    }
+        /* Select the target device */
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+        if (::ioctl(fileHandle.handle(), I2C_SLAVE, addr) == -1)
+        {
+            std::cerr << "Failed to configure device address 0x" << std::hex
+                      << (int)addr << " for bus " << std::dec << bus << ": "
+                      << strerror(errno) << "\n";
+            resp.resize(0);
+            return;
+        }
 
-    /* Select the target device */
-    if (::ioctl(dev, I2C_SLAVE, addr) == -1)
-    {
-        rc = -errno;
-        std::cerr << "Failed to configure device address 0x" << std::hex
-                  << (int)addr << " for bus " << std::dec << bus << ": "
-                  << strerror(errno) << "\n";
-        goto cleanup_fds;
-    }
+        resp.resize(UINT8_MAX + 1);
 
-    resp.reserve(UINT8_MAX + 1);
-
+<<<<<<< HEAD
     /* Issue the NVMe MI basic command */
     size = i2c_smbus_read_block_data(dev, cmd, resp.data());
     if (size < 0)
@@ -111,22 +101,56 @@ static ssize_t execBasicQuery(int bus, uint8_t addr, uint8_t cmd,
                   << (int)addr << " on bus " << std::dec << bus << ": " << size
                   << " (" << UINT8_MAX << ")\n";
         goto cleanup_fds;
-    }
-
-    rc = size;
-
-cleanup_fds:
-    if (::close(dev) == -1)
+||||||| 51ad667
+    /* Issue the NVMe MI basic command */
+    size = i2c_smbus_read_block_data(dev, cmd, resp.data());
+    if (size < 0)
     {
-        std::cerr << "Failed to close device descriptor " << std::dec << dev
-                  << " for bus " << std::dec << bus << ": " << strerror(errno)
-                  << "\n";
+        rc = size;
+        std::cerr << "Failed to read block data from device 0x" << std::hex
+                  << (int)addr << " on bus " << std::dec << bus << ": "
+                  << strerror(errno) << "\n";
+        goto cleanup_fds;
     }
-
-    return rc;
+    else if (size > UINT8_MAX + 1)
+    {
+        rc = -EBADMSG;
+        std::cerr << "Unexpected message length from device 0x" << std::hex
+                  << (int)addr << " on bus " << std::dec << bus << ": " << size
+                  << " (" << UINT8_MAX << ")\n";
+        goto cleanup_fds;
+=======
+        /* Issue the NVMe MI basic command */
+        size = i2c_smbus_read_block_data(fileHandle.handle(), cmd, resp.data());
+        if (size < 0)
+        {
+            std::cerr << "Failed to read block data from device 0x" << std::hex
+                      << (int)addr << " on bus " << std::dec << bus << ": "
+                      << strerror(errno) << "\n";
+            resp.resize(0);
+        }
+        else if (size > UINT8_MAX + 1)
+        {
+            std::cerr << "Unexpected message length from device 0x" << std::hex
+                      << (int)addr << " on bus " << std::dec << bus << ": "
+                      << size << " (" << UINT8_MAX << ")\n";
+            resp.resize(0);
+        }
+        else
+        {
+            resp.resize(size);
+        }
+>>>>>>> origin/master
+    }
+    catch (const std::out_of_range& e)
+    {
+        std::cerr << "Failed to create file handle for bus " << std::dec << bus
+                  << ": " << e.what() << "\n";
+        resp.resize(0);
+    }
 }
 
-static ssize_t processBasicQueryStream(int in, int out)
+static ssize_t processBasicQueryStream(FileHandle& in, FileHandle& out)
 {
     std::vector<uint8_t> resp{};
     ssize_t rc = 0;
@@ -142,81 +166,58 @@ static ssize_t processBasicQueryStream(int in, int out)
         std::array<uint8_t, sizeof(uint32_t) + 1 + 1> req{};
 
         /* Read the command parameters */
-        if ((rc = ::read(in, req.data(), req.size())) !=
-            static_cast<ssize_t>(req.size()))
+        ssize_t rc = ::read(in.handle(), req.data(), req.size());
+        if (rc != static_cast<ssize_t>(req.size()))
         {
-            assert(rc < 1);
-            rc = rc ? -errno : -EIO;
-            if (errno)
+            std::cerr << "Failed to read request from in descriptor "
+                      << strerror(errno) << "\n";
+            if (rc != 0)
             {
-                std::cerr << "Failed to read request from in descriptor ("
-                          << std::dec << in << "): " << strerror(errno) << "\n";
+                return -errno;
             }
-            goto done;
+            return -EIO;
         }
 
         decodeBasicQuery(req, bus, device, offset);
 
         /* Execute the query */
-        rc = execBasicQuery(bus, device, offset, resp);
-
-        /* Bounds check the response */
-        if (rc < 0)
-        {
-            len = 0;
-        }
-        else if (rc > UINT8_MAX)
-        {
-            assert(rc == UINT8_MAX + 1);
-
-            /* YOLO: Lop off the PEC */
-            len = UINT8_MAX;
-        }
-        else
-        {
-            len = rc;
-        }
+        execBasicQuery(bus, device, offset, resp);
 
         /* Write out the response length */
-        if ((rc = ::write(out, &len, sizeof(len))) != sizeof(len))
+        len = resp.size();
+        rc = ::write(out.handle(), &len, sizeof(len));
+        if (rc != sizeof(len))
         {
-            assert(rc < 1);
-            rc = rc ? -errno : -EIO;
             std::cerr << "Failed to write block (" << std::dec << len
-                      << ") length to out descriptor (" << std::dec << out
-                      << "): " << strerror(-rc) << "\n";
-            goto done;
+                      << ") length to out descriptor: "
+                      << strerror(static_cast<int>(-rc)) << "\n";
+            if (rc != 0)
+            {
+                return -errno;
+            }
+            return -EIO;
         }
 
         /* Write out the response data */
-        uint8_t* cursor = resp.data();
-        while (len > 0)
+        std::vector<uint8_t>::iterator cursor = resp.begin();
+        while (cursor != resp.end())
         {
-            ssize_t egress = ::write(out, cursor, len);
+            size_t lenRemaining = std::distance(cursor, resp.end());
+            ssize_t egress = ::write(out.handle(), &(*cursor), lenRemaining);
             if (egress == -1)
             {
-                rc = -errno;
                 std::cerr << "Failed to write block data of length " << std::dec
-                          << len << " to out pipe: " << strerror(errno) << "\n";
-                goto done;
+                          << lenRemaining << " to out pipe: " << strerror(errno)
+                          << "\n";
+                if (rc != 0)
+                {
+                    return -errno;
+                }
+                return -EIO;
             }
 
             cursor += egress;
-            len -= egress;
         }
-    }
-
-done:
-    if (::close(in) == -1)
-    {
-        std::cerr << "Failed to close in descriptor " << std::dec << in << ": "
-                  << strerror(errno) << "\n";
-    }
-
-    if (::close(out) == -1)
-    {
-        std::cerr << "Failed to close out descriptor " << std::dec << in << ": "
-                  << strerror(errno) << "\n";
     }
 
     return rc;
@@ -259,11 +260,12 @@ NVMeBasicContext::NVMeBasicContext(boost::asio::io_service& io, int rootBus) :
     }
 
     reqStream.assign(requestPipe[1]);
-    int streamIn = requestPipe[0];
-    int streamOut = responsePipe[1];
+    FileHandle streamIn(requestPipe[0]);
+    FileHandle streamOut(responsePipe[1]);
     respStream.assign(responsePipe[0]);
 
-    std::thread thread([streamIn, streamOut]() {
+    thread = std::jthread([streamIn{std::move(streamIn)},
+                           streamOut{std::move(streamOut)}]() mutable {
         ssize_t rc = 0;
 
         if ((rc = processBasicQueryStream(streamIn, streamOut)) < 0)
@@ -272,51 +274,44 @@ NVMeBasicContext::NVMeBasicContext(boost::asio::io_service& io, int rootBus) :
                       << strerror(static_cast<int>(-rc)) << "\n";
         }
 
-        if (::close(streamIn) == -1)
-        {
-            std::cerr << "Failed to close streamIn descriptor: "
-                      << strerror(errno) << "\n";
-        }
-
-        if (::close(streamOut) == -1)
-        {
-            std::cerr << "Failed to close streamOut descriptor: "
-                      << strerror(errno) << "\n";
-        }
-
         std::cerr << "Terminating basic query thread\n";
     });
-    thread.detach();
 }
 
 void NVMeBasicContext::readAndProcessNVMeSensor()
 {
-    auto response = std::make_shared<boost::asio::streambuf>();
-
-    if (sensors.empty())
+    if (pollCursor == sensors.end())
     {
+        this->pollNVMeDevices();
         return;
     }
 
+<<<<<<< HEAD
     std::shared_ptr<NVMeSensor> sensor = sensors.front();
+||||||| 51ad667
+    std::shared_ptr<NVMeSensor>& sensor = sensors.front();
+=======
+    std::shared_ptr<NVMeSensor> sensor = *pollCursor++;
+>>>>>>> origin/master
 
     if (!sensor->readingStateGood())
     {
         sensor->markAvailable(false);
         sensor->updateValue(std::numeric_limits<double>::quiet_NaN());
+<<<<<<< HEAD
         sensors.pop_front();
         sensors.emplace_back(sensor);
+||||||| 51ad667
+=======
+        readAndProcessNVMeSensor();
+>>>>>>> origin/master
         return;
     }
 
-    /* Ensure sensor query parameters are sensible */
-    if (sensor->bus < 0)
+    /* Potentially defer sampling the sensor sensor if it is in error */
+    if (!sensor->sample())
     {
-        std::cerr << "Bus index cannot be negative: " << sensor->bus << "\n";
-
-        sensors.pop_front();
-        sensors.emplace_back(sensor);
-
+        readAndProcessNVMeSensor();
         return;
     }
 
@@ -325,103 +320,109 @@ void NVMeBasicContext::readAndProcessNVMeSensor()
     /* Issue the request */
     boost::asio::async_write(
         reqStream, boost::asio::buffer(command->data(), command->size()),
-        [&command](boost::system::error_code ec, std::size_t) {
-            if (ec)
-            {
-                std::cerr << "Got error writing basic query: " << ec << "\n";
-            }
+        [command](boost::system::error_code ec, std::size_t) {
+        if (ec)
+        {
+            std::cerr << "Got error writing basic query: " << ec << "\n";
+        }
         });
 
+    auto response = std::make_shared<boost::asio::streambuf>();
     response->prepare(1);
 
     /* Gather the response and dispatch for parsing */
     boost::asio::async_read(
         respStream, *response,
         [response](const boost::system::error_code& ec, std::size_t n) {
-            if (ec)
-            {
-                std::cerr << "Got error completing basic query: " << ec << "\n";
-                return static_cast<std::size_t>(0);
-            }
+        if (ec)
+        {
+            std::cerr << "Got error completing basic query: " << ec << "\n";
+            return static_cast<std::size_t>(0);
+        }
 
-            if (n == 0)
-            {
-                return static_cast<std::size_t>(1);
-            }
+        if (n == 0)
+        {
+            return static_cast<std::size_t>(1);
+        }
 
-            std::istream is(response.get());
-            size_t len = static_cast<std::size_t>(is.peek());
+        std::istream is(response.get());
+        size_t len = static_cast<std::size_t>(is.peek());
 
-            if (n > len + 1)
-            {
-                std::cerr << "Query stream has become unsynchronised: "
-                          << "n: " << n << ", "
-                          << "len: " << len << "\n";
-                return static_cast<std::size_t>(0);
-            }
+        if (n > len + 1)
+        {
+            std::cerr << "Query stream has become unsynchronised: "
+                      << "n: " << n << ", "
+                      << "len: " << len << "\n";
+            return static_cast<std::size_t>(0);
+        }
 
-            if (n == len + 1)
-            {
-                return static_cast<std::size_t>(0);
-            }
+        if (n == len + 1)
+        {
+            return static_cast<std::size_t>(0);
+        }
 
-            if (n > 1)
-            {
-                return len + 1 - n;
-            }
+        if (n > 1)
+        {
+            return len + 1 - n;
+        }
 
-            response->prepare(len);
-            return len;
+        response->prepare(len);
+        return len;
         },
-        [self{shared_from_this()},
-         response](const boost::system::error_code& ec, std::size_t length) {
-            if (ec)
-            {
-                std::cerr << "Got error reading basic query: " << ec << "\n";
-                return;
-            }
+        [weakSelf{weak_from_this()}, sensor, response](
+            const boost::system::error_code& ec, std::size_t length) mutable {
+        if (ec)
+        {
+            std::cerr << "Got error reading basic query: " << ec << "\n";
+            return;
+        }
 
-            if (length == 0)
-            {
-                std::cerr << "Invalid message length: " << length << "\n";
-                return;
-            }
+        if (length == 0)
+        {
+            std::cerr << "Invalid message length: " << length << "\n";
+            return;
+        }
 
-            if (length == 1)
-            {
-                std::cerr << "Basic query failed\n";
-                return;
-            }
-
+        if (auto self = weakSelf.lock())
+        {
             /* Deserialise the response */
             response->consume(1); /* Drop the length byte */
             std::istream is(response.get());
             std::vector<char> data(response->size());
             is.read(data.data(), response->size());
 
-            self->processResponse(data.data(), data.size());
-        });
+            /* Update the sensor */
+            self->processResponse(sensor, data.data(), data.size());
+
+            /* Enqueue processing of the next sensor */
+            self->readAndProcessNVMeSensor();
+        }
+    });
 }
 
 void NVMeBasicContext::pollNVMeDevices()
 {
-    scanTimer.expires_from_now(boost::posix_time::seconds(1));
-    scanTimer.async_wait(
-        [self{shared_from_this()}](const boost::system::error_code errorCode) {
-            if (errorCode == boost::asio::error::operation_aborted)
-            {
-                return;
-            }
+    pollCursor = sensors.begin();
 
-            if (errorCode)
-            {
-                std::cerr << errorCode.message() << "\n";
-                return;
-            }
+    scanTimer.expires_from_now(std::chrono::seconds(1));
+    scanTimer.async_wait([weakSelf{weak_from_this()}](
+                             const boost::system::error_code errorCode) {
+        if (errorCode == boost::asio::error::operation_aborted)
+        {
+            return;
+        }
 
+        if (errorCode)
+        {
+            std::cerr << errorCode.message() << "\n";
+            return;
+        }
+
+        if (auto self = weakSelf.lock())
+        {
             self->readAndProcessNVMeSensor();
-            self->pollNVMeDevices();
-        });
+        }
+    });
 }
 
 static double getTemperatureReading(int8_t reading)
@@ -437,35 +438,31 @@ static double getTemperatureReading(int8_t reading)
     return reading;
 }
 
-void NVMeBasicContext::processResponse(void* msg, size_t len)
+void NVMeBasicContext::processResponse(std::shared_ptr<NVMeSensor>& sensor,
+                                       void* msg, size_t len)
 {
-    if (msg == nullptr)
+    if (msg == nullptr || len < 6)
     {
-        std::cerr << "Bad message received\n";
-        return;
-    }
-
-    if (len < 6)
-    {
-        std::cerr << "Invalid message length: " << len << "\n";
+        sensor->incrementError();
         return;
     }
 
     uint8_t* messageData = static_cast<uint8_t*>(msg);
 
-    std::shared_ptr<NVMeSensor> sensor = sensors.front();
+    uint8_t status = messageData[0];
+    if (((status & NVME_MI_BASIC_SFLGS_DRIVE_NOT_READY) != 0) ||
+        ((status & NVME_MI_BASIC_SFLGS_DRIVE_FUNCTIONAL) == 0))
+    {
+        sensor->markFunctional(false);
+        return;
+    }
+
     double value = getTemperatureReading(messageData[2]);
-
-    if (std::isfinite(value))
+    if (!std::isfinite(value))
     {
-        sensor->updateValue(value);
-    }
-    else
-    {
-        sensor->markAvailable(false);
         sensor->incrementError();
+        return;
     }
 
-    sensors.pop_front();
-    sensors.emplace_back(sensor);
+    sensor->updateValue(value);
 }

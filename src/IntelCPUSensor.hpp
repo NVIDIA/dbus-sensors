@@ -1,7 +1,8 @@
 #pragma once
 
-#include <Thresholds.hpp>
-#include <Utils.hpp>
+#include "Thresholds.hpp"
+#include "Utils.hpp"
+
 #include <boost/asio/streambuf.hpp>
 #include <boost/container/flat_map.hpp>
 #include <gpiod.hpp>
@@ -16,17 +17,19 @@
 #include <variant>
 #include <vector>
 
-class CPUSensor : public Sensor, public std::enable_shared_from_this<CPUSensor>
+class IntelCPUSensor :
+    public Sensor,
+    public std::enable_shared_from_this<IntelCPUSensor>
 {
   public:
-    CPUSensor(const std::string& path, const std::string& objectType,
-              sdbusplus::asio::object_server& objectServer,
-              std::shared_ptr<sdbusplus::asio::connection>& conn,
-              boost::asio::io_service& io, const std::string& sensorName,
-              std::vector<thresholds::Threshold>&& thresholds,
-              const std::string& configuration, int cpuId, bool show,
-              double dtsOffset);
-    ~CPUSensor() override;
+    IntelCPUSensor(const std::string& path, const std::string& objectType,
+                   sdbusplus::asio::object_server& objectServer,
+                   std::shared_ptr<sdbusplus::asio::connection>& conn,
+                   boost::asio::io_service& io, const std::string& sensorName,
+                   std::vector<thresholds::Threshold>&& thresholds,
+                   const std::string& configuration, int cpuId, bool show,
+                   double dtsOffset);
+    ~IntelCPUSensor() override;
     static constexpr unsigned int sensorScaleFactor = 1000;
     static constexpr unsigned int sensorPollMs = 1000;
     static constexpr size_t warnAfterErrorCount = 10;
@@ -37,7 +40,7 @@ class CPUSensor : public Sensor, public std::enable_shared_from_this<CPUSensor>
     sdbusplus::asio::object_server& objServer;
     boost::asio::streambuf readBuf;
     boost::asio::posix::stream_descriptor inputDev;
-    boost::asio::deadline_timer waitTimer;
+    boost::asio::steady_timer waitTimer;
     std::string nameTcontrol;
     std::string path;
     double privTcontrol;
@@ -45,19 +48,20 @@ class CPUSensor : public Sensor, public std::enable_shared_from_this<CPUSensor>
     bool show;
     size_t pollTime;
     bool loggedInterfaceDown = false;
-    uint8_t minMaxReadCounter;
+    uint8_t minMaxReadCounter{0};
+    int fd{};
     void handleResponse(const boost::system::error_code& err);
     void checkThresholds(void) override;
     void updateMinMaxValues(void);
+    void restartRead(void);
 };
 
-extern boost::container::flat_map<std::string, std::shared_ptr<CPUSensor>>
+extern boost::container::flat_map<std::string, std::shared_ptr<IntelCPUSensor>>
     gCpuSensors;
 
-// this is added to cpusensor.hpp to avoid having every sensor have to link
+// this is added to intelcpusensor.hpp to avoid having every sensor have to link
 // against libgpiod, if another sensor needs it we may move it to utils
-inline bool cpuIsPresent(
-    const boost::container::flat_map<std::string, BasicVariantType>& gpioConfig)
+inline bool cpuIsPresent(const SensorBaseConfigMap& gpioConfig)
 {
     static boost::container::flat_map<std::string, bool> cpuPresence;
 
@@ -98,7 +102,7 @@ inline bool cpuIsPresent(
     {
         line.request({"cpusensor", gpiod::line_request::DIRECTION_INPUT,
                       activeHigh ? 0 : gpiod::line_request::FLAG_ACTIVE_LOW});
-        resp = line.get_value();
+        resp = (line.get_value() != 0);
     }
     catch (const std::system_error&)
     {

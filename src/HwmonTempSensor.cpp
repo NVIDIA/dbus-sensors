@@ -14,20 +14,21 @@
 // limitations under the License.
 */
 
+#include "HwmonTempSensor.hpp"
+
 #include <unistd.h>
 
-#include <HwmonTempSensor.hpp>
-#include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/read_until.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <charconv>
 #include <iostream>
 #include <istream>
 #include <limits>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Temperatures are read in milli degrees Celsius, we need degrees Celsius.
@@ -46,14 +47,15 @@ HwmonTempSensor::HwmonTempSensor(
     boost::asio::io_service& io, const std::string& sensorName,
     std::vector<thresholds::Threshold>&& thresholdsIn,
     const struct SensorParams& thisSensorParameters, const float pollRate,
-    const std::string& sensorConfiguration, const PowerState powerState) :
+    const std::string& sensorConfiguration, const PowerState powerState,
+    const std::shared_ptr<I2CDevice>& i2cDevice) :
     Sensor(boost::replace_all_copy(sensorName, " ", "_"),
            std::move(thresholdsIn), sensorConfiguration, objectType, false,
            false, thisSensorParameters.maxValue, thisSensorParameters.minValue,
            conn, powerState),
-    std::enable_shared_from_this<HwmonTempSensor>(), objServer(objectServer),
-    inputDev(io, open(path.c_str(), O_RDONLY)), waitTimer(io), path(path),
-    offsetValue(thisSensorParameters.offsetValue),
+    i2cDevice(i2cDevice), objServer(objectServer),
+    inputDev(io, path, boost::asio::random_access_file::read_only),
+    waitTimer(io), path(path), offsetValue(thisSensorParameters.offsetValue),
     scaleValue(thisSensorParameters.scaleValue),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000))
 {
@@ -78,11 +80,35 @@ HwmonTempSensor::HwmonTempSensor(
     setInitialProperties(thisSensorParameters.units);
 }
 
-HwmonTempSensor::~HwmonTempSensor()
+bool HwmonTempSensor::isActive()
 {
+    return inputDev.is_open();
+}
+
+void HwmonTempSensor::activate(const std::string& newPath,
+                               const std::shared_ptr<I2CDevice>& newI2CDevice)
+{
+    path = newPath;
+    i2cDevice = newI2CDevice;
+    inputDev.open(path, boost::asio::random_access_file::read_only);
+    markAvailable(true);
+    setupRead();
+}
+
+void HwmonTempSensor::deactivate()
+{
+    markAvailable(false);
     // close the input dev to cancel async operations
     inputDev.close();
     waitTimer.cancel();
+    i2cDevice = nullptr;
+    path = "";
+}
+
+HwmonTempSensor::~HwmonTempSensor()
+{
+    deactivate();
+
     for (const auto& iface : thresholdInterfaces)
     {
         objServer.remove_interface(iface);
@@ -102,22 +128,21 @@ void HwmonTempSensor::setupRead(void)
     }
 
     std::weak_ptr<HwmonTempSensor> weakRef = weak_from_this();
-    boost::asio::async_read_until(inputDev, readBuf, '\n',
-                                  [weakRef](const boost::system::error_code& ec,
-                                            std::size_t /*bytes_transfered*/) {
-                                      std::shared_ptr<HwmonTempSensor> self =
-                                          weakRef.lock();
-                                      if (self)
-                                      {
-                                          self->handleResponse(ec);
-                                      }
-                                  });
+    inputDev.async_read_some_at(
+        0, boost::asio::buffer(readBuf),
+        [weakRef](const boost::system::error_code& ec, std::size_t bytesRead) {
+        std::shared_ptr<HwmonTempSensor> self = weakRef.lock();
+        if (self)
+        {
+            self->handleResponse(ec, bytesRead);
+        }
+        });
 }
 
 void HwmonTempSensor::restartRead()
 {
     std::weak_ptr<HwmonTempSensor> weakRef = weak_from_this();
-    waitTimer.expires_from_now(boost::posix_time::milliseconds(sensorPollMs));
+    waitTimer.expires_from_now(std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
@@ -132,7 +157,8 @@ void HwmonTempSensor::restartRead()
     });
 }
 
-void HwmonTempSensor::handleResponse(const boost::system::error_code& err)
+void HwmonTempSensor::handleResponse(const boost::system::error_code& err,
+                                     size_t bytesRead)
 {
     if ((err == boost::system::errc::bad_file_descriptor) ||
         (err == boost::asio::error::misc_errors::not_found))
@@ -141,20 +167,20 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err)
                   << "\n";
         return; // we're being destroyed
     }
-    std::istream responseStream(&readBuf);
+
     if (!err)
     {
-        std::string response;
-        std::getline(responseStream, response);
-        try
-        {
-            rawValue = std::stod(response);
-            double nvalue = (rawValue + offsetValue) * scaleValue;
-            updateValue(nvalue);
-        }
-        catch (const std::invalid_argument&)
+        const char* bufEnd = readBuf.data() + bytesRead;
+        int nvalue = 0;
+        std::from_chars_result ret =
+            std::from_chars(readBuf.data(), bufEnd, nvalue);
+        if (ret.ec != std::errc())
         {
             incrementError();
+        }
+        else
+        {
+            updateValue((nvalue + offsetValue) * scaleValue);
         }
     }
     else
@@ -162,16 +188,6 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err)
         incrementError();
     }
 
-    responseStream.clear();
-    inputDev.close();
-    int fd = open(path.c_str(), O_RDONLY);
-    if (fd < 0)
-    {
-        std::cerr << "Hwmon temp sensor " << name << " not valid " << path
-                  << "\n";
-        return; // we're no longer valid
-    }
-    inputDev.assign(fd);
     restartRead();
 }
 

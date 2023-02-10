@@ -1,6 +1,7 @@
 #pragma once
-#include <VariantVisitors.hpp>
-#include <boost/algorithm/string/predicate.hpp>
+
+#include "VariantVisitors.hpp"
+
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/container/flat_map.hpp>
@@ -14,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <regex>
+#include <span>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -50,6 +52,14 @@ inline std::string escapeName(const std::string& sensorName)
     return boost::replace_all_copy(sensorName, " ", "_");
 }
 
+enum class PowerState
+{
+    on,
+    biosPost,
+    always,
+    chassisOn
+};
+
 std::optional<std::string> openAndRead(const std::string& hwmonFile);
 std::optional<std::string>
     getFullHwmonFilePath(const std::string& directory,
@@ -62,6 +72,10 @@ bool findFiles(const std::filesystem::path& dirPath,
                int symlinkDepth = 1);
 bool isPowerOn(void);
 bool hasBiosPost(void);
+bool isChassisOn(void);
+void setupPowerMatchCallback(
+    const std::shared_ptr<sdbusplus::asio::connection>& conn,
+    std::function<void(PowerState type, bool state)>&& callback);
 void setupPowerMatch(const std::shared_ptr<sdbusplus::asio::connection>& conn);
 bool getSensorConfiguration(
     const std::string& type,
@@ -81,14 +95,15 @@ void createAssociation(
 void findLimits(std::pair<double, double>& limits,
                 const SensorBaseConfiguration* data);
 
-enum class PowerState
-{
-    on,
-    biosPost,
-    always
-};
-
 bool readingStateGood(const PowerState& powerState);
+
+constexpr const char* configInterfacePrefix =
+    "xyz.openbmc_project.Configuration.";
+
+inline std::string configInterfaceName(const std::string& type)
+{
+    return std::string(configInterfacePrefix) + type;
+}
 
 namespace mapper
 {
@@ -112,6 +127,16 @@ const static constexpr char* interface = "xyz.openbmc_project.State.Host";
 const static constexpr char* path = "/xyz/openbmc_project/state/host0";
 const static constexpr char* property = "CurrentHostState";
 } // namespace power
+
+namespace chassis
+{
+const static constexpr char* busname = "xyz.openbmc_project.State.Chassis";
+const static constexpr char* interface = "xyz.openbmc_project.State.Chassis";
+const static constexpr char* path = "/xyz/openbmc_project/state/chassis0";
+const static constexpr char* property = "CurrentPowerState";
+const static constexpr char* sOn = "On";
+} // namespace chassis
+
 namespace post
 {
 const static constexpr char* busname =
@@ -129,9 +154,7 @@ const static constexpr char* interface =
 } // namespace association
 
 template <typename T>
-inline T loadVariant(
-    const boost::container::flat_map<std::string, BasicVariantType>& data,
-    const std::string& key)
+inline T loadVariant(const SensorBaseConfigMap& data, const std::string& key)
 {
     auto it = data.find(key);
     if (it == data.end())
@@ -172,6 +195,38 @@ inline void setReadState(const std::string& str, PowerState& val)
     {
         val = PowerState::always;
     }
+    else if (str == "ChassisOn")
+    {
+        val = PowerState::chassisOn;
+    }
+}
+
+inline PowerState getPowerState(const SensorBaseConfigMap& cfg)
+{
+    PowerState state = PowerState::always;
+    auto findPowerState = cfg.find("PowerState");
+    if (findPowerState != cfg.end())
+    {
+        std::string powerState =
+            std::visit(VariantToStringVisitor(), findPowerState->second);
+        setReadState(powerState, state);
+    }
+    return state;
+}
+
+inline float getPollRate(const SensorBaseConfigMap& cfg, float dflt)
+{
+    float pollRate = dflt;
+    auto findPollRate = cfg.find("PollRate");
+    if (findPollRate != cfg.end())
+    {
+        pollRate = std::visit(VariantToFloatVisitor(), findPollRate->second);
+        if (!std::isfinite(pollRate) || pollRate <= 0.0F)
+        {
+            pollRate = dflt; // poll time invalid, fall back to default
+        }
+    }
+    return pollRate;
 }
 
 inline void setLed(const std::shared_ptr<sdbusplus::asio::connection>& conn,
@@ -179,10 +234,10 @@ inline void setLed(const std::shared_ptr<sdbusplus::asio::connection>& conn,
 {
     conn->async_method_call(
         [name](const boost::system::error_code ec) {
-            if (ec)
-            {
-                std::cerr << "Failed to set LED " << name << "\n";
-            }
+        if (ec)
+        {
+            std::cerr << "Failed to set LED " << name << "\n";
+        }
         },
         "xyz.openbmc_project.LED.GroupManager",
         "/xyz/openbmc_project/led/groups/" + name, properties::interface,
@@ -215,40 +270,38 @@ struct GetSensorConfiguration :
         std::shared_ptr<GetSensorConfiguration> self = shared_from_this();
 
         self->dbusConnection->async_method_call(
-            [self, path, interface, owner,
-             retries](const boost::system::error_code ec,
-                      boost::container::flat_map<std::string, BasicVariantType>&
-                          data) {
-                if (ec)
+            [self, path, interface, owner, retries](
+                const boost::system::error_code ec, SensorBaseConfigMap& data) {
+            if (ec)
+            {
+                std::cerr << "Error getting " << path << ": retries left"
+                          << retries - 1 << "\n";
+                if (retries == 0U)
                 {
-                    std::cerr << "Error getting " << path << ": retries left"
-                              << retries - 1 << "\n";
-                    if (!retries)
-                    {
-                        return;
-                    }
-                    auto timer = std::make_shared<boost::asio::steady_timer>(
-                        self->dbusConnection->get_io_context());
-                    timer->expires_after(std::chrono::seconds(10));
-                    timer->async_wait([self, timer, path, interface, owner,
-                                       retries](boost::system::error_code ec) {
-                        if (ec)
-                        {
-                            std::cerr << "Timer error!\n";
-                            return;
-                        }
-                        self->getPath(path, interface, owner, retries - 1);
-                    });
                     return;
                 }
+                auto timer = std::make_shared<boost::asio::steady_timer>(
+                    self->dbusConnection->get_io_context());
+                timer->expires_after(std::chrono::seconds(10));
+                timer->async_wait([self, timer, path, interface, owner,
+                                   retries](boost::system::error_code ec) {
+                    if (ec)
+                    {
+                        std::cerr << "Timer error!\n";
+                        return;
+                    }
+                    self->getPath(path, interface, owner, retries - 1);
+                });
+                return;
+            }
 
-                self->respData[path][interface] = std::move(data);
+            self->respData[path][interface] = std::move(data);
             },
             owner, path, "org.freedesktop.DBus.Properties", "GetAll",
             interface);
     }
 
-    void getConfiguration(const std::vector<std::string>& interfaces,
+    void getConfiguration(const std::vector<std::string>& types,
                           size_t retries = 0)
     {
         if (retries > 5)
@@ -256,56 +309,60 @@ struct GetSensorConfiguration :
             retries = 5;
         }
 
+        std::vector<std::string> interfaces(types.size());
+        for (const auto& type : types)
+        {
+            interfaces.push_back(configInterfaceName(type));
+        }
+
         std::shared_ptr<GetSensorConfiguration> self = shared_from_this();
         dbusConnection->async_method_call(
             [self, interfaces, retries](const boost::system::error_code ec,
                                         const GetSubTreeType& ret) {
-                if (ec)
+            if (ec)
+            {
+                std::cerr << "Error calling mapper\n";
+                if (retries == 0U)
                 {
-                    std::cerr << "Error calling mapper\n";
-                    if (!retries)
-                    {
-                        return;
-                    }
-                    auto timer = std::make_shared<boost::asio::steady_timer>(
-                        self->dbusConnection->get_io_context());
-                    timer->expires_after(std::chrono::seconds(10));
-                    timer->async_wait([self, timer, interfaces,
-                                       retries](boost::system::error_code ec) {
-                        if (ec)
-                        {
-                            std::cerr << "Timer error!\n";
-                            return;
-                        }
-                        self->getConfiguration(interfaces, retries - 1);
-                    });
-
                     return;
                 }
-                for (const auto& [path, objDict] : ret)
-                {
-                    if (objDict.empty())
+                auto timer = std::make_shared<boost::asio::steady_timer>(
+                    self->dbusConnection->get_io_context());
+                timer->expires_after(std::chrono::seconds(10));
+                timer->async_wait([self, timer, interfaces,
+                                   retries](boost::system::error_code ec) {
+                    if (ec)
                     {
+                        std::cerr << "Timer error!\n";
                         return;
                     }
-                    const std::string& owner = objDict.begin()->first;
+                    self->getConfiguration(interfaces, retries - 1);
+                });
 
-                    for (const std::string& interface : objDict.begin()->second)
-                    {
-                        // anything that starts with a requested configuration
-                        // is good
-                        if (std::find_if(
-                                interfaces.begin(), interfaces.end(),
-                                [interface](const std::string& possible) {
-                                    return boost::starts_with(interface,
-                                                              possible);
-                                }) == interfaces.end())
-                        {
-                            continue;
-                        }
-                        self->getPath(path, interface, owner);
-                    }
+                return;
+            }
+            for (const auto& [path, objDict] : ret)
+            {
+                if (objDict.empty())
+                {
+                    return;
                 }
+                const std::string& owner = objDict.begin()->first;
+
+                for (const std::string& interface : objDict.begin()->second)
+                {
+                    // anything that starts with a requested configuration
+                    // is good
+                    if (std::find_if(interfaces.begin(), interfaces.end(),
+                                     [interface](const std::string& possible) {
+                        return interface.starts_with(possible);
+                        }) == interfaces.end())
+                    {
+                        continue;
+                    }
+                    self->getPath(path, interface, owner);
+                }
+            }
             },
             mapper::busName, mapper::path, mapper::interface, mapper::subtree,
             "/", 0, interfaces);
@@ -329,3 +386,7 @@ std::optional<double> readFile(const std::string& thresholdFile,
                                const double& scaleFactor);
 void setupManufacturingModeMatch(sdbusplus::asio::connection& conn);
 bool getManufacturingMode();
+std::vector<std::unique_ptr<sdbusplus::bus::match_t>>
+    setupPropertiesChangedMatches(
+        sdbusplus::asio::connection& bus, std::span<const char* const> types,
+        const std::function<void(sdbusplus::message_t&)>& handler);

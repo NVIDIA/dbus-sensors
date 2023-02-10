@@ -14,11 +14,12 @@
 // limitations under the License.
 */
 
+#include "ChassisIntrusionSensor.hpp"
+
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#include <ChassisIntrusionSensor.hpp>
 #include <boost/asio/io_service.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
@@ -80,12 +81,15 @@ int ChassisIntrusionSensor::i2cReadFromPch(int busId, int slaveAddr)
 {
     std::string i2cBus = "/dev/i2c-" + std::to_string(busId);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     int fd = open(i2cBus.c_str(), O_RDWR | O_CLOEXEC);
     if (fd < 0)
     {
         std::cerr << "unable to open i2c device \n";
         return -1;
     }
+
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     if (ioctl(fd, I2C_SLAVE_FORCE, slaveAddr) < 0)
     {
         std::cerr << "unable to set device address\n";
@@ -94,6 +98,8 @@ int ChassisIntrusionSensor::i2cReadFromPch(int busId, int slaveAddr)
     }
 
     unsigned long funcs = 0;
+
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     if (ioctl(fd, I2C_FUNCS, &funcs) < 0)
     {
         std::cerr << "not support I2C_FUNCS \n";
@@ -101,7 +107,7 @@ int ChassisIntrusionSensor::i2cReadFromPch(int busId, int slaveAddr)
         return -1;
     }
 
-    if (!(funcs & I2C_FUNC_SMBUS_READ_BYTE_DATA))
+    if ((funcs & I2C_FUNC_SMBUS_READ_BYTE_DATA) == 0U)
     {
         std::cerr << "not support I2C_FUNC_SMBUS_READ_BYTE_DATA \n";
         close(fd);
@@ -141,15 +147,15 @@ int ChassisIntrusionSensor::i2cReadFromPch(int busId, int slaveAddr)
 void ChassisIntrusionSensor::pollSensorStatusByPch()
 {
     // setting a new experation implicitly cancels any pending async wait
-    mPollTimer.expires_from_now(
-        boost::posix_time::seconds(intrusionSensorPollSec));
+    mPollTimer.expires_from_now(std::chrono::seconds(intrusionSensorPollSec));
 
     mPollTimer.async_wait([&](const boost::system::error_code& ec) {
         // case of timer expired
         if (!ec)
         {
             int statusValue = i2cReadFromPch(mBusId, mSlaveAddr);
-            std::string newValue = statusValue ? "HardwareIntrusion" : "Normal";
+            std::string newValue =
+                statusValue != 0 ? "HardwareIntrusion" : "Normal";
 
             if (newValue != "unknown" && mValue != newValue)
             {
@@ -176,7 +182,7 @@ void ChassisIntrusionSensor::readGpio()
     auto value = mGpioLine.get_value();
 
     // set string defined in chassis redfish schema
-    std::string newValue = value ? "HardwareIntrusion" : "Normal";
+    std::string newValue = value != 0 ? "HardwareIntrusion" : "Normal";
 
     if (debug)
     {
@@ -194,24 +200,22 @@ void ChassisIntrusionSensor::readGpio()
 
 void ChassisIntrusionSensor::pollSensorStatusByGpio(void)
 {
-    mGpioFd.async_wait(
-        boost::asio::posix::stream_descriptor::wait_read,
-        [this](const boost::system::error_code& ec) {
-            if (ec == boost::system::errc::bad_file_descriptor)
-            {
-                return; // we're being destroyed
-            }
-            if (ec)
-            {
-                std::cerr
-                    << "Error on GPIO based intrusion sensor wait event\n";
-            }
-            else
-            {
-                readGpio();
-            }
-            pollSensorStatusByGpio();
-        });
+    mGpioFd.async_wait(boost::asio::posix::stream_descriptor::wait_read,
+                       [this](const boost::system::error_code& ec) {
+        if (ec == boost::system::errc::bad_file_descriptor)
+        {
+            return; // we're being destroyed
+        }
+        if (ec)
+        {
+            std::cerr << "Error on GPIO based intrusion sensor wait event\n";
+        }
+        else
+        {
+            readGpio();
+        }
+        pollSensorStatusByGpio();
+    });
 }
 
 void ChassisIntrusionSensor::initGpioDeviceFile()
@@ -233,7 +237,7 @@ void ChassisIntrusionSensor::initGpioDeviceFile()
 
         // set string defined in chassis redfish schema
         auto value = mGpioLine.get_value();
-        std::string newValue = value ? "HardwareIntrusion" : "Normal";
+        std::string newValue = value != 0 ? "HardwareIntrusion" : "Normal";
         updateValue(newValue);
 
         auto gpioLineFd = mGpioLine.event_get_fd();
@@ -310,7 +314,7 @@ void ChassisIntrusionSensor::start(IntrusionSensorType type, int busId,
             mIface->register_property(
                 "Status", mValue,
                 [&](const std::string& req, std::string& propertyValue) {
-                    return setSensorValue(req, propertyValue);
+                return setSensorValue(req, propertyValue);
                 });
             mIface->initialize();
 
@@ -360,9 +364,7 @@ ChassisIntrusionSensor::ChassisIntrusionSensor(
     boost::asio::io_service& io,
     std::shared_ptr<sdbusplus::asio::dbus_interface> iface) :
     mIface(std::move(iface)),
-    mType(IntrusionSensorType::gpio), mValue("unknown"), mOldValue("unknown"),
-    mBusId(-1), mSlaveAddr(-1), mPollTimer(io), mGpioInverted(false),
-    mGpioFd(io)
+    mValue("unknown"), mOldValue("unknown"), mPollTimer(io), mGpioFd(io)
 {}
 
 ChassisIntrusionSensor::~ChassisIntrusionSensor()

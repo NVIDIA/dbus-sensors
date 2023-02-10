@@ -14,8 +14,10 @@
 // limitations under the License.
 */
 
-#include <PSUEvent.hpp>
-#include <SensorPaths.hpp>
+#include "PSUEvent.hpp"
+
+#include "SensorPaths.hpp"
+
 #include <boost/asio/io_service.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/container/flat_map.hpp>
@@ -59,15 +61,14 @@ PSUCombineEvent::PSUCombineEvent(
 
     std::shared_ptr<std::set<std::string>> combineEvent =
         std::make_shared<std::set<std::string>>();
-    for (const auto& pathList : eventPathList)
+    for (const auto& [eventName, paths] : eventPathList)
     {
         std::shared_ptr<std::set<std::string>> assert =
             std::make_shared<std::set<std::string>>();
         std::shared_ptr<bool> state = std::make_shared<bool>(false);
 
-        const std::string& eventName = pathList.first;
         std::string eventPSUName = eventName + psuName;
-        for (const auto& path : pathList.second)
+        for (const auto& path : paths)
         {
             auto p = std::make_shared<PSUSubEvent>(
                 eventInterface, path, conn, io, powerState, eventName,
@@ -80,22 +81,20 @@ PSUCombineEvent::PSUCombineEvent(
         }
     }
 
-    for (const auto& groupPathList : groupEventPathList)
+    for (const auto& [eventName, groupEvents] : groupEventPathList)
     {
-        for (const auto& pathList : groupPathList.second)
+        for (const auto& [groupEventName, paths] : groupEvents)
         {
             std::shared_ptr<std::set<std::string>> assert =
                 std::make_shared<std::set<std::string>>();
             std::shared_ptr<bool> state = std::make_shared<bool>(false);
 
-            const std::string& groupEventName = pathList.first;
             std::string eventPSUName = groupEventName + psuName;
-            for (const auto& path : pathList.second)
+            for (const auto& path : paths)
             {
                 auto p = std::make_shared<PSUSubEvent>(
                     eventInterface, path, conn, io, powerState, groupEventName,
-                    groupPathList.first, assert, combineEvent, state, psuName,
-                    pollRate);
+                    eventName, assert, combineEvent, state, psuName, pollRate);
                 p->setupRead();
                 events[eventPSUName].emplace_back(p);
 
@@ -109,9 +108,9 @@ PSUCombineEvent::PSUCombineEvent(
 PSUCombineEvent::~PSUCombineEvent()
 {
     // Clear unique_ptr first
-    for (auto& event : events)
+    for (auto& [psuName, subEvents] : events)
     {
-        for (auto& subEventPtr : event.second)
+        for (auto& subEventPtr : subEvents)
         {
             subEventPtr.reset();
         }
@@ -146,24 +145,19 @@ PSUSubEvent::PSUSubEvent(
     std::shared_ptr<std::set<std::string>> asserts,
     std::shared_ptr<std::set<std::string>> combineEvent,
     std::shared_ptr<bool> state, const std::string& psuName, double pollRate) :
-    std::enable_shared_from_this<PSUSubEvent>(),
-    eventInterface(std::move(eventInterface)), asserts(std::move(asserts)),
-    combineEvent(std::move(combineEvent)), assertState(std::move(state)),
-    errCount(0), path(path), eventName(eventName), readState(powerState),
-    waitTimer(io), inputDev(io), psuName(psuName),
-    groupEventName(groupEventName), systemBus(conn)
+    eventInterface(std::move(eventInterface)),
+    asserts(std::move(asserts)), combineEvent(std::move(combineEvent)),
+    assertState(std::move(state)), path(path), eventName(eventName),
+    readState(powerState), waitTimer(io),
+
+    inputDev(io, path, boost::asio::random_access_file::read_only),
+    psuName(psuName), groupEventName(groupEventName), systemBus(conn)
 {
+    buffer = std::make_shared<std::array<char, 128>>();
     if (pollRate > 0.0)
     {
         eventPollMs = static_cast<unsigned int>(pollRate * 1000);
     }
-    fd = open(path.c_str(), O_RDONLY);
-    if (fd < 0)
-    {
-        std::cerr << "PSU sub event failed to open file\n";
-        return;
-    }
-    inputDev.assign(fd);
 
     auto found = logID.find(eventName);
     if (found == logID.end())
@@ -204,27 +198,29 @@ void PSUSubEvent::setupRead(void)
         restartRead();
         return;
     }
+    if (!buffer)
+    {
+        std::cerr << "Buffer was invalid?";
+        return;
+    }
 
-    std::shared_ptr<boost::asio::streambuf> buffer =
-        std::make_shared<boost::asio::streambuf>();
     std::weak_ptr<PSUSubEvent> weakRef = weak_from_this();
-    boost::asio::async_read_until(
-        inputDev, *buffer, '\n',
-        [weakRef, buffer](const boost::system::error_code& ec,
-                          std::size_t /*bytes_transfered*/) {
-            std::shared_ptr<PSUSubEvent> self = weakRef.lock();
-            if (self)
-            {
-                self->readBuf = buffer;
-                self->handleResponse(ec);
-            }
+    inputDev.async_read_some_at(
+        0, boost::asio::buffer(buffer->data(), buffer->size() - 1),
+        [weakRef, buffer{buffer}](const boost::system::error_code& ec,
+                                  std::size_t bytesTransferred) {
+        std::shared_ptr<PSUSubEvent> self = weakRef.lock();
+        if (self)
+        {
+            self->handleResponse(ec, bytesTransferred);
+        }
         });
 }
 
 void PSUSubEvent::restartRead()
 {
     std::weak_ptr<PSUSubEvent> weakRef = weak_from_this();
-    waitTimer.expires_from_now(boost::posix_time::milliseconds(eventPollMs));
+    waitTimer.expires_from_now(std::chrono::milliseconds(eventPollMs));
     waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
@@ -238,23 +234,34 @@ void PSUSubEvent::restartRead()
     });
 }
 
-void PSUSubEvent::handleResponse(const boost::system::error_code& err)
+void PSUSubEvent::handleResponse(const boost::system::error_code& err,
+                                 size_t bytesTransferred)
 {
+    if (err == boost::asio::error::operation_aborted)
+    {
+        return;
+    }
+
     if ((err == boost::system::errc::bad_file_descriptor) ||
         (err == boost::asio::error::misc_errors::not_found))
     {
         return;
     }
-    std::istream responseStream(readBuf.get());
+    if (!buffer)
+    {
+        std::cerr << "Buffer was invalid?";
+        return;
+    }
+    // null terminate the string so we don't walk off the end
+    std::array<char, 128>& bufferRef = *buffer;
+    bufferRef[bytesTransferred] = '\0';
+
     if (!err)
     {
         std::string response;
         try
         {
-            std::getline(responseStream, response);
-            int nvalue = std::stoi(response);
-            responseStream.clear();
-
+            int nvalue = std::stoi(bufferRef.data());
             updateValue(nvalue);
             errCount = 0;
         }
@@ -276,7 +283,6 @@ void PSUSubEvent::handleResponse(const boost::system::error_code& err)
         updateValue(0);
         errCount++;
     }
-    lseek(fd, 0, SEEK_SET);
     restartRead();
 }
 
@@ -306,7 +312,7 @@ void PSUSubEvent::updateValue(const int& newValue)
 
             return;
         }
-        if (*assertState == true)
+        if (*assertState)
         {
             *assertState = false;
             auto foundCombine = (*combineEvent).find(groupEventName);
@@ -343,7 +349,7 @@ void PSUSubEvent::updateValue(const int& newValue)
     {
         std::cerr << "PSUSubEvent asserted by " << path << "\n";
 
-        if ((*assertState == false) && ((*asserts).empty()))
+        if ((!*assertState) && ((*asserts).empty()))
         {
             *assertState = true;
             if (!assertMessage.empty())

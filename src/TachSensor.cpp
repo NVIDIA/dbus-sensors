@@ -14,18 +14,25 @@
 // limitations under the License.
 */
 
+#include "TachSensor.hpp"
+
+#include "Utils.hpp"
+
 #include <unistd.h>
 
-#include <TachSensor.hpp>
-#include <Utils.hpp>
-#include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/read_until.hpp>
+<<<<<<< HEAD
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <LedUtils.hpp>
+||||||| 51ad667
+#include <boost/date_time/posix_time/posix_time.hpp>
+=======
+>>>>>>> origin/master
 #include <gpiod.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <charconv>
 #include <fstream>
 #include <iostream>
 #include <istream>
@@ -57,8 +64,16 @@ TachSensor::TachSensor(const std::string& path, const std::string& objectType,
            powerState),
     objServer(objectServer), redundancy(redundancy),
     presence(std::move(presenceSensor)),
+<<<<<<< HEAD
     inputDev(io, open(path.c_str(), O_RDONLY)), waitTimer(io), path(path),
     led(ledIn), ledReg(ledReg), offset(offset)
+||||||| 51ad667
+    inputDev(io, open(path.c_str(), O_RDONLY)), waitTimer(io), path(path),
+    led(ledIn)
+=======
+    inputDev(io, path, boost::asio::random_access_file::read_only),
+    waitTimer(io), path(path), led(ledIn)
+>>>>>>> origin/master
 {
     sensorInterface = objectServer.add_interface(
         "/xyz/openbmc_project/sensors/fan_tach/" + name,
@@ -94,7 +109,6 @@ TachSensor::TachSensor(const std::string& path, const std::string& objectType,
         itemAssoc->initialize();
     }
     setInitialProperties(sensor_paths::unitRPMs);
-    setupRead();
 }
 
 TachSensor::~TachSensor()
@@ -112,18 +126,45 @@ TachSensor::~TachSensor()
     objServer.remove_interface(itemAssoc);
 }
 
-void TachSensor::setupRead(void)
+void TachSensor::setupRead()
 {
-    boost::asio::async_read_until(
-        inputDev, readBuf, '\n',
-        [&](const boost::system::error_code& ec,
-            std::size_t /*bytes_transfered*/) { handleResponse(ec); });
+    std::weak_ptr<TachSensor> weakRef = weak_from_this();
+    inputDev.async_read_some_at(
+        0, boost::asio::buffer(readBuf),
+        [weakRef](const boost::system::error_code& ec, std::size_t bytesRead) {
+        std::shared_ptr<TachSensor> self = weakRef.lock();
+        if (self)
+        {
+            self->handleResponse(ec, bytesRead);
+        }
+        });
 }
 
-void TachSensor::handleResponse(const boost::system::error_code& err)
+void TachSensor::restartRead(size_t pollTime)
 {
-    if (err == boost::system::errc::bad_file_descriptor)
+    std::weak_ptr<TachSensor> weakRef = weak_from_this();
+    waitTimer.expires_from_now(std::chrono::milliseconds(pollTime));
+    waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
+        if (ec == boost::asio::error::operation_aborted)
+        {
+            return; // we're being canceled
+        }
+        std::shared_ptr<TachSensor> self = weakRef.lock();
+        if (!self)
+        {
+            return;
+        }
+        self->setupRead();
+    });
+}
+
+void TachSensor::handleResponse(const boost::system::error_code& err,
+                                size_t bytesRead)
+{
+    if ((err == boost::system::errc::bad_file_descriptor) ||
+        (err == boost::asio::error::misc_errors::not_found))
     {
+        std::cerr << "TachSensor " << name << " removed " << path << "\n";
         return; // we're being destroyed
     }
     bool missing = false;
@@ -138,23 +179,23 @@ void TachSensor::handleResponse(const boost::system::error_code& err)
         }
         itemIface->set_property("Present", !missing);
     }
-    std::istream responseStream(&readBuf);
+
     if (!missing)
     {
         if (!err)
         {
-            std::string response;
-            try
-            {
-                std::getline(responseStream, response);
-                rawValue = std::stod(response);
-                responseStream.clear();
-                updateValue(rawValue);
-            }
-            catch (const std::invalid_argument&)
+            const char* bufEnd = readBuf.data() + bytesRead;
+            int nvalue = 0;
+            std::from_chars_result ret =
+                std::from_chars(readBuf.data(), bufEnd, nvalue);
+            if (ret.ec != std::errc())
             {
                 incrementError();
                 pollTime = sensorFailedPollTimeMs;
+            }
+            else
+            {
+                updateValue(nvalue);
             }
         }
         else
@@ -163,29 +204,15 @@ void TachSensor::handleResponse(const boost::system::error_code& err)
             pollTime = sensorFailedPollTimeMs;
         }
     }
-    responseStream.clear();
-    inputDev.close();
-    int fd = open(path.c_str(), O_RDONLY);
-    if (fd < 0)
-    {
-        return; // we're no longer valid
-    }
-    inputDev.assign(fd);
-    waitTimer.expires_from_now(boost::posix_time::milliseconds(pollTime));
-    waitTimer.async_wait([&](const boost::system::error_code& ec) {
-        if (ec == boost::asio::error::operation_aborted)
-        {
-            return; // we're being canceled
-        }
-        setupRead();
-    });
+
+    restartRead(pollTime);
 }
 
 void TachSensor::checkThresholds(void)
 {
     bool status = thresholds::checkThresholds(this);
 
-    if (redundancy && *redundancy)
+    if ((redundancy != nullptr) && *redundancy)
     {
         (*redundancy)
             ->update("/xyz/openbmc_project/sensors/fan_tach/" + name, !status);
@@ -222,7 +249,7 @@ PresenceSensor::PresenceSensor(const std::string& gpioName, bool inverted,
     {
         gpioLine.request({"FanSensor", gpiod::line_request::EVENT_BOTH_EDGES,
                           inverted ? gpiod::line_request::FLAG_ACTIVE_LOW : 0});
-        status = gpioLine.get_value();
+        status = (gpioLine.get_value() != 0);
 
         int gpioLineFd = gpioLine.event_get_fd();
         if (gpioLineFd < 0)
@@ -253,28 +280,27 @@ void PresenceSensor::monitorPresence(void)
 {
     gpioFd.async_wait(boost::asio::posix::stream_descriptor::wait_read,
                       [this](const boost::system::error_code& ec) {
-                          if (ec == boost::system::errc::bad_file_descriptor)
-                          {
-                              return; // we're being destroyed
-                          }
-                          if (ec)
-                          {
-                              std::cerr << "Error on presence sensor " << name
-                                        << " \n";
-                              ;
-                          }
-                          else
-                          {
-                              read();
-                          }
-                          monitorPresence();
-                      });
+        if (ec == boost::system::errc::bad_file_descriptor)
+        {
+            return; // we're being destroyed
+        }
+        if (ec)
+        {
+            std::cerr << "Error on presence sensor " << name << " \n";
+            ;
+        }
+        else
+        {
+            read();
+        }
+        monitorPresence();
+    });
 }
 
 void PresenceSensor::read(void)
 {
     gpioLine.event_read();
-    status = gpioLine.get_value();
+    status = (gpioLine.get_value() != 0);
     // Read is invoked when an edge event is detected by monitorPresence
     if (status)
     {
@@ -286,7 +312,7 @@ void PresenceSensor::read(void)
     }
 }
 
-bool PresenceSensor::getValue(void)
+bool PresenceSensor::getValue(void) const
 {
     return status;
 }
@@ -321,9 +347,9 @@ void RedundancySensor::update(const std::string& name, bool failed)
     size_t failedCount = 0;
 
     std::string newState = redundancy::full;
-    for (const auto& status : statuses)
+    for (const auto& [name, status] : statuses)
     {
-        if (status.second)
+        if (status)
         {
             failedCount++;
         }
@@ -332,7 +358,7 @@ void RedundancySensor::update(const std::string& name, bool failed)
             newState = redundancy::failed;
             break;
         }
-        if (failedCount)
+        if (failedCount != 0U)
         {
             newState = redundancy::degraded;
         }

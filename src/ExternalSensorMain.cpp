@@ -2,7 +2,6 @@
 #include "Utils.hpp"
 #include "VariantVisitors.hpp"
 
-#include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
@@ -52,8 +51,7 @@
 
 static constexpr bool debug = false;
 
-static const char* sensorType =
-    "xyz.openbmc_project.Configuration.ExternalSensor";
+static const char* sensorType = "ExternalSensor";
 
 void updateReaper(boost::container::flat_map<
                       std::string, std::shared_ptr<ExternalSensor>>& sensors,
@@ -61,22 +59,22 @@ void updateReaper(boost::container::flat_map<
                   const std::chrono::steady_clock::time_point& now)
 {
     // First pass, reap all stale sensors
-    for (auto& sensor : sensors)
+    for (const auto& [name, sensor] : sensors)
     {
-        if (!sensor.second)
+        if (!sensor)
         {
             continue;
         }
 
-        if (!sensor.second->isAliveAndPerishable())
+        if (!sensor->isAliveAndPerishable())
         {
             continue;
         }
 
-        if (!sensor.second->isAliveAndFresh(now))
+        if (!sensor->isAliveAndFresh(now))
         {
             // Mark sensor as dead, no longer alive
-            sensor.second->writeInvalidate();
+            sensor->writeInvalidate();
         }
     }
 
@@ -84,19 +82,19 @@ void updateReaper(boost::container::flat_map<
     bool needCheck = false;
 
     // Second pass, determine timer interval to next check
-    for (auto& sensor : sensors)
+    for (const auto& [name, sensor] : sensors)
     {
-        if (!sensor.second)
+        if (!sensor)
         {
             continue;
         }
 
-        if (!sensor.second->isAliveAndPerishable())
+        if (!sensor->isAliveAndPerishable())
         {
             continue;
         }
 
-        auto expiration = sensor.second->ageRemaining(now);
+        auto expiration = sensor->ageRemaining(now);
 
         if (needCheck)
         {
@@ -165,177 +163,168 @@ void createSensors(
         dbusConnection,
         [&objectServer, &sensors, &dbusConnection, sensorsChanged,
          &reaperTimer](const ManagedObjectType& sensorConfigurations) {
-            bool firstScan = (sensorsChanged == nullptr);
+        bool firstScan = (sensorsChanged == nullptr);
 
-            for (const std::pair<sdbusplus::message::object_path, SensorData>&
-                     sensor : sensorConfigurations)
+        for (const std::pair<sdbusplus::message::object_path, SensorData>&
+                 sensor : sensorConfigurations)
+        {
+            const std::string& interfacePath = sensor.first.str;
+            const SensorData& sensorData = sensor.second;
+
+            auto sensorBase = sensorData.find(configInterfaceName(sensorType));
+            if (sensorBase == sensorData.end())
             {
-                const std::string& interfacePath = sensor.first.str;
-                const SensorData& sensorData = sensor.second;
+                std::cerr << "Base configuration not found for "
+                          << interfacePath << "\n";
+                continue;
+            }
 
-                auto sensorBase = sensorData.find(sensorType);
-                if (sensorBase == sensorData.end())
-                {
-                    std::cerr << "Base configuration not found for "
-                              << interfacePath << "\n";
-                    continue;
-                }
+            const SensorBaseConfiguration& baseConfiguration = *sensorBase;
+            const SensorBaseConfigMap& baseConfigMap = baseConfiguration.second;
 
-                const SensorBaseConfiguration& baseConfiguration = *sensorBase;
-                const SensorBaseConfigMap& baseConfigMap =
-                    baseConfiguration.second;
+            // MinValue and MinValue are mandatory numeric parameters
+            auto minFound = baseConfigMap.find("MinValue");
+            if (minFound == baseConfigMap.end())
+            {
+                std::cerr << "MinValue parameter not found for "
+                          << interfacePath << "\n";
+                continue;
+            }
+            double minValue =
+                std::visit(VariantToDoubleVisitor(), minFound->second);
+            if (!std::isfinite(minValue))
+            {
+                std::cerr << "MinValue parameter not parsed for "
+                          << interfacePath << "\n";
+                continue;
+            }
 
-                // MinValue and MinValue are mandatory numeric parameters
-                auto minFound = baseConfigMap.find("MinValue");
-                if (minFound == baseConfigMap.end())
-                {
-                    std::cerr << "MinValue parameter not found for "
-                              << interfacePath << "\n";
-                    continue;
-                }
-                double minValue =
-                    std::visit(VariantToDoubleVisitor(), minFound->second);
-                if (!std::isfinite(minValue))
-                {
-                    std::cerr << "MinValue parameter not parsed for "
-                              << interfacePath << "\n";
-                    continue;
-                }
+            auto maxFound = baseConfigMap.find("MaxValue");
+            if (maxFound == baseConfigMap.end())
+            {
+                std::cerr << "MaxValue parameter not found for "
+                          << interfacePath << "\n";
+                continue;
+            }
+            double maxValue =
+                std::visit(VariantToDoubleVisitor(), maxFound->second);
+            if (!std::isfinite(maxValue))
+            {
+                std::cerr << "MaxValue parameter not parsed for "
+                          << interfacePath << "\n";
+                continue;
+            }
 
-                auto maxFound = baseConfigMap.find("MaxValue");
-                if (maxFound == baseConfigMap.end())
-                {
-                    std::cerr << "MaxValue parameter not found for "
-                              << interfacePath << "\n";
-                    continue;
-                }
-                double maxValue =
-                    std::visit(VariantToDoubleVisitor(), maxFound->second);
-                if (!std::isfinite(maxValue))
-                {
-                    std::cerr << "MaxValue parameter not parsed for "
-                              << interfacePath << "\n";
-                    continue;
-                }
+            double timeoutSecs = 0.0;
 
-                double timeoutSecs = 0.0;
+            // Timeout is an optional numeric parameter
+            auto timeoutFound = baseConfigMap.find("Timeout");
+            if (timeoutFound != baseConfigMap.end())
+            {
+                timeoutSecs =
+                    std::visit(VariantToDoubleVisitor(), timeoutFound->second);
+            }
+            if (!std::isfinite(timeoutSecs) || (timeoutSecs < 0.0))
+            {
+                std::cerr << "Timeout parameter not parsed for "
+                          << interfacePath << "\n";
+                continue;
+            }
 
-                // Timeout is an optional numeric parameter
-                auto timeoutFound = baseConfigMap.find("Timeout");
-                if (timeoutFound != baseConfigMap.end())
-                {
-                    timeoutSecs = std::visit(VariantToDoubleVisitor(),
-                                             timeoutFound->second);
-                }
-                if (!(std::isfinite(timeoutSecs) && (timeoutSecs >= 0.0)))
-                {
-                    std::cerr << "Timeout parameter not parsed for "
-                              << interfacePath << "\n";
-                    continue;
-                }
+            std::string sensorName;
+            std::string sensorUnits;
 
-                std::string sensorName;
-                std::string sensorUnits;
+            // Name and Units are mandatory string parameters
+            auto nameFound = baseConfigMap.find("Name");
+            if (nameFound == baseConfigMap.end())
+            {
+                std::cerr << "Name parameter not found for " << interfacePath
+                          << "\n";
+                continue;
+            }
+            sensorName =
+                std::visit(VariantToStringVisitor(), nameFound->second);
+            if (sensorName.empty())
+            {
+                std::cerr << "Name parameter not parsed for " << interfacePath
+                          << "\n";
+                continue;
+            }
 
-                // Name and Units are mandatory string parameters
-                auto nameFound = baseConfigMap.find("Name");
-                if (nameFound == baseConfigMap.end())
-                {
-                    std::cerr << "Name parameter not found for "
-                              << interfacePath << "\n";
-                    continue;
-                }
-                sensorName =
-                    std::visit(VariantToStringVisitor(), nameFound->second);
-                if (sensorName.empty())
-                {
-                    std::cerr << "Name parameter not parsed for "
-                              << interfacePath << "\n";
-                    continue;
-                }
+            auto unitsFound = baseConfigMap.find("Units");
+            if (unitsFound == baseConfigMap.end())
+            {
+                std::cerr << "Units parameter not found for " << interfacePath
+                          << "\n";
+                continue;
+            }
+            sensorUnits =
+                std::visit(VariantToStringVisitor(), unitsFound->second);
+            if (sensorUnits.empty())
+            {
+                std::cerr << "Units parameter not parsed for " << interfacePath
+                          << "\n";
+                continue;
+            }
 
-                auto unitsFound = baseConfigMap.find("Units");
-                if (unitsFound == baseConfigMap.end())
+            // on rescans, only update sensors we were signaled by
+            auto findSensor = sensors.find(sensorName);
+            if (!firstScan && (findSensor != sensors.end()))
+            {
+                std::string suffixName = "/";
+                suffixName += findSensor->second->name;
+                bool found = false;
+                for (auto it = sensorsChanged->begin();
+                     it != sensorsChanged->end(); it++)
                 {
-                    std::cerr << "Units parameter not found for "
-                              << interfacePath << "\n";
-                    continue;
-                }
-                sensorUnits =
-                    std::visit(VariantToStringVisitor(), unitsFound->second);
-                if (sensorUnits.empty())
-                {
-                    std::cerr << "Units parameter not parsed for "
-                              << interfacePath << "\n";
-                    continue;
-                }
-
-                // on rescans, only update sensors we were signaled by
-                auto findSensor = sensors.find(sensorName);
-                if (!firstScan && (findSensor != sensors.end()))
-                {
-                    std::string suffixName = "/";
-                    suffixName += findSensor->second->name;
-                    bool found = false;
-                    for (auto it = sensorsChanged->begin();
-                         it != sensorsChanged->end(); it++)
+                    std::string suffixIt = "/";
+                    suffixIt += *it;
+                    if (suffixIt.ends_with(suffixName))
                     {
-                        std::string suffixIt = "/";
-                        suffixIt += *it;
-                        if (boost::ends_with(suffixIt, suffixName))
+                        sensorsChanged->erase(it);
+                        findSensor->second = nullptr;
+                        found = true;
+                        if constexpr (debug)
                         {
-                            sensorsChanged->erase(it);
-                            findSensor->second = nullptr;
-                            found = true;
-                            if constexpr (debug)
-                            {
-                                std::cerr << "ExternalSensor " << sensorName
-                                          << " change found\n";
-                            }
-                            break;
+                            std::cerr << "ExternalSensor " << sensorName
+                                      << " change found\n";
                         }
-                    }
-                    if (!found)
-                    {
-                        continue;
+                        break;
                     }
                 }
-
-                std::vector<thresholds::Threshold> sensorThresholds;
-                if (!parseThresholdsFromConfig(sensorData, sensorThresholds))
+                if (!found)
                 {
-                    std::cerr << "error populating thresholds for "
-                              << sensorName << "\n";
-                }
-
-                auto findPowerOn = baseConfiguration.second.find("PowerState");
-                PowerState readState = PowerState::always;
-                if (findPowerOn != baseConfiguration.second.end())
-                {
-                    std::string powerState = std::visit(
-                        VariantToStringVisitor(), findPowerOn->second);
-                    setReadState(powerState, readState);
-                }
-
-                auto& sensorEntry = sensors[sensorName];
-                sensorEntry = nullptr;
-
-                sensorEntry = std::make_shared<ExternalSensor>(
-                    sensorType, objectServer, dbusConnection, sensorName,
-                    sensorUnits, std::move(sensorThresholds), interfacePath,
-                    maxValue, minValue, timeoutSecs, readState);
-                sensorEntry->initWriteHook(
-                    [&sensors, &reaperTimer](
-                        const std::chrono::steady_clock::time_point& now) {
-                        updateReaper(sensors, reaperTimer, now);
-                    });
-
-                if constexpr (debug)
-                {
-                    std::cerr << "ExternalSensor " << sensorName
-                              << " created\n";
+                    continue;
                 }
             }
+
+            std::vector<thresholds::Threshold> sensorThresholds;
+            if (!parseThresholdsFromConfig(sensorData, sensorThresholds))
+            {
+                std::cerr << "error populating thresholds for " << sensorName
+                          << "\n";
+            }
+
+            PowerState readState = getPowerState(baseConfigMap);
+
+            auto& sensorEntry = sensors[sensorName];
+            sensorEntry = nullptr;
+
+            sensorEntry = std::make_shared<ExternalSensor>(
+                sensorType, objectServer, dbusConnection, sensorName,
+                sensorUnits, std::move(sensorThresholds), interfacePath,
+                maxValue, minValue, timeoutSecs, readState);
+            sensorEntry->initWriteHook(
+                [&sensors, &reaperTimer](
+                    const std::chrono::steady_clock::time_point& now) {
+                updateReaper(sensors, reaperTimer, now);
+            });
+
+            if constexpr (debug)
+            {
+                std::cerr << "ExternalSensor " << sensorName << " created\n";
+            }
+        }
         });
 
     getter->getConfiguration(std::vector<std::string>{sensorType});
@@ -350,11 +339,13 @@ int main()
 
     boost::asio::io_service io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
+    sdbusplus::asio::object_server objectServer(systemBus, true);
+
+    objectServer.add_manager("/xyz/openbmc_project/sensors");
     systemBus->request_name("xyz.openbmc_project.ExternalSensor");
-    sdbusplus::asio::object_server objectServer(systemBus);
+
     boost::container::flat_map<std::string, std::shared_ptr<ExternalSensor>>
         sensors;
-    std::vector<std::unique_ptr<sdbusplus::bus::match::match>> matches;
     auto sensorsChanged =
         std::make_shared<boost::container::flat_set<std::string>>();
     boost::asio::steady_timer reaperTimer(io);
@@ -363,51 +354,47 @@ int main()
         createSensors(objectServer, sensors, systemBus, nullptr, reaperTimer);
     });
 
-    boost::asio::deadline_timer filterTimer(io);
-    std::function<void(sdbusplus::message::message&)> eventHandler =
+    boost::asio::steady_timer filterTimer(io);
+    std::function<void(sdbusplus::message_t&)> eventHandler =
         [&objectServer, &sensors, &systemBus, &sensorsChanged, &filterTimer,
-         &reaperTimer](sdbusplus::message::message& message) mutable {
-            if (message.is_method_error())
+         &reaperTimer](sdbusplus::message_t& message) mutable {
+        if (message.is_method_error())
+        {
+            std::cerr << "callback method error\n";
+            return;
+        }
+
+        const auto* messagePath = message.get_path();
+        sensorsChanged->insert(messagePath);
+        if constexpr (debug)
+        {
+            std::cerr << "ExternalSensor change event received: " << messagePath
+                      << "\n";
+        }
+
+        // this implicitly cancels the timer
+        filterTimer.expires_from_now(std::chrono::seconds(1));
+
+        filterTimer.async_wait(
+            [&objectServer, &sensors, &systemBus, &sensorsChanged,
+             &reaperTimer](const boost::system::error_code& ec) mutable {
+            if (ec != boost::system::errc::success)
             {
-                std::cerr << "callback method error\n";
+                if (ec != boost::asio::error::operation_aborted)
+                {
+                    std::cerr << "callback error: " << ec.message() << "\n";
+                }
                 return;
             }
 
-            auto messagePath = message.get_path();
-            sensorsChanged->insert(messagePath);
-            if constexpr (debug)
-            {
-                std::cerr << "ExternalSensor change event received: "
-                          << messagePath << "\n";
-            }
+            createSensors(objectServer, sensors, systemBus, sensorsChanged,
+                          reaperTimer);
+        });
+    };
 
-            // this implicitly cancels the timer
-            filterTimer.expires_from_now(boost::posix_time::seconds(1));
-
-            filterTimer.async_wait(
-                [&objectServer, &sensors, &systemBus, &sensorsChanged,
-                 &reaperTimer](const boost::system::error_code& ec) mutable {
-                    if (ec != boost::system::errc::success)
-                    {
-                        if (ec != boost::asio::error::operation_aborted)
-                        {
-                            std::cerr << "callback error: " << ec.message()
-                                      << "\n";
-                        }
-                        return;
-                    }
-
-                    createSensors(objectServer, sensors, systemBus,
-                                  sensorsChanged, reaperTimer);
-                });
-        };
-
-    auto match = std::make_unique<sdbusplus::bus::match::match>(
-        static_cast<sdbusplus::bus::bus&>(*systemBus),
-        "type='signal',member='PropertiesChanged',path_namespace='" +
-            std::string(inventoryPath) + "',arg0namespace='" + sensorType + "'",
-        eventHandler);
-    matches.emplace_back(std::move(match));
+    std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
+        setupPropertiesChangedMatches(
+            *systemBus, std::to_array<const char*>({sensorType}), eventHandler);
 
     if constexpr (debug)
     {

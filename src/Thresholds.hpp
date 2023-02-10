@@ -1,7 +1,9 @@
 #pragma once
-#include <Utils.hpp>
-#include <boost/asio/deadline_timer.hpp>
+
+#include "Utils.hpp"
+
 #include <boost/asio/io_service.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <nlohmann/json.hpp>
 
 #include <list>
@@ -17,6 +19,7 @@ enum class Level
 {
     WARNING,
     CRITICAL,
+    PERFORMANCELOSS,
     SOFTSHUTDOWN,
     HARDSHUTDOWN,
     ERROR
@@ -61,12 +64,12 @@ struct TimerUsed
     bool assert;
 };
 
-using TimerPair = std::pair<struct TimerUsed, boost::asio::deadline_timer>;
+using TimerPair = std::pair<struct TimerUsed, boost::asio::steady_timer>;
 
 struct ThresholdTimer
 {
 
-    ThresholdTimer(boost::asio::io_service& ioService) : io(ioService)
+    explicit ThresholdTimer(boost::asio::io_service& ioService) : io(ioService)
     {}
 
     bool hasActiveTimer(const Threshold& threshold, bool assert)
@@ -112,17 +115,15 @@ struct ThresholdTimer
     std::list<TimerPair> timers;
 };
 
-bool isValidLevel(Level lev);
-
 bool parseThresholdsFromConfig(
     const SensorData& sensorData,
     std::vector<thresholds::Threshold>& thresholdVector,
     const std::string* matchLabel = nullptr, const int* sensorIndex = nullptr);
 
-bool parseThresholdsFromAttr(std::vector<thresholds::Threshold>& thresholds,
-                             const std::string& inputPath,
-                             const double& scaleFactor,
-                             const double& offset = 0);
+bool parseThresholdsFromAttr(
+    std::vector<thresholds::Threshold>& thresholdVector,
+    const std::string& inputPath, const double& scaleFactor,
+    const double& offset = 0);
 
 struct ThresholdDefinition
 {
@@ -131,15 +132,16 @@ struct ThresholdDefinition
     const char* levelName;
 };
 
-constexpr static std::array<thresholds::ThresholdDefinition, 4> thresProp = {
+constexpr static std::array<thresholds::ThresholdDefinition, 5> thresProp = {
     {{Level::WARNING, 0, "Warning"},
      {Level::CRITICAL, 1, "Critical"},
-     {Level::SOFTSHUTDOWN, 2, "SoftShutdown"},
-     {Level::HARDSHUTDOWN, 3, "HardShutdown"}}};
+     {Level::PERFORMANCELOSS, 2, "PerformanceLoss"},
+     {Level::SOFTSHUTDOWN, 3, "SoftShutdown"},
+     {Level::HARDSHUTDOWN, 4, "HardShutdown"}}};
 
-std::string getInterface(const Level level);
+std::string getInterface(Level level);
 
-void persistThreshold(const std::string& baseInterface, const std::string& path,
+void persistThreshold(const std::string& path, const std::string& baseInterface,
                       const thresholds::Threshold& threshold,
                       std::shared_ptr<sdbusplus::asio::connection>& conn,
                       size_t thresholdCount, const std::string& label);

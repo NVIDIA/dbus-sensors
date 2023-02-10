@@ -1,3 +1,60 @@
+conf_data = configuration_data()
+conf_data.set10('VALIDATION_UNSECURE_FEATURE', get_option('validate-unsecure-feature').enabled())
+conf_data.set10('INSECURE_UNRESTRICTED_SENSOR_OVERRIDE', get_option('insecure-sensor-override').enabled())
+configure_file(input: 'dbus-sensor_config.h.in',
+               output: 'dbus-sensor_config.h',
+               configuration: conf_data)
+
+thresholds_a = static_library(
+    'thresholds_a',
+    'Thresholds.cpp',
+    dependencies: default_deps,
+)
+
+thresholds_dep = declare_dependency(
+    link_with: [ thresholds_a ],
+    dependencies: default_deps,
+)
+
+utils_a = static_library(
+    'utils_a',
+    [
+        'FileHandle.cpp',
+        'SensorPaths.cpp',
+        'Utils.cpp',
+    ],
+    dependencies: default_deps,
+)
+
+utils_dep = declare_dependency(
+    link_with: [ utils_a ],
+    dependencies: [ sdbusplus ],
+)
+
+devicemgmt_a = static_library(
+    'devicemgmt_a',
+    [
+        'DeviceMgmt.cpp',
+    ],
+    dependencies: default_deps,
+)
+
+devicemgmt_dep = declare_dependency(
+    link_with: [ devicemgmt_a ],
+    dependencies: default_deps,
+)
+
+pwmsensor_a = static_library(
+    'pwmsensor_a',
+    'PwmSensor.cpp',
+    dependencies: [ default_deps, thresholds_dep ],
+)
+
+pwmsensor_dep = declare_dependency(
+    link_with: [ pwmsensor_a ],
+    dependencies: [ default_deps, thresholds_dep ],
+)
+
 peci_incdirs = []
 if not meson.get_compiler('cpp').has_header('linux/peci-ioctl.h')
     peci_incdirs = ['../include']
@@ -14,27 +71,23 @@ if get_option('adc').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        implicit_include_directories: false,
-        include_directories: '../include',
+        cpp_args: uring_args,
         install: true,
     )
 endif
 
-if get_option('cpu').enabled()
+if get_option('intel-cpu').enabled()
     executable(
-        'cpusensor',
-        'CPUSensorMain.cpp',
-        'CPUSensor.cpp',
+        'intelcpusensor',
+        'IntelCPUSensorMain.cpp',
+        'IntelCPUSensor.cpp',
         dependencies: [
             default_deps,
             gpiodcxx,
             thresholds_dep,
             utils_dep,
         ],
-        implicit_include_directories: false,
-        include_directories: [
-            '../include'
-        ] + peci_incdirs,
+        include_directories: peci_incdirs,
         install: true,
     )
 endif
@@ -48,8 +101,7 @@ if get_option('exit-air').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        implicit_include_directories: false,
-        include_directories: '../include',
+        cpp_args: uring_args,
         install: true,
     )
 endif
@@ -67,8 +119,7 @@ if get_option('fan').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        implicit_include_directories: false,
-        include_directories: '../include',
+        cpp_args: uring_args,
         install: true,
     )
 endif
@@ -80,11 +131,11 @@ if get_option('hwmon-temp').enabled()
         'HwmonTempSensor.cpp',
         dependencies: [
             default_deps,
+            devicemgmt_dep,
             thresholds_dep,
             utils_dep,
         ],
-        implicit_include_directories: false,
-        include_directories: '../include',
+        cpp_args: uring_args,
         install: true,
     )
 endif
@@ -116,8 +167,7 @@ if get_option('intrusion').enabled()
             i2c,
             utils_dep,
         ],
-        implicit_include_directories: false,
-        include_directories: '../include',
+        cpp_args: uring_args,
         install: true,
     )
 endif
@@ -126,13 +176,13 @@ if get_option('ipmb').enabled()
     executable(
         'ipmbsensor',
         'IpmbSensor.cpp',
+        'IpmbSDRSensor.cpp',
         dependencies: [
             default_deps,
             thresholds_dep,
             utils_dep,
         ],
-        implicit_include_directories: false,
-        include_directories: '../include',
+        cpp_args: uring_args,
         install: true,
     )
 endif
@@ -147,8 +197,7 @@ if get_option('mcu').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        implicit_include_directories: false,
-        include_directories: '../include',
+        cpp_args: uring_args,
         install: true,
     )
 endif
@@ -159,20 +208,11 @@ if get_option('nvme').enabled()
 
     nvme_deps = [ default_deps, i2c, thresholds_dep, utils_dep, threads ]
 
-    mi_mctp = get_option('nvme-mi-mctp')
-    if mi_mctp.enabled()
-        nvme_srcs += files('NVMeMCTPContext.cpp')
-        nvme_deps += meson.get_compiler('cpp').find_library('libmctp')
-        conf_data = configuration_data()
-        conf_data.set('HAVE_NVME_MI_MCTP', true)
-    endif
-
     executable(
         'nvmesensor',
         sources: nvme_srcs,
         dependencies: nvme_deps,
-        implicit_include_directories: false,
-        include_directories: '../include',
+        cpp_args: uring_args,
         install: true,
     )
 endif
@@ -189,8 +229,7 @@ if get_option('psu').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        implicit_include_directories: false,
-        include_directories: '../include',
+        cpp_args: uring_args,
         install: true,
     )
 endif
@@ -205,8 +244,7 @@ if get_option('external').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        implicit_include_directories: false,
-        include_directories: '../include',
+        cpp_args: uring_args,
         install: true,
     )
 endif

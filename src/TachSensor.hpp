@@ -1,12 +1,14 @@
 #pragma once
-#include <Thresholds.hpp>
-#include <boost/asio/streambuf.hpp>
+
+#include "Thresholds.hpp"
+#include "sensor.hpp"
+
+#include <boost/asio/random_access_file.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
 #include <gpiod.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <sensor.hpp>
 
 #include <memory>
 #include <optional>
@@ -17,13 +19,13 @@
 class PresenceSensor
 {
   public:
-    PresenceSensor(const std::string& pinName, bool inverted,
+    PresenceSensor(const std::string& gpioName, bool inverted,
                    boost::asio::io_service& io, const std::string& name);
     ~PresenceSensor();
 
     void monitorPresence(void);
     void read(void);
-    bool getValue(void);
+    bool getValue(void) const;
 
   private:
     bool status = true;
@@ -58,7 +60,9 @@ class RedundancySensor
     boost::container::flat_map<std::string, bool> statuses;
 };
 
-class TachSensor : public Sensor
+class TachSensor :
+    public Sensor,
+    public std::enable_shared_from_this<TachSensor>
 {
   public:
     TachSensor(const std::string& path, const std::string& objectType,
@@ -75,48 +79,52 @@ class TachSensor : public Sensor
                const std::optional<uint8_t> ledReg,
                const std::optional<uint8_t> offset);
     ~TachSensor() override;
+    void setupRead();
 
   private:
+    // Ordering is important here; readBuf is first so that it's not destroyed
+    // while async operations from other member fields might still be using it.
+    std::array<char, 128> readBuf{};
     sdbusplus::asio::object_server& objServer;
     std::optional<RedundancySensor>* redundancy;
     std::unique_ptr<PresenceSensor> presence;
     std::shared_ptr<sdbusplus::asio::dbus_interface> itemIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> itemAssoc;
-    boost::asio::streambuf readBuf;
-    boost::asio::posix::stream_descriptor inputDev;
-    boost::asio::deadline_timer waitTimer;
+    boost::asio::random_access_file inputDev;
+    boost::asio::steady_timer waitTimer;
     std::string path;
     std::optional<std::string> led;
     std::optional<uint8_t> ledReg;
     std::optional<uint8_t> offset;
     bool ledState = false;
-    void setupRead(void);
-    void handleResponse(const boost::system::error_code& err);
+
+    void handleResponse(const boost::system::error_code& err, size_t bytesRead);
+    void restartRead(size_t pollTime);
     void checkThresholds(void) override;
 };
 
 inline void logFanInserted(const std::string& device)
 {
-    auto msg = "OpenBMC.0.1.FanInserted";
+    const auto* msg = "OpenBMC.0.1.FanInserted";
     lg2::error("Fan Inserted", "REDFISH_MESSAGE_ID", msg,
                "REDFISH_MESSAGE_ARGS", device);
 }
 
 inline void logFanRemoved(const std::string& device)
 {
-    auto msg = "OpenBMC.0.1.FanRemoved";
+    const auto* msg = "OpenBMC.0.1.FanRemoved";
     lg2::error("Fan Removed", "REDFISH_MESSAGE_ID", msg, "REDFISH_MESSAGE_ARGS",
                device);
 }
 
 inline void logFanRedundancyLost(void)
 {
-    auto msg = "OpenBMC.0.1.FanRedundancyLost";
+    const auto* msg = "OpenBMC.0.1.FanRedundancyLost";
     lg2::error("Fan Inserted", "REDFISH_MESSAGE_ID", msg);
 }
 
 inline void logFanRedundancyRestored(void)
 {
-    auto msg = "OpenBMC.0.1.FanRedundancyRegained";
+    const auto* msg = "OpenBMC.0.1.FanRedundancyRegained";
     lg2::error("Fan Removed", "REDFISH_MESSAGE_ID", msg);
 }

@@ -16,13 +16,15 @@
 
 #pragma once
 
-#include <Utils.hpp>
-#include <boost/asio/deadline_timer.hpp>
+#include "Utils.hpp"
+
 #include <boost/asio/io_service.hpp>
-#include <boost/asio/streambuf.hpp>
+#include <boost/asio/random_access_file.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/container/flat_map.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <array>
 #include <memory>
 #include <set>
 #include <string>
@@ -34,7 +36,7 @@ class PSUSubEvent : public std::enable_shared_from_this<PSUSubEvent>
     PSUSubEvent(std::shared_ptr<sdbusplus::asio::dbus_interface> eventInterface,
                 const std::string& path,
                 std::shared_ptr<sdbusplus::asio::connection>& conn,
-                boost::asio::io_service& io, const PowerState& readState,
+                boost::asio::io_service& io, const PowerState& powerState,
                 const std::string& groupEventName, const std::string& eventName,
                 std::shared_ptr<std::set<std::string>> asserts,
                 std::shared_ptr<std::set<std::string>> combineEvent,
@@ -50,18 +52,18 @@ class PSUSubEvent : public std::enable_shared_from_this<PSUSubEvent>
 
   private:
     int value = 0;
-    int fd;
-    size_t errCount;
+    size_t errCount{0};
     std::string path;
     std::string eventName;
 
     PowerState readState;
-    boost::asio::deadline_timer waitTimer;
-    std::shared_ptr<boost::asio::streambuf> readBuf;
+    boost::asio::steady_timer waitTimer;
+    std::shared_ptr<std::array<char, 128>> buffer;
     void restartRead();
-    void handleResponse(const boost::system::error_code& err);
+    void handleResponse(const boost::system::error_code& err,
+                        size_t bytesTransferred);
     void updateValue(const int& newValue);
-    boost::asio::posix::stream_descriptor inputDev;
+    boost::asio::random_access_file inputDev;
     std::string psuName;
     std::string groupEventName;
     std::string fanName;
@@ -77,7 +79,7 @@ class PSUCombineEvent
 {
   public:
     PSUCombineEvent(
-        sdbusplus::asio::object_server& objectSever,
+        sdbusplus::asio::object_server& objectServer,
         std::shared_ptr<sdbusplus::asio::connection>& conn,
         boost::asio::io_service& io, const std::string& psuName,
         const PowerState& powerState,

@@ -14,12 +14,11 @@
 // limitations under the License.
 */
 
+#include "ADCSensor.hpp"
+
 #include <unistd.h>
 
-#include <ADCSensor.hpp>
-#include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/read_until.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
@@ -50,15 +49,22 @@ ADCSensor::ADCSensor(const std::string& path,
                      const std::string& sensorConfiguration,
                      std::optional<BridgeGpio>&& bridgeGpio) :
     Sensor(escapeName(sensorName), std::move(thresholdsIn), sensorConfiguration,
-           "xyz.openbmc_project.Configuration.ADC", false, false,
-           maxVoltageReading / scaleFactor, minVoltageReading / scaleFactor,
-           conn, readState),
-    std::enable_shared_from_this<ADCSensor>(), objServer(objectServer),
-    inputDev(io, open(path.c_str(), O_RDONLY)), waitTimer(io), path(path),
+           "ADC", false, false, maxVoltageReading / scaleFactor,
+           minVoltageReading / scaleFactor, conn, readState),
+    objServer(objectServer), inputDev(io), waitTimer(io), path(path),
     scaleFactor(scaleFactor),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
     bridgeGpio(std::move(bridgeGpio)), thresholdTimer(io)
 {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0)
+    {
+        std::cerr << "unable to open acd device \n";
+    }
+
+    inputDev.assign(fd);
+
     sensorInterface = objectServer.add_interface(
         "/xyz/openbmc_project/sensors/voltage/" + name,
         "xyz.openbmc_project.Sensor.Value");
@@ -103,30 +109,30 @@ void ADCSensor::setupRead(void)
         // value. Guarantee that the HW signal can be stable, the HW signal
         // could be instability.
         waitTimer.expires_from_now(
-            boost::posix_time::milliseconds(bridgeGpio->setupTimeMs));
+            std::chrono::milliseconds(bridgeGpio->setupTimeMs));
         waitTimer.async_wait(
             [weakRef, buffer](const boost::system::error_code& ec) {
-                std::shared_ptr<ADCSensor> self = weakRef.lock();
-                if (ec == boost::asio::error::operation_aborted)
-                {
-                    return; // we're being canceled
-                }
+            std::shared_ptr<ADCSensor> self = weakRef.lock();
+            if (ec == boost::asio::error::operation_aborted)
+            {
+                return; // we're being canceled
+            }
 
-                if (self)
-                {
-                    boost::asio::async_read_until(
-                        self->inputDev, *buffer, '\n',
-                        [weakRef, buffer](const boost::system::error_code& ec,
-                                          std::size_t /*bytes_transfered*/) {
-                            std::shared_ptr<ADCSensor> self = weakRef.lock();
-                            if (self)
-                            {
-                                self->readBuf = buffer;
-                                self->handleResponse(ec);
-                            }
-                        });
-                }
-            });
+            if (self)
+            {
+                boost::asio::async_read_until(
+                    self->inputDev, *buffer, '\n',
+                    [weakRef, buffer](const boost::system::error_code& ec,
+                                      std::size_t /*bytes_transfered*/) {
+                    std::shared_ptr<ADCSensor> self = weakRef.lock();
+                    if (self)
+                    {
+                        self->readBuf = buffer;
+                        self->handleResponse(ec);
+                    }
+                    });
+            }
+        });
     }
     else
     {
@@ -134,12 +140,12 @@ void ADCSensor::setupRead(void)
             inputDev, *buffer, '\n',
             [weakRef, buffer](const boost::system::error_code& ec,
                               std::size_t /*bytes_transfered*/) {
-                std::shared_ptr<ADCSensor> self = weakRef.lock();
-                if (self)
-                {
-                    self->readBuf = buffer;
-                    self->handleResponse(ec);
-                }
+            std::shared_ptr<ADCSensor> self = weakRef.lock();
+            if (self)
+            {
+                self->readBuf = buffer;
+                self->handleResponse(ec);
+            }
             });
     }
 }
@@ -183,6 +189,8 @@ void ADCSensor::handleResponse(const boost::system::error_code& err)
     {
         (*bridgeGpio).set(0);
     }
+
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     int fd = open(path.c_str(), O_RDONLY);
     if (fd < 0)
     {
@@ -190,7 +198,7 @@ void ADCSensor::handleResponse(const boost::system::error_code& err)
         return; // we're no longer valid
     }
     inputDev.assign(fd);
-    waitTimer.expires_from_now(boost::posix_time::milliseconds(sensorPollMs));
+    waitTimer.expires_from_now(std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
         std::shared_ptr<ADCSensor> self = weakRef.lock();
         if (ec == boost::asio::error::operation_aborted)

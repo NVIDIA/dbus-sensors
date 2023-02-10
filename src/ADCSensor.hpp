@@ -1,10 +1,11 @@
 #pragma once
 
-#include <Thresholds.hpp>
+#include "Thresholds.hpp"
+#include "sensor.hpp"
+
 #include <boost/asio/streambuf.hpp>
 #include <gpiod.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <sensor.hpp>
 
 #include <memory>
 #include <optional>
@@ -70,8 +71,8 @@ class ADCSensor : public Sensor, public std::enable_shared_from_this<ADCSensor>
               std::shared_ptr<sdbusplus::asio::connection>& conn,
               boost::asio::io_service& io, const std::string& sensorName,
               std::vector<thresholds::Threshold>&& thresholds,
-              const double scaleFactor, const float pollRate,
-              PowerState readState, const std::string& sensorConfiguration,
+              double scaleFactor, float pollRate, PowerState readState,
+              const std::string& sensorConfiguration,
               std::optional<BridgeGpio>&& bridgeGpio);
     ~ADCSensor() override;
     void setupRead(void);
@@ -79,7 +80,7 @@ class ADCSensor : public Sensor, public std::enable_shared_from_this<ADCSensor>
   private:
     sdbusplus::asio::object_server& objServer;
     boost::asio::posix::stream_descriptor inputDev;
-    boost::asio::deadline_timer waitTimer;
+    boost::asio::steady_timer waitTimer;
     std::shared_ptr<boost::asio::streambuf> readBuf;
     std::string path;
     double scaleFactor;

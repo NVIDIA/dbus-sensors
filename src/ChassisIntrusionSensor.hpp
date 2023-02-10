@@ -1,7 +1,7 @@
 #pragma once
 
-#include <boost/asio/deadline_timer.hpp>
 #include <boost/asio/io_service.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <gpiod.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
@@ -30,19 +30,19 @@ class ChassisIntrusionSensor
     std::shared_ptr<sdbusplus::asio::dbus_interface> mIface;
     std::shared_ptr<sdbusplus::asio::connection> mDbusConn;
 
-    IntrusionSensorType mType;
+    IntrusionSensorType mType{IntrusionSensorType::gpio};
 
     // intrusion status. 0: not intruded, 1: intruded
     std::string mValue = "unknown";
     std::string mOldValue = "unknown";
 
     // valid if it is PCH register via i2c
-    int mBusId;
-    int mSlaveAddr;
-    boost::asio::deadline_timer mPollTimer;
+    int mBusId{-1};
+    int mSlaveAddr{-1};
+    boost::asio::steady_timer mPollTimer;
 
     // valid if it is via GPIO
-    bool mGpioInverted;
+    bool mGpioInverted{false};
     std::string mPinName = "CHASSIS_INTRUSION";
     gpiod::line mGpioLine;
     boost::asio::posix::stream_descriptor mGpioFd;
@@ -54,7 +54,7 @@ class ChassisIntrusionSensor
     bool mInitialized = false;
 
     void updateValue(const std::string& newValue);
-    int i2cReadFromPch(int busId, int slaveAddr);
+    static int i2cReadFromPch(int busId, int slaveAddr);
     void pollSensorStatusByPch();
     void readGpio();
     void pollSensorStatusByGpio();
