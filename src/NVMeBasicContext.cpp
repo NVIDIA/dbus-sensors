@@ -81,45 +81,6 @@ static void execBasicQuery(int bus, uint8_t addr, uint8_t cmd,
 
         resp.resize(UINT8_MAX + 1);
 
-<<<<<<< HEAD
-    /* Issue the NVMe MI basic command */
-    size = i2c_smbus_read_block_data(dev, cmd, resp.data());
-    if (size < 0)
-    {
-        rc = NVME_MI_BASIC_STATUS_LEN;
-        resp[2] = NVME_MI_BASIC_CTEMP_TEMP_SENSOR_FAILURE;
-
-        std::cerr << "Failed to read block data from device 0x" << std::hex
-                  << (int)addr << " on bus " << std::dec << bus << ": "
-                  << strerror(errno) << "\n";
-        goto cleanup_fds;
-    }
-    else if (size > UINT8_MAX + 1)
-    {
-        rc = -EBADMSG;
-        std::cerr << "Unexpected message length from device 0x" << std::hex
-                  << (int)addr << " on bus " << std::dec << bus << ": " << size
-                  << " (" << UINT8_MAX << ")\n";
-        goto cleanup_fds;
-||||||| 51ad667
-    /* Issue the NVMe MI basic command */
-    size = i2c_smbus_read_block_data(dev, cmd, resp.data());
-    if (size < 0)
-    {
-        rc = size;
-        std::cerr << "Failed to read block data from device 0x" << std::hex
-                  << (int)addr << " on bus " << std::dec << bus << ": "
-                  << strerror(errno) << "\n";
-        goto cleanup_fds;
-    }
-    else if (size > UINT8_MAX + 1)
-    {
-        rc = -EBADMSG;
-        std::cerr << "Unexpected message length from device 0x" << std::hex
-                  << (int)addr << " on bus " << std::dec << bus << ": " << size
-                  << " (" << UINT8_MAX << ")\n";
-        goto cleanup_fds;
-=======
         /* Issue the NVMe MI basic command */
         size = i2c_smbus_read_block_data(fileHandle.handle(), cmd, resp.data());
         if (size < 0)
@@ -140,8 +101,6 @@ static void execBasicQuery(int bus, uint8_t addr, uint8_t cmd,
         {
             resp.resize(size);
         }
->>>>>>> origin/master
-    }
     catch (const std::out_of_range& e)
     {
         std::cerr << "Failed to create file handle for bus " << std::dec << bus
@@ -286,25 +245,13 @@ void NVMeBasicContext::readAndProcessNVMeSensor()
         return;
     }
 
-<<<<<<< HEAD
-    std::shared_ptr<NVMeSensor> sensor = sensors.front();
-||||||| 51ad667
-    std::shared_ptr<NVMeSensor>& sensor = sensors.front();
-=======
     std::shared_ptr<NVMeSensor> sensor = *pollCursor++;
->>>>>>> origin/master
 
     if (!sensor->readingStateGood())
     {
         sensor->markAvailable(false);
         sensor->updateValue(std::numeric_limits<double>::quiet_NaN());
-<<<<<<< HEAD
-        sensors.pop_front();
-        sensors.emplace_back(sensor);
-||||||| 51ad667
-=======
         readAndProcessNVMeSensor();
->>>>>>> origin/master
         return;
     }
 

@@ -57,15 +57,10 @@ static constexpr auto pmbusNames{std::to_array<const char*>({
     "adm1272",
     "adm1275",
     "adm1278",
-<<<<<<< HEAD
-    "bmr453",
-||||||| 51ad667
-=======
     "adm1293",
     "ads7830",
     "ahe50dc_fan",
     "bmr490",
->>>>>>> origin/master
     "dps800",
     "ina219",
     "ina230",

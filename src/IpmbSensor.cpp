@@ -68,20 +68,9 @@ IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                        uint8_t hostSMbusIndex, const float pollRate,
                        std::string& sensorTypeName) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
-<<<<<<< HEAD
-           sensorConfiguration, "xyz.openbmc_project.Configuration.ExitAirTemp",
-           false, false, ipmbMaxReading, ipmbMinReading, conn, PowerState::on),
-    deviceAddress(deviceAddress), channelAddress(channelAddress),
-    hostSMbusIndex(hostSMbusIndex),
-||||||| 51ad667
-           sensorConfiguration, "xyz.openbmc_project.Configuration.ExitAirTemp",
-           false, false, ipmbMaxReading, ipmbMinReading, conn, PowerState::on),
-    deviceAddress(deviceAddress), hostSMbusIndex(hostSMbusIndex),
-=======
            sensorConfiguration, "IpmbSensor", false, false, ipmbMaxReading,
            ipmbMinReading, conn, PowerState::on),
     deviceAddress(deviceAddress), hostSMbusIndex(hostSMbusIndex),
->>>>>>> origin/master
     sensorPollMs(static_cast<int>(pollRate * 1000)), objectServer(objectServer),
     waitTimer(io)
 {
@@ -562,42 +551,8 @@ void createSensors(
                 }
                 uint8_t deviceAddress = loadVariant<uint8_t>(cfg, "Address");
 
-<<<<<<< HEAD
-                    uint8_t channelAddress = meAddressDefault;
-                    auto findmType = entry.second.find("ChannelAddress");
-                    if (findmType != entry.second.end())
-                    {
-                        channelAddress = std::visit(
-                            VariantToUnsignedIntVisitor(), findmType->second);
-                    }
-
-                    float pollRate = pollRateDefault;
-                    auto findPollRate = entry.second.find("PollRate");
-                    if (findPollRate != entry.second.end())
-                    {
-                        pollRate = std::visit(VariantToFloatVisitor(),
-                                              findPollRate->second);
-                        if (pollRate <= 0.0f)
-                        {
-                            pollRate = pollRateDefault;
-                        }
-                    }
-||||||| 51ad667
-                    float pollRate = pollRateDefault;
-                    auto findPollRate = entry.second.find("PollRate");
-                    if (findPollRate != entry.second.end())
-                    {
-                        pollRate = std::visit(VariantToFloatVisitor(),
-                                              findPollRate->second);
-                        if (pollRate <= 0.0f)
-                        {
-                            pollRate = pollRateDefault;
-                        }
-                    }
-=======
                 std::string sensorClass =
                     loadVariant<std::string>(cfg, "Class");
->>>>>>> origin/master
 
                 uint8_t hostSMbusIndex = hostSMbusIndexDefault;
                 auto findSmType = cfg.find("HostSMbusIndex");
@@ -607,22 +562,7 @@ void createSensors(
                                                 findSmType->second);
                 }
 
-<<<<<<< HEAD
-                    auto& sensor = sensors[name];
-                    sensor = std::make_unique<IpmbSensor>(
-                        dbusConnection, io, name, pathPair.first, objectServer,
-                        std::move(sensorThresholds), deviceAddress,
-                        channelAddress, hostSMbusIndex, pollRate,
-                        sensorTypeName);
-||||||| 51ad667
-                    auto& sensor = sensors[name];
-                    sensor = std::make_unique<IpmbSensor>(
-                        dbusConnection, io, name, pathPair.first, objectServer,
-                        std::move(sensorThresholds), deviceAddress,
-                        hostSMbusIndex, pollRate, sensorTypeName);
-=======
                 float pollRate = getPollRate(cfg, pollRateDefault);
->>>>>>> origin/master
 
                 uint8_t ipmbBusIndex = ipmbBusIndexDefault;
                 auto findBusType = cfg.find("Bus");

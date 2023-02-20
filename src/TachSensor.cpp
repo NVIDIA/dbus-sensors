@@ -21,13 +21,6 @@
 #include <unistd.h>
 
 #include <boost/asio/read_until.hpp>
-<<<<<<< HEAD
-#include <boost/date_time/posix_time/posix_time.hpp>
-#include <LedUtils.hpp>
-||||||| 51ad667
-#include <boost/date_time/posix_time/posix_time.hpp>
-=======
->>>>>>> origin/master
 #include <gpiod.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -64,16 +57,8 @@ TachSensor::TachSensor(const std::string& path, const std::string& objectType,
            powerState),
     objServer(objectServer), redundancy(redundancy),
     presence(std::move(presenceSensor)),
-<<<<<<< HEAD
-    inputDev(io, open(path.c_str(), O_RDONLY)), waitTimer(io), path(path),
-    led(ledIn), ledReg(ledReg), offset(offset)
-||||||| 51ad667
-    inputDev(io, open(path.c_str(), O_RDONLY)), waitTimer(io), path(path),
-    led(ledIn)
-=======
     inputDev(io, path, boost::asio::random_access_file::read_only),
     waitTimer(io), path(path), led(ledIn)
->>>>>>> origin/master
 {
     sensorInterface = objectServer.add_interface(
         "/xyz/openbmc_project/sensors/fan_tach/" + name,

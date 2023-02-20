@@ -500,137 +500,8 @@ void createSensors(
                         std::get_if<std::string>(&(findLED->second));
                     if (ledName == nullptr)
                     {
-<<<<<<< HEAD
-                        setReadState(*ptrPower, powerState);
-                    }
-                }
-
-                constexpr double defaultMaxReading = 25000;
-                constexpr double defaultMinReading = 0;
-                std::pair<double, double> limits =
-                    std::make_pair(defaultMinReading, defaultMaxReading);
-
-                std::optional<uint8_t> ledReg;
-                std::optional<uint8_t> offset;
-                auto findLedReg = baseConfiguration->second.find("LedRegister");
-                if (findLedReg != baseConfiguration->second.end())
-                {
-                    ledReg = std::visit(VariantToUnsignedIntVisitor(),
-                                        findLedReg->second);
-                }
-                auto findLedOffset = baseConfiguration->second.find("Offset");
-                if (findLedOffset != baseConfiguration->second.end())
-                {
-                    offset = std::visit(VariantToUnsignedIntVisitor(),
-                                        findLedOffset->second);
-                }
-
-                auto connector =
-                    sensorData->find(baseType + std::string(".Connector"));
-
-                std::optional<std::string> led;
-                std::string pwmName;
-                fs::path pwmPath;
-
-                // The Mutable parameter is optional, defaulting to false
-                bool isValueMutable = false;
-                if (connector != sensorData->end())
-                {
-                    auto findPwm = connector->second.find("Pwm");
-                    if (findPwm != connector->second.end())
-                    {
-                        fs::path pwmEnableFile =
-                            "pwm" + std::to_string(index + 1) + "_enable";
-                        fs::path enablePath =
-                            path.parent_path() / pwmEnableFile;
-                        enablePwm(enablePath);
-                        size_t pwm = std::visit(VariantToUnsignedIntVisitor(),
-                                                findPwm->second);
-                        pwmPath = directory / ("pwm" + std::to_string(pwm + 1));
-                        /* use pwm name override if found in configuration else
-                         * use default */
-                        auto findOverride = connector->second.find("PwmName");
-                        if (findOverride != connector->second.end())
-                        {
-                            pwmName = std::visit(VariantToStringVisitor(),
-                                                 findOverride->second);
-                        }
-                        else
-                        {
-                            pwmName = "Pwm_" + std::to_string(pwm + 1);
-                        }
-
-                        // Check PWM sensor mutability
-                        auto findMutable = connector->second.find("Mutable");
-                        if (findMutable != connector->second.end())
-                        {
-                            auto ptrMutable =
-                                std::get_if<bool>(&(findMutable->second));
-                            if (ptrMutable)
-                            {
-                                isValueMutable = *ptrMutable;
-                            }
-                        }
-||||||| 51ad667
-                        setReadState(*ptrPower, powerState);
-                    }
-                }
-
-                constexpr double defaultMaxReading = 25000;
-                constexpr double defaultMinReading = 0;
-                std::pair<double, double> limits =
-                    std::make_pair(defaultMinReading, defaultMaxReading);
-
-                auto connector =
-                    sensorData->find(baseType + std::string(".Connector"));
-
-                std::optional<std::string> led;
-                std::string pwmName;
-                fs::path pwmPath;
-
-                // The Mutable parameter is optional, defaulting to false
-                bool isValueMutable = false;
-                if (connector != sensorData->end())
-                {
-                    auto findPwm = connector->second.find("Pwm");
-                    if (findPwm != connector->second.end())
-                    {
-                        fs::path pwmEnableFile =
-                            "pwm" + std::to_string(index + 1) + "_enable";
-                        fs::path enablePath =
-                            path.parent_path() / pwmEnableFile;
-                        enablePwm(enablePath);
-                        size_t pwm = std::visit(VariantToUnsignedIntVisitor(),
-                                                findPwm->second);
-                        pwmPath = directory / ("pwm" + std::to_string(pwm + 1));
-                        /* use pwm name override if found in configuration else
-                         * use default */
-                        auto findOverride = connector->second.find("PwmName");
-                        if (findOverride != connector->second.end())
-                        {
-                            pwmName = std::visit(VariantToStringVisitor(),
-                                                 findOverride->second);
-                        }
-                        else
-                        {
-                            pwmName = "Pwm_" + std::to_string(pwm + 1);
-                        }
-
-                        // Check PWM sensor mutability
-                        auto findMutable = connector->second.find("Mutable");
-                        if (findMutable != connector->second.end())
-                        {
-                            auto ptrMutable =
-                                std::get_if<bool>(&(findMutable->second));
-                            if (ptrMutable)
-                            {
-                                isValueMutable = *ptrMutable;
-                            }
-                        }
-=======
                         std::cerr << "Wrong format for LED of " << sensorName
                                   << "\n";
->>>>>>> origin/master
                     }
                     else
                     {
@@ -639,23 +510,7 @@ void createSensors(
                 }
             }
 
-<<<<<<< HEAD
-                findLimits(limits, baseConfiguration);
-                tachSensors[sensorName] = std::make_unique<TachSensor>(
-                    path.string(), baseType, objectServer, dbusConnection,
-                    std::move(presenceSensor), redundancy, io, sensorName,
-                    std::move(sensorThresholds), *interfacePath, limits,
-                    powerState, led, ledReg, offset);
-||||||| 51ad667
-                findLimits(limits, baseConfiguration);
-                tachSensors[sensorName] = std::make_unique<TachSensor>(
-                    path.string(), baseType, objectServer, dbusConnection,
-                    std::move(presenceSensor), redundancy, io, sensorName,
-                    std::move(sensorThresholds), *interfacePath, limits,
-                    powerState, led);
-=======
             findLimits(limits, baseConfiguration);
->>>>>>> origin/master
 
             enableFanInput(path);
 
