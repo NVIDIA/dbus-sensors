@@ -3,8 +3,9 @@
 #include <linux/i2c.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
+#include "sensor.hpp"
 
-#include <PLXTempSensor.hpp>
+#include "PLXTempSensor.hpp"
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -86,7 +87,7 @@ void PLXTempSensor::setupRead(void)
 void PLXTempSensor::restartRead()
 {
     std::weak_ptr<PLXTempSensor> weakRef = weak_from_this();
-    waitTimer.expires_from_now(boost::posix_time::milliseconds(sensorPollMs));
+    waitTimer.expires_from_now(std::chrono::seconds(sensorPollMs));
     waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {

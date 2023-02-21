@@ -2,13 +2,14 @@
 
 #include <unistd.h>
 
-#include <Thresholds.hpp>
 #include <boost/asio/streambuf.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <sensor.hpp>
 
 #include <string>
 #include <vector>
+#include <iostream>
+#include "sensor.hpp"
+
 
 /**
  * @class PLXTempSensor
@@ -48,7 +49,7 @@ class PLXTempSensor :
 
   private:
     sdbusplus::asio::object_server& objServer;
-    boost::asio::deadline_timer waitTimer;
+    boost::asio::steady_timer waitTimer;
 
     uint8_t deviceBus;
     uint8_t deviceAddress;

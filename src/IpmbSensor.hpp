@@ -86,21 +86,11 @@ struct IpmbSensor :
                boost::asio::io_service& io, const std::string& name,
                const std::string& sensorConfiguration,
                sdbusplus::asio::object_server& objectServer,
-<<<<<<< HEAD:include/IpmbSensor.hpp
-               std::vector<thresholds::Threshold>&& thresholds,
-               uint8_t deviceAddress, uint8_t channelAddress,
-               uint8_t hostSMbusIndex, const float pollRate,
-               std::string& sensorTypeName);
-||||||| 51ad667:include/IpmbSensor.hpp
-               std::vector<thresholds::Threshold>&& thresholds,
-               uint8_t deviceAddress, uint8_t hostSMbusIndex,
-               const float pollRate, std::string& sensorTypeName);
-=======
                std::vector<thresholds::Threshold>&& thresholdData,
-               uint8_t deviceAddress, uint8_t hostSMbusIndex, float pollRate,
+               uint8_t deviceAddress, 
+               uint8_t hostSMbusIndex, float pollRate,
                std::string& sensorTypeName);
->>>>>>> origin/master:src/IpmbSensor.hpp
-    ~IpmbSensor() override;
+	~IpmbSensor() override;
 
     void checkThresholds(void) override;
     void read(void);

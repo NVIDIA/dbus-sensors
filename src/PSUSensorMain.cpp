@@ -937,15 +937,9 @@ void propertyInitialize(void)
 
     labelMatch = {
         {"pin", PSUProperty("Input Power", 3000, 0, 6, 0)},
-<<<<<<< HEAD
-        {"pout1", PSUProperty("PWR", 3000, 0, 6, 0)},
-||||||| 51ad667
-        {"pout1", PSUProperty("Output Power", 3000, 0, 6, 0)},
-=======
         {"pin1", PSUProperty("Input Power", 3000, 0, 6, 0)},
         {"pin2", PSUProperty("Input Power", 3000, 0, 6, 0)},
         {"pout1", PSUProperty("Output Power", 3000, 0, 6, 0)},
->>>>>>> origin/master
         {"pout2", PSUProperty("Output Power", 3000, 0, 6, 0)},
         {"pout3", PSUProperty("Output Power", 3000, 0, 6, 0)},
         {"power1", PSUProperty("Output Power", 3000, 0, 6, 0)},
@@ -1025,18 +1019,10 @@ void propertyInitialize(void)
         {"temp5", PSUProperty("TEMP", 127, -128, 3, 0)},
         {"temp6", PSUProperty("TEMP", 127, -128, 3, 0)},
         {"maxtemp1", PSUProperty("Max Temperature", 127, -128, 3, 0)},
-<<<<<<< HEAD
-        {"fan1", PSUProperty("SPD FAN", 30000, 0, 0, 0)},
-        {"fan2", PSUProperty("Fan Speed 2", 30000, 0, 0, 0)}};
-||||||| 51ad667
-        {"fan1", PSUProperty("Fan Speed 1", 30000, 0, 0, 0)},
-        {"fan2", PSUProperty("Fan Speed 2", 30000, 0, 0, 0)}};
-=======
         {"fan1", PSUProperty("Fan Speed 1", 30000, 0, 0, 0)},
         {"fan2", PSUProperty("Fan Speed 2", 30000, 0, 0, 0)},
         {"fan3", PSUProperty("Fan Speed 3", 30000, 0, 0, 0)},
         {"fan4", PSUProperty("Fan Speed 4", 30000, 0, 0, 0)}};
->>>>>>> origin/master
 
     pwmTable = {{"fan1", "Fan_1"},
                 {"fan2", "Fan_2"},

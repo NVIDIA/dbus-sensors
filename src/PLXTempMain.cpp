@@ -1,5 +1,5 @@
-#include <PLXTempSensor.hpp>
-#include <Utils.hpp>
+#include "PLXTempSensor.hpp"
+#include "Utils.hpp"
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/container/flat_map.hpp>
@@ -19,7 +19,7 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
+#include <iostream>
 static constexpr float pollRateDefault = 0.5;
 
 namespace fs = std::filesystem;
@@ -210,7 +210,7 @@ int main()
         createSensors(io, objectServer, sensors, systemBus, nullptr);
     });
 
-    boost::asio::deadline_timer filterTimer(io);
+    boost::asio::steady_timer filterTimer(io);
     std::function<void(sdbusplus::message::message&)> eventHandler =
         [&](sdbusplus::message::message& message) {
             if (message.is_method_error())
@@ -220,7 +220,7 @@ int main()
             }
             sensorsChanged->insert(message.get_path());
             // this implicitly cancels the timer
-            filterTimer.expires_from_now(boost::posix_time::seconds(1));
+            filterTimer.expires_from_now(std::chrono::seconds(1));
 
             filterTimer.async_wait([&](const boost::system::error_code& ec) {
                 if (ec == boost::asio::error::operation_aborted)

@@ -64,7 +64,7 @@ IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                        const std::string& sensorConfiguration,
                        sdbusplus::asio::object_server& objectServer,
                        std::vector<thresholds::Threshold>&& thresholdData,
-                       uint8_t deviceAddress, uint8_t channelAddress,
+                       uint8_t deviceAddress, 
                        uint8_t hostSMbusIndex, const float pollRate,
                        std::string& sensorTypeName) :
     Sensor(escapeName(sensorName), std::move(thresholdData),

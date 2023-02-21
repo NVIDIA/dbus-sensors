@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include <boost/asio/read_until.hpp>
+#include <LedUtils.hpp>
 #include <gpiod.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -58,7 +59,7 @@ TachSensor::TachSensor(const std::string& path, const std::string& objectType,
     objServer(objectServer), redundancy(redundancy),
     presence(std::move(presenceSensor)),
     inputDev(io, path, boost::asio::random_access_file::read_only),
-    waitTimer(io), path(path), led(ledIn)
+    waitTimer(io), path(path), led(ledIn), ledReg(ledReg), offset(offset)
 {
     sensorInterface = objectServer.add_interface(
         "/xyz/openbmc_project/sensors/fan_tach/" + name,
