@@ -7,6 +7,14 @@
 
 #include <string>
 #include <vector>
+#include <variant>
+
+using sensorMap = std::map<
+    std::string,
+    std::tuple<std::variant<std::string, int, int16_t, int64_t, uint16_t,
+                            uint32_t, uint64_t, double, bool>,
+               uint64_t, sdbusplus::message::object_path>>;
+
 
 struct SensorParams
 {
@@ -16,6 +24,9 @@ struct SensorParams
     double scaleValue;
     std::string units;
     std::string typeName;
+    std::string platform;
+    std::string inventoryChassis;
+    bool enablePlatformMetrics;
 };
 
 class HwmonTempSensor :
@@ -44,6 +55,12 @@ class HwmonTempSensor :
     double offsetValue;
     double scaleValue;
     unsigned int sensorPollMs;
+
+    std::string platform;
+    std::string inventoryChassis;
+    bool enablePlatformMetrics;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> sensorMetricIface;
+    sensorMap sensorMetric;
 
     void handleResponse(const boost::system::error_code& err);
     void restartRead();
