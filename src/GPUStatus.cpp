@@ -22,15 +22,13 @@ GPUStatus::GPUStatus(sdbusplus::asio::object_server& objectServer,
                      const std::string& sensorConfiguration) :
     AssocInterface(
         static_cast<sdbusplus::bus::bus&>(*conn),
-        ("/xyz/openbmc_project/sensors/gpuboard/GPU/" + escapeName(sensorName))
-            .c_str(),
+        ("/xyz/openbmc_project/sensors/GPU/" + escapeName(sensorName)).c_str(),
         AssocInterface::action::defer_emit),
     std::enable_shared_from_this<GPUStatus>(), name(sensorName),
     totalGPU(totalGPU), objServer(objectServer)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/gpuboard/GPU/" + escapeName(sensorName))
-            .c_str(),
+        ("/xyz/openbmc_project/sensors/GPU/" + escapeName(sensorName)).c_str(),
         "xyz.openbmc_project.Inventory.Item.GPU");
 
     fs::path p(sensorConfiguration);

@@ -18,8 +18,7 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
                              const std::string& sensorConfiguration) :
     AssocInterface(
         static_cast<sdbusplus::bus::bus&>(*conn),
-        ("/xyz/openbmc_project/sensors/power/PSU/" + escapeName(sensorName))
-            .c_str(),
+        ("/xyz/openbmc_project/sensors/PSU/" + escapeName(sensorName)).c_str(),
         AssocInterface::action::defer_emit),
     std::enable_shared_from_this<PSURedundancy>(), name(sensorName),
     totalPSU(totalPSUCount), redundantPSU(redundantPSUCount),
@@ -27,8 +26,7 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
     objServer(objectServer)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/power/PSU/" + escapeName(sensorName))
-            .c_str(),
+        ("/xyz/openbmc_project/sensors/PSU/" + escapeName(sensorName)).c_str(),
         "xyz.openbmc_project.Control.PowerSupplyRedundancy");
     sensorInterface->register_property(
         "Status", status,
