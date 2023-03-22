@@ -142,6 +142,7 @@ bool IpmbSensor::processReading(const std::vector<uint8_t>& data, double& resp)
 
 void IpmbSensor::read(void)
 {
+    
     waitTimer.expires_from_now(std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
@@ -180,13 +181,14 @@ void IpmbSensor::read(void)
                     read();
                     return;
                 }
-                // Per IPMI 'Get Sensor Reading' specification , 4th byte
+                // Per IPMI 'Get Sensor Reading' specification , 3th byte
                 // discrete reading sensor
+
                 sensorInterface->set_property(
-                    "CableStatus",  static_cast<bool>(data[3] & (1 << cableStatusBit)));
+                    "CableStatus",  static_cast<bool>(data[2] & (1 << cableStatusBit)));
                 sensorInterface->set_property(
                     "ConfigurationError",
-                     static_cast<bool>(data[3] & (1 << configurationErrorBit)));
+                     static_cast<bool>(data[2] & (1 << configurationErrorBit)));
                 if constexpr (debug)
                 {
                     std::cout << value;
