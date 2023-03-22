@@ -41,11 +41,11 @@ IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
     objectServer(objectServer), waitTimer(io)
 {
     sensorInterface = objectServer.add_interface(
-        "/xyz/openbmc_project/sensors/motherboard/cable/" + sensorName,
+        "/xyz/openbmc_project/sensors/cable/" + sensorName,
         "xyz.openbmc_project.Inventory.Item.Cable");
 
     association = objectServer.add_interface(
-        "/xyz/openbmc_project/sensors/motherboard/cable/" + sensorName,
+        "/xyz/openbmc_project/sensors/cable/" + sensorName,
         association::interface);
 
     createAssociation(association, sensorConfiguration);
