@@ -39,8 +39,7 @@ constexpr const bool debug = false;
 
 constexpr const char* configInterface =
     "xyz.openbmc_project.Configuration.IpmbSensor";
-static constexpr double ipmbMaxReading = 0xFF;
-static constexpr double ipmbMinReading = 0;
+
 
 static constexpr uint8_t meAddressDefault = 1;
 static constexpr uint8_t lun = 0;
@@ -64,7 +63,7 @@ IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                        std::vector<thresholds::Threshold>&& thresholdData,
                        uint8_t deviceAddress, uint8_t channelAddress,
                        uint8_t hostSMbusIndex, const float pollRate,
-                       std::string& sensorTypeName) :
+                       std::string& sensorTypeName,double ipmbMaxReading,double ipmbMinReading) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
            sensorConfiguration, "xyz.openbmc_project.Configuration.ExitAirTemp",
            false, false, ipmbMaxReading, ipmbMinReading, conn, PowerState::on),
@@ -244,6 +243,7 @@ void IpmbSensor::loadDefaults()
     if (subType == IpmbSubType::util)
     {
         // Utilization need to be scaled to percent
+       
         maxValue = 100;
         minValue = 0;
     }
@@ -476,9 +476,18 @@ void createSensors(
                         {
                             pollRate = pollRateDefault;
                         }
+                    }                 
+                    double maxValue = 255;
+                    double minValue = 0;
+                    for(auto sensorThreshold : sensorThresholds){
+                       
+                        if (sensorThreshold.value < 0) {
+                            minValue = -128;
+                            maxValue = 127;
+                            
+                        }
                     }
-
-                    /* Default sensor type is "temperature" */
+                    /*Default sensor type is "temperature"*/
                     std::string sensorTypeName = "temperature";
                     auto findType = entry.second.find("SensorType");
                     if (findType != entry.second.end())
@@ -486,13 +495,12 @@ void createSensors(
                         sensorTypeName = std::visit(VariantToStringVisitor(),
                                                     findType->second);
                     }
-
                     auto& sensor = sensors[name];
                     sensor = std::make_unique<IpmbSensor>(
                         dbusConnection, io, name, pathPair.first, objectServer,
                         std::move(sensorThresholds), deviceAddress,
                         channelAddress, hostSMbusIndex, pollRate,
-                        sensorTypeName);
+                        sensorTypeName,maxValue,minValue);
 
                     /* Initialize scale and offset value */
                     sensor->scaleVal = 1;

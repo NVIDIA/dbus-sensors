@@ -84,7 +84,7 @@ struct IpmbSensor : public Sensor
                std::vector<thresholds::Threshold>&& thresholds,
                uint8_t deviceAddress, uint8_t channelAddress,
                uint8_t hostSMbusIndex, const float pollRate,
-               std::string& sensorTypeName);
+               std::string& sensorTypeName ,double ipmbMaxReading  ,double ipmbMinReading );
     ~IpmbSensor() override;
 
     void checkThresholds(void) override;
