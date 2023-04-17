@@ -183,12 +183,41 @@ void IpmbSensor::read(void)
                 }
                 // Per IPMI 'Get Sensor Reading' specification , 3th byte
                 // discrete reading sensor
-
                 sensorInterface->set_property(
                     "CableStatus",  static_cast<bool>(data[2] & (1 << cableStatusBit)));
                 sensorInterface->set_property(
                     "ConfigurationError",
                      static_cast<bool>(data[2] & (1 << configurationErrorBit)));
+                if (sensorMaskEnable){
+                   bool cableMsgSent = false;
+                   bool cableStatusMsg= false;
+                    if (static_cast<bool>(data[2] & (1 << cableStatusBit)) && sensorReport){
+                        std::cerr << "Sensor " << statusSensorName << " is enabled"<< "\n";
+                        sensorReport = false;
+                        cableStatusMsg = true;
+                        cableMsgSent = true;
+                    }
+                    if (static_cast<bool>(data[2] & (1 << configurationErrorBit)) && !sensorReport){
+                        std::cerr << "Sensor " << statusSensorName << " is in error"<< "\n";
+                        sensorReport = true;
+                        cableMsgSent = true;
+                    }
+                    if (cableMsgSent){
+                        try
+                            {
+                                sdbusplus::message::message msg =
+                                   sensorInterface->new_signal("CableStatus");
+                                msg.append(statusSensorName, sensorInterface->get_interface_name(),cableMsgSent,cableStatusMsg);
+                                msg.signal_send();
+                            }
+                            catch (const sdbusplus::exception::exception& e)
+                            {
+                                std::cerr
+                                    << "Failed to send thresholdAsserted signal with assertValue\n";
+                            }
+                    }
+                }
+                
                 if constexpr (debug)
                 {
                     std::cout << value;
@@ -273,6 +302,17 @@ void createSensors(
                         std::cerr << "Invalid class " << sensorClass << "\n";
                         continue;
                     }
+                                    
+				    auto findmMask = entry.second.find("MaskEnable");
+                    if (findmMask != entry.second.end())
+                    {
+                        std::string maskEnableStatus= loadVariant<std::string>(entry.second, "MaskEnable");
+                        if (maskEnableStatus == "True"){
+                            sensor->sensorMaskEnable = true;
+                        }
+                    }
+                    
+                    sensor->statusSensorName = name;
 
                     sensor->init();
                 }
