@@ -15,17 +15,16 @@ SELSensor::SELSensor(sdbusplus::asio::object_server& objectServer,
                      std::shared_ptr<sdbusplus::asio::connection>& conn,
                      const std::string& sensorName,
                      const std::string& sensorConfiguration) :
-    AssocInterface(static_cast<sdbusplus::bus::bus&>(*conn),
-                   ("/xyz/openbmc_project/sensors/motherboard/EventLogging/" +
-                    escapeName(sensorName))
-                       .c_str(),
-                   AssocInterface::action::defer_emit),
+    AssocInterface(
+        static_cast<sdbusplus::bus::bus&>(*conn),
+        ("/xyz/openbmc_project/sensors/EventLogging/" + escapeName(sensorName))
+            .c_str(),
+        AssocInterface::action::defer_emit),
     std::enable_shared_from_this<SELSensor>(), name(sensorName),
     objServer(objectServer)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/motherboard/EventLogging/" +
-         escapeName(sensorName))
+        ("/xyz/openbmc_project/sensors/EventLogging/" + escapeName(sensorName))
             .c_str(),
         "xyz.openbmc_project.Inventory.Item.SEL");
     sensorInterface->register_property(

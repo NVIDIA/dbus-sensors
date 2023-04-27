@@ -13,21 +13,17 @@ ProcessorStatus::ProcessorStatus(
     sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     boost::asio::io_service& io, const std::string& sensorName,
-    const std::string& gpioName,
-    const std::string& sensorConfiguration) :
-    ItemInterface(static_cast<sdbusplus::bus::bus&>(*conn),
-                  ("/xyz/openbmc_project/sensors/motherboard/cpu/" +
-                   escapeName(sensorName))
-                      .c_str(),
-                  ItemInterface::action::defer_emit),
+    const std::string& gpioName, const std::string& sensorConfiguration) :
+    ItemInterface(
+        static_cast<sdbusplus::bus::bus&>(*conn),
+        ("/xyz/openbmc_project/sensors/cpu/" + escapeName(sensorName)).c_str(),
+        ItemInterface::action::defer_emit),
     std::enable_shared_from_this<ProcessorStatus>(),
     name(escapeName(sensorName)), gpio(gpioName), objServer(objectServer),
     procPresentEvent(io)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/motherboard/cpu/" +
-         escapeName(sensorName))
-            .c_str(),
+        ("/xyz/openbmc_project/sensors/cpu/" + escapeName(sensorName)).c_str(),
         CpuInterface::interface);
 
     fs::path p(sensorConfiguration);

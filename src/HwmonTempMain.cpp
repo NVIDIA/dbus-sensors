@@ -77,6 +77,26 @@ static const I2CDeviceTypeMap sensorTypes{
     {"W83773G", I2CDeviceType{"w83773g", true}},
 };
 
+std::string getPlatform() {
+    std::ifstream osRelease("/etc/os-release");
+    if (!osRelease) {
+        std::cerr << "Failed to open /etc/os-release" << std::endl;
+        return "";
+    }
+
+    std::string line;
+    while (getline(osRelease, line)) {
+        if (line.compare(0, 22, "OPENBMC_TARGET_MACHINE") == 0) {
+            size_t equalsPos = line.find('=');
+            std::string targetPlatform = line.substr(equalsPos + 1);
+            return targetPlatform;
+        }
+    }
+
+    std::cerr << "Target Platform not found in /etc/os-release" << std::endl;
+    return "";
+}
+
 static struct SensorParams
     getSensorParameters(const std::filesystem::path& path)
 {
@@ -88,7 +108,17 @@ static struct SensorParams
                                                .scaleValue = 1.0,
                                                .units =
                                                    sensor_paths::unitDegreesC,
-                                               .typeName = "temperature"};
+                                               .typeName = "temperature",
+                                               .platform = getPlatform(),
+                                               .inventoryChassis = "",
+                                               .enablePlatformMetrics = false};
+
+    if (tmpSensorParameters.platform.compare("\"hgx\"") == 0)
+    {
+        // HGX HMC Temperature Sensor's Inventory Chassis
+        tmpSensorParameters.inventoryChassis = "/xyz/openbmc_project/inventory/system/chassis/HGX_BMC_0";
+        tmpSensorParameters.enablePlatformMetrics = true;
+    }
 
     // For IIO RAW sensors we get a raw_value, an offset, and scale
     // to compute the value = (raw_value + offset) * scale

@@ -32,18 +32,17 @@ NVMeMIStatus::NVMeMIStatus(sdbusplus::asio::object_server& objectServer,
                            const std::string& sensorConfiguration,
                            unsigned int pollRate, uint8_t busId,
                            uint8_t nvmeAddress) :
-    StatusInterface(static_cast<sdbusplus::bus::bus&>(*conn),
-                    ("/xyz/openbmc_project/sensors/motherboard/drive/" +
-                     escapeName(sensorName))
-                        .c_str(),
-                    StatusInterface::action::defer_emit),
+    StatusInterface(
+        static_cast<sdbusplus::bus::bus&>(*conn),
+        ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))
+            .c_str(),
+        StatusInterface::action::defer_emit),
     std::enable_shared_from_this<NVMeMIStatus>(), name(sensorName),
     sensorPollSec(pollRate), busId(busId), nvmeAddress(nvmeAddress),
     objServer(objectServer), waitTimer(io)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/motherboard/drive/" +
-         escapeName(sensorName))
+        ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))
             .c_str(),
         DriveInterface::interface);
 

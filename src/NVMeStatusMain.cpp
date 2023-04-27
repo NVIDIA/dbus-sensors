@@ -215,8 +215,9 @@ int main()
 {
     boost::asio::io_service io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
+    sdbusplus::asio::object_server objectServer(systemBus, true);
+    objectServer.add_manager("/xyz/openbmc_project/sensors");
     systemBus->request_name("xyz.openbmc_project.NvmeStatus");
-    sdbusplus::asio::object_server objectServer(systemBus);
     boost::container::flat_map<std::string, std::shared_ptr<NVMeStatus>>
         u2Sensors;
     boost::container::flat_map<std::string, std::shared_ptr<NVMeMIStatus>>

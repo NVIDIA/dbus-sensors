@@ -41,11 +41,11 @@ IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
     objectServer(objectServer), waitTimer(io)
 {
     sensorInterface = objectServer.add_interface(
-        "/xyz/openbmc_project/sensors/motherboard/cable/" + sensorName,
+        "/xyz/openbmc_project/sensors/cable/" + sensorName,
         "xyz.openbmc_project.Inventory.Item.Cable");
 
     association = objectServer.add_interface(
-        "/xyz/openbmc_project/sensors/motherboard/cable/" + sensorName,
+        "/xyz/openbmc_project/sensors/cable/" + sensorName,
         association::interface);
 
     createAssociation(association, sensorConfiguration);
@@ -142,6 +142,7 @@ bool IpmbSensor::processReading(const std::vector<uint8_t>& data, double& resp)
 
 void IpmbSensor::read(void)
 {
+    
     waitTimer.expires_from_now(std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
@@ -180,13 +181,14 @@ void IpmbSensor::read(void)
                     read();
                     return;
                 }
-                // Per IPMI 'Get Sensor Reading' specification , 4th byte
+                // Per IPMI 'Get Sensor Reading' specification , 3th byte
                 // discrete reading sensor
+
                 sensorInterface->set_property(
-                    "CableStatus",  static_cast<bool>(data[3] & (1 << cableStatusBit)));
+                    "CableStatus",  static_cast<bool>(data[2] & (1 << cableStatusBit)));
                 sensorInterface->set_property(
                     "ConfigurationError",
-                     static_cast<bool>(data[3] & (1 << configurationErrorBit)));
+                     static_cast<bool>(data[2] & (1 << configurationErrorBit)));
                 if constexpr (debug)
                 {
                     std::cout << value;
@@ -276,8 +278,8 @@ void createSensors(
                 }
             }
         },
-        entityManagerName, "/", "org.freedesktop.DBus.ObjectManager",
-        "GetManagedObjects");
+        entityManagerName, "/xyz/openbmc_project/inventory",
+        "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 }
 
 void reinitSensors(sdbusplus::message::message& message)
@@ -325,8 +327,9 @@ int main()
 {
     boost::asio::io_service io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
+    sdbusplus::asio::object_server objectServer(systemBus, true);
+    objectServer.add_manager("/xyz/openbmc_project/sensors");
     systemBus->request_name("xyz.openbmc_project.IpmbStatus");
-    sdbusplus::asio::object_server objectServer(systemBus);
 
     initCmdTimer = std::make_unique<boost::asio::steady_timer>(io);
 

@@ -25,19 +25,18 @@ NVMeStatus::NVMeStatus(sdbusplus::asio::object_server& objectServer,
                        const std::string& sensorConfiguration,
                        unsigned int pollRate, uint8_t index, uint8_t busId,
                        uint8_t cpldAddress, uint8_t statusReg) :
-    ItemInterface(static_cast<sdbusplus::bus::bus&>(*conn),
-                  ("/xyz/openbmc_project/sensors/motherboard/drive/" +
-                   escapeName(sensorName))
-                      .c_str(),
-                  ItemInterface::action::defer_emit),
+    ItemInterface(
+        static_cast<sdbusplus::bus::bus&>(*conn),
+        ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))
+            .c_str(),
+        ItemInterface::action::defer_emit),
     std::enable_shared_from_this<NVMeStatus>(), name(sensorName),
     sensorPollSec(pollRate), index(index), busId(busId),
     cpldAddress(cpldAddress), statusReg(statusReg), objServer(objectServer),
     waitTimer(io)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/motherboard/drive/" +
-         escapeName(sensorName))
+        ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))
             .c_str(),
         DriveInterface::interface);
 

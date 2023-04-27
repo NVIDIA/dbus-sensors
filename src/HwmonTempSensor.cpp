@@ -30,6 +30,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <chrono>
 
 // Temperatures are read in milli degrees Celsius, we need degrees Celsius.
 // Pressures are read in kilopascal, we need Pascals.  On D-Bus for Open BMC
@@ -57,12 +58,32 @@ HwmonTempSensor::HwmonTempSensor(
     inputDev(io, path, boost::asio::random_access_file::read_only),
     waitTimer(io), path(path), offsetValue(thisSensorParameters.offsetValue),
     scaleValue(thisSensorParameters.scaleValue),
-    sensorPollMs(static_cast<unsigned int>(pollRate * 1000))
+    sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
+    platform(thisSensorParameters.platform),
+    inventoryChassis(thisSensorParameters.inventoryChassis),
+    enablePlatformMetrics(thisSensorParameters.enablePlatformMetrics)
 {
     sensorInterface = objectServer.add_interface(
         "/xyz/openbmc_project/sensors/" + thisSensorParameters.typeName + "/" +
             name,
         "xyz.openbmc_project.Sensor.Value");
+
+    if (enablePlatformMetrics)
+    {
+        std::string telemetryDataPath =
+            "/xyz/openbmc_project/inventory/platformmetrics";
+        std::string telemetryDataIntf =
+            "xyz.openbmc_project.Sensor.Aggregation";
+
+        // Register telemetry sensor collection interface/property
+        sensorMetricIface = objectServer.add_interface(telemetryDataPath,  telemetryDataIntf);
+        sensorMetricIface->register_property("SensorMetrics", sensorMetric);
+        sensorMetricIface->register_property(
+            "StaleSensorUpperLimitms",
+            static_cast<uint32_t>(750),
+            sdbusplus::asio::PropertyPermission::readWrite);
+        sensorMetricIface->initialize(true);
+    }
 
     for (const auto& threshold : thresholds)
     {
@@ -115,6 +136,10 @@ HwmonTempSensor::~HwmonTempSensor()
     }
     objServer.remove_interface(sensorInterface);
     objServer.remove_interface(association);
+    if (enablePlatformMetrics)
+    {
+        objServer.remove_interface(sensorMetricIface);
+    }
 }
 
 void HwmonTempSensor::setupRead(void)
@@ -181,6 +206,17 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err,
         else
         {
             updateValue((nvalue + offsetValue) * scaleValue);
+            if(enablePlatformMetrics)
+            {
+                uint64_t time =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+                sensorMetric[name] =
+                    std::make_tuple(nvalue, time, inventoryChassis);
+                ;
+                sensorMetricIface->set_property("SensorMetrics", sensorMetric);
+            }
         }
     }
     else
