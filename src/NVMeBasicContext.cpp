@@ -101,6 +101,7 @@ static void execBasicQuery(int bus, uint8_t addr, uint8_t cmd,
         {
             resp.resize(size);
         }
+    }
     catch (const std::out_of_range& e)
     {
         std::cerr << "Failed to create file handle for bus " << std::dec << bus

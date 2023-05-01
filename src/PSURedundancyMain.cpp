@@ -1,5 +1,5 @@
-#include <PSURedundancy.hpp>
-#include <VariantVisitors.hpp>
+#include "PSURedundancy.hpp"
+#include "VariantVisitors.hpp"
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/replace.hpp>

@@ -1,6 +1,6 @@
 #include <unistd.h>
 
-#include <GPUStatus.hpp>
+#include "GPUStatus.hpp"
 #include <boost/asio/read_until.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 

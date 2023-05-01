@@ -1,6 +1,6 @@
-#include <SELSensor.hpp>
-#include <VariantVisitors.hpp>
-#include <WatchdogSensor.hpp>
+#include "SELSensor.hpp"
+#include "VariantVisitors.hpp"
+#include "WatchdogSensor.hpp"
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/replace.hpp>
