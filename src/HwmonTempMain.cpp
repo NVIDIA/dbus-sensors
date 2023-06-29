@@ -328,6 +328,17 @@ void createSensors(
                               << deviceName << "\n";
                     continue;
                 }
+
+                std::string sensorPhysicalContext = "";
+                auto configurationSensorPhysicalContext =
+                    baseConfigMap->find("PhysicalContext");
+
+                if (configurationSensorPhysicalContext != baseConfigMap->end())
+                {
+                    sensorPhysicalContext = std::get<std::string>(
+                        configurationSensorPhysicalContext->second);
+                }
+
                 std::string sensorName =
                     std::get<std::string>(findSensorName->second);
                 // on rescans, only update sensors we were signaled by
@@ -399,7 +410,7 @@ void createSensors(
                         *hwmonFile, sensorType, objectServer, dbusConnection,
                         io, sensorName, std::move(sensorThresholds),
                         thisSensorParameters, pollRate, *interfacePath,
-                        readState);
+                        readState, sensorPhysicalContext);
                     sensor->setupRead();
                 }
                 // Looking for keys like "Name1" for temp2_input,
@@ -408,6 +419,7 @@ void createSensors(
                 while (true)
                 {
                     ++i;
+                    std::string context = "";
                     auto findKey =
                         baseConfigMap->find("Name" + std::to_string(i));
                     if (findKey == baseConfigMap->end())
@@ -446,7 +458,7 @@ void createSensors(
                             *hwmonFile, sensorType, objectServer,
                             dbusConnection, io, sensorName,
                             std::move(thresholds), thisSensorParameters,
-                            pollRate, *interfacePath, readState);
+                            pollRate, *interfacePath, readState, context);
                         sensor->setupRead();
                     }
                 }

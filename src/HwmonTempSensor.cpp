@@ -47,7 +47,7 @@ HwmonTempSensor::HwmonTempSensor(
     boost::asio::io_service& io, const std::string& sensorName,
     std::vector<thresholds::Threshold>&& thresholdsIn,
     const struct SensorParams& thisSensorParameters, const float pollRate,
-    const std::string& sensorConfiguration, const PowerState powerState) :
+    const std::string& sensorConfiguration, const PowerState powerState, const std::string& sensorPhysicalContext) :
     Sensor(boost::replace_all_copy(sensorName, " ", "_"),
            std::move(thresholdsIn), sensorConfiguration, objectType, false,
            false, thisSensorParameters.maxValue, thisSensorParameters.minValue,
@@ -59,7 +59,9 @@ HwmonTempSensor::HwmonTempSensor(
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
     platform(thisSensorParameters.platform),
     inventoryChassis(thisSensorParameters.inventoryChassis),
-    enablePlatformMetrics(thisSensorParameters.enablePlatformMetrics)
+    enablePlatformMetrics(thisSensorParameters.enablePlatformMetrics),
+    physicalContext(sensorPhysicalContext)
+
 {
     sensorInterface = objectServer.add_interface(
         "/xyz/openbmc_project/sensors/" + thisSensorParameters.typeName + "/" +
@@ -81,6 +83,20 @@ HwmonTempSensor::HwmonTempSensor(
             static_cast<uint32_t>(750),
             sdbusplus::asio::PropertyPermission::readWrite);
         sensorMetricIface->initialize(true);
+    }
+
+    if (!physicalContext.empty())
+    {
+        std::string areaIfaceName =
+            "xyz.openbmc_project.Inventory.Decorator.Area";
+        std::string physicalContextVal =
+            "xyz.openbmc_project.Inventory.Decorator.Area.PhysicalContextType." + physicalContext;
+
+        // Register Area interface/property
+        areaIface = objectServer.add_interface("/xyz/openbmc_project/sensors/" +
+                        thisSensorParameters.typeName + "/" + name,  areaIfaceName);
+        areaIface->register_property("PhysicalContext", physicalContextVal);
+        areaIface->initialize(true);
     }
 
     for (const auto& threshold : thresholds)
