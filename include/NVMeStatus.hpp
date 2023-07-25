@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Utils.hpp>
-#include <boost/asio/deadline_timer.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/io_service.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -50,5 +50,5 @@ class NVMeStatus :
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
     sdbusplus::asio::object_server& objServer;
     int getCPLDRegsInfo(uint8_t regs, int16_t* pu16data);
-    boost::asio::deadline_timer waitTimer;
+    boost::asio::steady_timer waitTimer;
 };

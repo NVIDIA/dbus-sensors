@@ -53,7 +53,7 @@ using IpmbMethodType =
 
 boost::container::flat_map<std::string, std::unique_ptr<IpmbSensor>> sensors;
 
-std::unique_ptr<boost::asio::deadline_timer> initCmdTimer;
+std::unique_ptr<boost::asio::steady_timer> initCmdTimer;
 
 IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                        boost::asio::io_service& io,
@@ -340,7 +340,7 @@ bool IpmbSensor::processReading(const std::vector<uint8_t>& data, double& resp)
 
 void IpmbSensor::read(void)
 {
-    waitTimer.expires_from_now(boost::posix_time::milliseconds(sensorPollMs));
+    waitTimer.expires_from_now( std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
@@ -607,7 +607,7 @@ void reinitSensors(sdbusplus::message::message& message)
             // we seem to send this command too fast sometimes, wait before
             // sending
             initCmdTimer->expires_from_now(
-                boost::posix_time::seconds(reinitWaitSeconds));
+                std::chrono::seconds(reinitWaitSeconds));
 
             initCmdTimer->async_wait([](const boost::system::error_code ec) {
                 if (ec == boost::asio::error::operation_aborted)
@@ -636,15 +636,15 @@ int main()
     objectServer.add_manager("/xyz/openbmc_project/sensors");
     systemBus->request_name("xyz.openbmc_project.IpmbSensor");
 
-    initCmdTimer = std::make_unique<boost::asio::deadline_timer>(io);
+    initCmdTimer = std::make_unique<boost::asio::steady_timer>(io);
 
     io.post([&]() { createSensors(io, objectServer, sensors, systemBus); });
 
-    boost::asio::deadline_timer configTimer(io);
+    boost::asio::steady_timer configTimer(io);
 
     std::function<void(sdbusplus::message::message&)> eventHandler =
         [&](sdbusplus::message::message&) {
-            configTimer.expires_from_now(boost::posix_time::seconds(1));
+            configTimer.expires_from_now(std::chrono::seconds(1));
             // create a timer because normally multiple properties change
             configTimer.async_wait([&](const boost::system::error_code& ec) {
                 if (ec == boost::asio::error::operation_aborted)

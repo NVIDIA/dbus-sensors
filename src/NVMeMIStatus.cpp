@@ -2,7 +2,7 @@
 
 #include <NVMeMIStatus.hpp>
 #include <boost/asio/read_until.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
+
 
 #include <cerrno>
 #include <fstream>
@@ -113,7 +113,7 @@ int NVMeMIStatus::getNVMeInfo(int bus, uint8_t addr, std::vector<uint8_t>& resp)
 void NVMeMIStatus::monitor(void)
 {
 
-    waitTimer.expires_from_now(boost::posix_time::seconds(sensorPollSec));
+    waitTimer.expires_from_now(std::chrono::seconds(sensorPollSec));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {

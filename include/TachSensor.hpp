@@ -84,7 +84,7 @@ class TachSensor : public Sensor
     std::shared_ptr<sdbusplus::asio::dbus_interface> itemAssoc;
     boost::asio::streambuf readBuf;
     boost::asio::posix::stream_descriptor inputDev;
-    boost::asio::deadline_timer waitTimer;
+    boost::asio::steady_timer waitTimer;
     std::string path;
     std::optional<std::string> led;
     std::optional<uint8_t> ledReg;

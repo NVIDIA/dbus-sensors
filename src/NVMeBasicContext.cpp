@@ -405,7 +405,7 @@ void NVMeBasicContext::readAndProcessNVMeSensor()
 
 void NVMeBasicContext::pollNVMeDevices()
 {
-    scanTimer.expires_from_now(boost::posix_time::seconds(1));
+    scanTimer.expires_from_now(std::chrono::seconds(1));
     scanTimer.async_wait(
         [self{shared_from_this()}](const boost::system::error_code errorCode) {
             if (errorCode == boost::asio::error::operation_aborted)

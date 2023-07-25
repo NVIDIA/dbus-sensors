@@ -20,7 +20,7 @@
 #include <Utils.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/read_until.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
+
 #include <LedUtils.hpp>
 #include <gpiod.hpp>
 #include <sdbusplus/asio/connection.hpp>
@@ -171,7 +171,7 @@ void TachSensor::handleResponse(const boost::system::error_code& err)
         return; // we're no longer valid
     }
     inputDev.assign(fd);
-    waitTimer.expires_from_now(boost::posix_time::milliseconds(pollTime));
+    waitTimer.expires_from_now( std::chrono::milliseconds(pollTime));
     waitTimer.async_wait([&](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {

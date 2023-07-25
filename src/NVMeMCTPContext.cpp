@@ -349,7 +349,7 @@ void NVMeMCTPContext::readAndProcessNVMeSensor()
 
     // setup the timeout timer
     mctpResponseTimer.expires_from_now(
-        boost::posix_time::seconds(mctpResponseTimeout));
+        std::chrono::seconds(mctpResponseTimeout));
 
     mctpResponseTimer.async_wait(
         [sensor, this](const boost::system::error_code errorCode) {
@@ -396,7 +396,7 @@ NVMeMCTPContext::NVMeMCTPContext(boost::asio::io_service& io, int rootBus) :
 
 void NVMeMCTPContext::pollNVMeDevices()
 {
-    scanTimer.expires_from_now(boost::posix_time::seconds(1));
+    scanTimer.expires_from_now(std::chrono::seconds(1));
     scanTimer.async_wait(
         [self{shared_from_this()}](const boost::system::error_code errorCode) {
             if (errorCode == boost::asio::error::operation_aborted)

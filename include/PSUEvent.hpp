@@ -17,7 +17,7 @@
 #pragma once
 
 #include <Utils.hpp>
-#include <boost/asio/deadline_timer.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/io_service.hpp>
 #include <boost/asio/streambuf.hpp>
 #include <boost/container/flat_map.hpp>
@@ -56,7 +56,7 @@ class PSUSubEvent : public std::enable_shared_from_this<PSUSubEvent>
     std::string eventName;
 
     PowerState readState;
-    boost::asio::deadline_timer waitTimer;
+    boost::asio::steady_timer waitTimer;
     std::shared_ptr<boost::asio::streambuf> readBuf;
     void restartRead();
     void handleResponse(const boost::system::error_code& err);

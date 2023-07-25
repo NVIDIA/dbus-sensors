@@ -48,7 +48,7 @@ class PLXTempSensor :
 
   private:
     sdbusplus::asio::object_server& objServer;
-    boost::asio::deadline_timer waitTimer;
+    boost::asio::steady_timer waitTimer;
 
     uint8_t deviceBus;
     uint8_t deviceAddress;

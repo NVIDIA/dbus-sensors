@@ -18,7 +18,7 @@
 #include <NVMeContext.hpp>
 #include <NVMeMCTPContext.hpp>
 #include <NVMeSensor.hpp>
-#include <boost/asio/deadline_timer.hpp>
+#include <boost/asio/steady_timer.hpp>
 
 #include <optional>
 #include <regex>
@@ -231,12 +231,12 @@ int main()
 
     io.post([&]() { createSensors(io, objectServer, systemBus); });
 
-    boost::asio::deadline_timer filterTimer(io);
+    boost::asio::steady_timer filterTimer(io);
     std::function<void(sdbusplus::message::message&)> eventHandler =
         [&filterTimer, &io, &objectServer,
          &systemBus](sdbusplus::message::message&) {
             // this implicitly cancels the timer
-            filterTimer.expires_from_now(boost::posix_time::seconds(1));
+            filterTimer.expires_from_now(std::chrono::seconds(1));
 
             filterTimer.async_wait([&](const boost::system::error_code& ec) {
                 if (ec == boost::asio::error::operation_aborted)

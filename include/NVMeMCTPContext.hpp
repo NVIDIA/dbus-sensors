@@ -18,7 +18,7 @@ class NVMeMCTPContext : public NVMeContext
 
   private:
     boost::asio::ip::tcp::socket nvmeSlaveSocket;
-    boost::asio::deadline_timer mctpResponseTimer;
+    boost::asio::steady_timer mctpResponseTimer;
 
     void readResponse();
 };
