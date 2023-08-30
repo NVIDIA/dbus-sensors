@@ -98,6 +98,12 @@ int NVMeMIStatus::getNVMeInfo(int bus, uint8_t addr, std::vector<uint8_t>& resp)
     size = i2c_smbus_read_block_data(dev, statusCmd, resp.data());
     if (size < 0)
     {
+        // Ignore the error message when the drive is not present.
+        if (errno == ENXIO)
+        {
+            close(dev);
+            return -1;
+        }
         std::cerr << "Failed to read block data from device 0x" << std::hex
                   << (int)addr << " on bus " << std::dec << bus << ": "
                   << strerror(errno) << "\n";
