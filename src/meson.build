@@ -39,6 +39,22 @@ if get_option('cpu').enabled()
     )
 endif
 
+if get_option('boot-progress').enabled()
+    executable(
+        'bootprogress',
+        'BootProgressSensor.cpp',
+        dependencies: [
+            default_deps,
+            utils_dep,
+        ],
+        implicit_include_directories: false,
+        include_directories: [
+            '../include'
+        ] + peci_incdirs,
+        install: true,
+    )
+endif
+
 if get_option('exit-air').enabled()
     executable(
         'exitairtempsensor',
