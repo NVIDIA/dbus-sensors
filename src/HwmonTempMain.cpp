@@ -489,7 +489,7 @@ void interfaceRemoved(
     auto sensorIt = sensors.begin();
     while (sensorIt != sensors.end())
     {
-        if ((sensorIt->second->configurationPath == path) &&
+        if (sensorIt->second && (sensorIt->second->configurationPath == path) &&
             (std::find(interfaces.begin(), interfaces.end(),
                        sensorIt->second->objectType) != interfaces.end()))
         {
