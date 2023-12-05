@@ -4,16 +4,12 @@
 #include <boost/asio/streambuf.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sensor.hpp>
+#include "sharedMemUtils.hpp"
 
 #include <string>
 #include <vector>
 #include <variant>
 
-using sensorMap = std::map<
-    std::string,
-    std::tuple<std::variant<std::string, int, int16_t, int64_t, uint16_t,
-                            uint32_t, uint64_t, double, bool>,
-               uint64_t, sdbusplus::message::object_path>>;
 
 
 struct SensorParams
@@ -26,7 +22,6 @@ struct SensorParams
     std::string typeName;
     std::string platform;
     std::string inventoryChassis;
-    bool enablePlatformMetrics;
 };
 
 class HwmonTempSensor :
@@ -59,10 +54,8 @@ class HwmonTempSensor :
 
     std::string platform;
     std::string inventoryChassis;
-    bool enablePlatformMetrics;
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorMetricIface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> areaIface;
-    sensorMap sensorMetric;
     std::string physicalContext;
 
     void handleResponse(const boost::system::error_code& err);

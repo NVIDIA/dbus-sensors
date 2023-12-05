@@ -67,10 +67,12 @@ systemd_system_unit_dir = systemd.get_variable(
     pkgconfig_define: ['prefix', get_option('prefix')])
 threads = dependency('threads')
 
+nvidia_shmem =dependency('nvidia-shmem', required : true)
 default_deps = [
     nlohmann_json,
     phosphor_logging_dep,
     sdbusplus,
+    nvidia_shmem
 ]
 
 thresholds_a = static_library(
