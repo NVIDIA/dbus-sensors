@@ -49,7 +49,7 @@ static constexpr double mcuTempMinReading = 0;
 boost::container::flat_map<std::string, std::unique_ptr<MCUTempSensor>> sensors;
 
 MCUTempSensor::MCUTempSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
-                             boost::asio::io_service& io,
+                             boost::asio::io_context& io,
                              const std::string& sensorName,
                              const std::string& sensorConfiguration,
                              sdbusplus::asio::object_server& objectServer,
@@ -100,7 +100,7 @@ void MCUTempSensor::checkThresholds(void)
     thresholds::checkThresholds(this);
 }
 
-int MCUTempSensor::getMCURegsInfoWord(uint8_t regs, int16_t* pu16data) const
+int MCUTempSensor::getMCURegsInfoWord(uint8_t regs, int32_t* pu32data) const
 {
     std::string i2cBus = "/dev/i2c-" + std::to_string(busId);
 
@@ -137,10 +137,10 @@ int MCUTempSensor::getMCURegsInfoWord(uint8_t regs, int16_t* pu16data) const
         return -1;
     }
 
-    *pu16data = i2c_smbus_read_word_data(fd, regs);
+    *pu32data = i2c_smbus_read_word_data(fd, regs);
     close(fd);
 
-    if (*pu16data < 0)
+    if (*pu32data < 0)
     {
         std::cerr << " read word data failed at " << static_cast<int>(regs)
                   << "\n";
@@ -154,7 +154,7 @@ void MCUTempSensor::read(void)
 {
     static constexpr size_t pollTime = 1; // in seconds
 
-    waitTimer.expires_from_now(std::chrono::seconds(pollTime));
+    waitTimer.expires_after(std::chrono::seconds(pollTime));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
@@ -166,7 +166,7 @@ void MCUTempSensor::read(void)
             std::cerr << "timer error\n";
             return;
         }
-        int16_t temp = 0;
+        int32_t temp = 0;
         int ret = getMCURegsInfoWord(tempReg, &temp);
         if (ret >= 0)
         {
@@ -188,7 +188,7 @@ void MCUTempSensor::read(void)
 }
 
 void createSensors(
-    boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
+    boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
     boost::container::flat_map<std::string, std::unique_ptr<MCUTempSensor>>&
         sensors,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
@@ -228,8 +228,8 @@ void createSensors(
                 uint8_t mcuAddress = loadVariant<uint8_t>(cfg, "Address");
                 uint8_t tempReg = loadVariant<uint8_t>(cfg, "Reg");
 
-                std::string sensorClass =
-                    loadVariant<std::string>(cfg, "Class");
+                std::string sensorClass = loadVariant<std::string>(cfg,
+                                                                   "Class");
 
                 if constexpr (debug)
                 {
@@ -252,27 +252,28 @@ void createSensors(
                 sensor->init();
             }
         }
-        },
+    },
         entityManagerName, "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 }
 
 int main()
 {
-    boost::asio::io_service io;
+    boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server objectServer(systemBus, true);
     objectServer.add_manager("/xyz/openbmc_project/sensors");
 
     systemBus->request_name("xyz.openbmc_project.MCUTempSensor");
 
-    io.post([&]() { createSensors(io, objectServer, sensors, systemBus); });
+    boost::asio::post(
+        io, [&]() { createSensors(io, objectServer, sensors, systemBus); });
 
     boost::asio::steady_timer configTimer(io);
 
     std::function<void(sdbusplus::message_t&)> eventHandler =
         [&](sdbusplus::message_t&) {
-        configTimer.expires_from_now(std::chrono::seconds(1));
+        configTimer.expires_after(std::chrono::seconds(1));
         // create a timer because normally multiple properties change
         configTimer.async_wait([&](const boost::system::error_code& ec) {
             if (ec == boost::asio::error::operation_aborted)

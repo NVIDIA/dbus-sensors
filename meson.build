@@ -8,29 +8,32 @@ project(
     ],
     license: 'Apache-2.0',
     version: '0.1',
-    meson_version: '>=0.57.0',
+    meson_version: '>=0.58.0',
 )
 
-# Note, there is currently an issue with CPUSensor when used in conjunction
-# with io_uring.  For the moment, we enable uring for all other daemons, but
-# we'd like to enable it for all daemons.
+# Enable io_uring for all daemons with below flags.
+#    '-DBOOST_ASIO_HAS_IO_URING',
+#    '-DBOOST_ASIO_DISABLE_EPOLL',
+#    '-DBOOST_ASIO_USE_TS_EXECUTOR_AS_DEFAULT',
+# Note, there is currently an issue with CPUSensor when used in
+# conjunction with io_uring. So it has not been changed to use
+# random file access. But we'd like to enable it for all daemons.
 # https://github.com/openbmc/dbus-sensors/issues/19
-uring_args = [
-    '-DBOOST_ASIO_HAS_IO_URING',
-    '-DBOOST_ASIO_DISABLE_EPOLL',
-    '-DBOOST_ASIO_USE_TS_EXECUTOR_AS_DEFAULT',
-]
 
 add_project_arguments(
     '-Wno-psabi',
     '-Wuninitialized',
     '-DBOOST_SYSTEM_NO_DEPRECATED',
+    '-DBOOST_ASIO_NO_DEPRECATED',
     '-DBOOST_ERROR_CODE_HEADER_ONLY',
     '-DBOOST_NO_RTTI',
     '-DBOOST_NO_TYPEID',
     '-DBOOST_ALL_NO_LIB',
     '-DBOOST_ASIO_DISABLE_THREADS',
     '-DBOOST_ALLOW_DEPRECATED_HEADERS',
+    '-DBOOST_ASIO_HAS_IO_URING',
+    '-DBOOST_ASIO_DISABLE_EPOLL',
+    '-DBOOST_ASIO_USE_TS_EXECUTOR_AS_DEFAULT',
     language: 'cpp',
 )
 
@@ -52,16 +55,11 @@ if not sdbusplus.found()
 endif
 
 phosphor_logging_dep = dependency('phosphor-logging')
-
-if cpp.has_header('nlohmann/json.hpp')
-    nlohmann_json = declare_dependency()
-else
-    nlohmann_json = dependency('nlohmann_json')
-endif
+nlohmann_json_dep = dependency('nlohmann_json', include_type: 'system')
 
 systemd = dependency('systemd')
 systemd_system_unit_dir = systemd.get_variable(
-    pkgconfig: 'systemdsystemunitdir',
+    'systemdsystemunitdir',
     pkgconfig_define: ['prefix', get_option('prefix')])
 threads = dependency('threads')
 
@@ -82,7 +80,7 @@ endif
 
 default_deps = [
     boost,
-    nlohmann_json,
+    nlohmann_json_dep,
     phosphor_logging_dep,
     sdbusplus,
     uring,

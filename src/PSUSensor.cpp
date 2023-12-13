@@ -38,16 +38,17 @@ static constexpr bool debug = false;
 PSUSensor::PSUSensor(const std::string& path, const std::string& objectType,
                      sdbusplus::asio::object_server& objectServer,
                      std::shared_ptr<sdbusplus::asio::connection>& conn,
-                     boost::asio::io_service& io, const std::string& sensorName,
+                     boost::asio::io_context& io, const std::string& sensorName,
                      std::vector<thresholds::Threshold>&& thresholdsIn,
                      const std::string& sensorConfiguration,
                      const PowerState& powerState,
                      const std::string& sensorUnits, unsigned int factor,
                      double max, double min, double offset,
-                     const std::string& label, size_t tSize, double pollRate) :
+                     const std::string& label, size_t tSize, double pollRate,
+                     const std::shared_ptr<I2CDevice>& i2cDevice) :
     Sensor(escapeName(sensorName), std::move(thresholdsIn), sensorConfiguration,
            objectType, false, false, max, min, conn, powerState),
-    objServer(objectServer),
+    i2cDevice(i2cDevice), objServer(objectServer),
     inputDev(io, path, boost::asio::random_access_file::read_only),
     waitTimer(io), path(path), sensorFactor(factor), sensorOffset(offset),
     thresholdTimer(io)
@@ -98,14 +99,39 @@ PSUSensor::PSUSensor(const std::string& path, const std::string& objectType,
 
 PSUSensor::~PSUSensor()
 {
-    waitTimer.cancel();
-    inputDev.close();
+    deactivate();
+
     objServer.remove_interface(sensorInterface);
     for (const auto& iface : thresholdInterfaces)
     {
         objServer.remove_interface(iface);
     }
     objServer.remove_interface(association);
+}
+
+bool PSUSensor::isActive()
+{
+    return inputDev.is_open();
+}
+
+void PSUSensor::activate(const std::string& newPath,
+                         const std::shared_ptr<I2CDevice>& newI2CDevice)
+{
+    path = newPath;
+    i2cDevice = newI2CDevice;
+    inputDev.open(path, boost::asio::random_access_file::read_only);
+    markAvailable(true);
+    setupRead();
+}
+
+void PSUSensor::deactivate()
+{
+    markAvailable(false);
+    // close the input dev to cancel async operations
+    inputDev.close();
+    waitTimer.cancel();
+    i2cDevice = nullptr;
+    path = "";
 }
 
 void PSUSensor::setupRead(void)
@@ -140,13 +166,13 @@ void PSUSensor::setupRead(void)
         }
 
         self->handleResponse(ec, bytesRead);
-        });
+    });
 }
 
 void PSUSensor::restartRead(void)
 {
     std::weak_ptr<PSUSensor> weakRef = weak_from_this();
-    waitTimer.expires_from_now(std::chrono::milliseconds(sensorPollMs));
+    waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
@@ -177,6 +203,16 @@ void PSUSensor::handleResponse(const boost::system::error_code& err,
         std::cerr << "Bad file descriptor for " << path << "\n";
         return;
     }
+    if (err || bytesRead == 0)
+    {
+        if (readingStateGood())
+        {
+            std::cerr << name << " read failed\n";
+        }
+        restartRead();
+        return;
+    }
+
     // null terminate the string so we don't walk off the end
     std::array<char, 128>& bufferRef = *buffer;
     bufferRef[bytesRead] = '\0';

@@ -17,12 +17,11 @@
 #include "ChassisIntrusionSensor.hpp"
 #include "Utils.hpp"
 
-#include <boost/asio/io_service.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/container/flat_map.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <sdbusplus/asio/sd_event.hpp>
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/exception.hpp>
@@ -48,12 +47,17 @@ static constexpr const char* sensorType = "ChassisIntrusionSensor";
 static constexpr const char* nicType = "NIC";
 static constexpr auto nicTypes{std::to_array<const char*>({nicType})};
 
-namespace fs = std::filesystem;
+static const std::map<std::string, std::string> compatibleHwmonNames = {
+    {"Aspeed2600_Hwmon", "intrusion0_alarm"}
+    // Add compatible strings here for new hwmon intrusion detection
+    // drivers that have different hwmon names but would also like to
+    // use the available Hwmon class.
+};
 
-static bool getIntrusionSensorConfig(
+static void createSensorsFromConfig(
+    boost::asio::io_context& io, sdbusplus::asio::object_server& objServer,
     const std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
-    IntrusionSensorType* pType, int* pBusId, int* pSlaveAddr,
-    bool* pGpioInverted)
+    std::shared_ptr<ChassisIntrusionSensor>& pSensor)
 {
     // find matched configuration according to sensor type
     ManagedObjectType sensorConfigurations;
@@ -63,14 +67,13 @@ static bool getIntrusionSensorConfig(
                                 sensorConfigurations, useCache))
     {
         std::cerr << "error communicating to entity manager\n";
-        return false;
+        return;
     }
 
     const SensorData* sensorData = nullptr;
     const std::pair<std::string, SensorBaseConfigMap>* baseConfiguration =
         nullptr;
 
-    // Get bus and addr of matched configuration
     for (const auto& [path, cfgData] : sensorConfigurations)
     {
         baseConfiguration = nullptr;
@@ -86,88 +89,143 @@ static bool getIntrusionSensorConfig(
 
         baseConfiguration = &(*sensorBase);
 
-        // judge class, "Gpio" or "I2C"
+        // Rearm defaults to "Automatic" mode
+        bool autoRearm = true;
+        auto findRearm = baseConfiguration->second.find("Rearm");
+        if (findRearm != baseConfiguration->second.end())
+        {
+            std::string rearmStr = std::get<std::string>(findRearm->second);
+            if (rearmStr != "Automatic" && rearmStr != "Manual")
+            {
+                std::cerr << "Wrong input for Rearm parameter\n";
+                continue;
+            }
+            autoRearm = (rearmStr == "Automatic");
+        }
+
+        // judge class, "Gpio", "Hwmon" or "I2C"
         auto findClass = baseConfiguration->second.find("Class");
-        if (findClass != baseConfiguration->second.end() &&
-            std::get<std::string>(findClass->second) == "Gpio")
+        if (findClass != baseConfiguration->second.end())
         {
-            *pType = IntrusionSensorType::gpio;
-        }
-        else
-        {
-            *pType = IntrusionSensorType::pch;
-        }
-
-        // case to find GPIO info
-        if (*pType == IntrusionSensorType::gpio)
-        {
-            auto findGpioPolarity =
-                baseConfiguration->second.find("GpioPolarity");
-
-            if (findGpioPolarity == baseConfiguration->second.end())
+            auto classString = std::get<std::string>(findClass->second);
+            if (classString == "Gpio")
             {
-                std::cerr << "error finding gpio polarity in configuration \n";
-                continue;
-            }
+                auto findGpioPolarity =
+                    baseConfiguration->second.find("GpioPolarity");
 
-            try
-            {
-                *pGpioInverted =
-                    (std::get<std::string>(findGpioPolarity->second) == "Low");
-            }
-            catch (const std::bad_variant_access& e)
-            {
-                std::cerr << "invalid value for gpio info in config. \n";
-                continue;
-            }
+                if (findGpioPolarity == baseConfiguration->second.end())
+                {
+                    std::cerr
+                        << "error finding gpio polarity in configuration \n";
+                    continue;
+                }
 
-            if (debug)
-            {
-                std::cout << "find chassis intrusion sensor polarity inverted "
-                             "flag is "
-                          << *pGpioInverted << "\n";
+                try
+                {
+                    bool gpioInverted =
+                        (std::get<std::string>(findGpioPolarity->second) ==
+                         "Low");
+                    pSensor = std::make_shared<ChassisIntrusionGpioSensor>(
+                        autoRearm, io, objServer, gpioInverted);
+                    pSensor->start();
+                    if (debug)
+                    {
+                        std::cout
+                            << "find chassis intrusion sensor polarity inverted "
+                               "flag is "
+                            << gpioInverted << "\n";
+                    }
+                    return;
+                }
+                catch (const std::bad_variant_access& e)
+                {
+                    std::cerr << "invalid value for gpio info in config. \n";
+                    continue;
+                }
+                catch (const std::exception& e)
+                {
+                    std::cerr << e.what() << std::endl;
+                    continue;
+                }
             }
+            // If class string contains Hwmon string
+            else if (classString.find("Hwmon") != std::string::npos)
+            {
+                std::string hwmonName;
+                std::map<std::string, std::string>::const_iterator
+                    compatIterator = compatibleHwmonNames.find(classString);
 
-            return true;
-        }
+                if (compatIterator == compatibleHwmonNames.end())
+                {
+                    std::cerr << "Hwmon Class string is not supported\n";
+                    continue;
+                }
 
-        // case to find I2C info
-        if (*pType == IntrusionSensorType::pch)
-        {
-            auto findBus = baseConfiguration->second.find("Bus");
-            auto findAddress = baseConfiguration->second.find("Address");
-            if (findBus == baseConfiguration->second.end() ||
-                findAddress == baseConfiguration->second.end())
-            {
-                std::cerr << "error finding bus or address in configuration \n";
-                continue;
-            }
+                hwmonName = compatIterator->second;
 
-            try
-            {
-                *pBusId = std::get<uint64_t>(findBus->second);
-                *pSlaveAddr = std::get<uint64_t>(findAddress->second);
+                try
+                {
+                    pSensor = std::make_shared<ChassisIntrusionHwmonSensor>(
+                        autoRearm, io, objServer, hwmonName);
+                    pSensor->start();
+                    return;
+                }
+                catch (const std::exception& e)
+                {
+                    std::cerr << e.what() << std::endl;
+                    continue;
+                }
             }
-            catch (const std::bad_variant_access& e)
+            else
             {
-                std::cerr << "invalid value for bus or address in config. \n";
-                continue;
+                auto findBus = baseConfiguration->second.find("Bus");
+                auto findAddress = baseConfiguration->second.find("Address");
+                if (findBus == baseConfiguration->second.end() ||
+                    findAddress == baseConfiguration->second.end())
+                {
+                    std::cerr
+                        << "error finding bus or address in configuration \n";
+                    continue;
+                }
+                try
+                {
+                    int busId = std::get<uint64_t>(findBus->second);
+                    int slaveAddr = std::get<uint64_t>(findAddress->second);
+                    pSensor = std::make_shared<ChassisIntrusionPchSensor>(
+                        autoRearm, io, objServer, busId, slaveAddr);
+                    pSensor->start();
+                    if (debug)
+                    {
+                        std::cout << "find matched bus " << busId
+                                  << ", matched slave addr " << slaveAddr
+                                  << "\n";
+                    }
+                    return;
+                }
+                catch (const std::bad_variant_access& e)
+                {
+                    std::cerr
+                        << "invalid value for bus or address in config. \n";
+                    continue;
+                }
+                catch (const std::exception& e)
+                {
+                    std::cerr << e.what() << std::endl;
+                    continue;
+                }
             }
-
-            if (debug)
-            {
-                std::cout << "find matched bus " << *pBusId
-                          << ", matched slave addr " << *pSlaveAddr << "\n";
-            }
-            return true;
         }
     }
 
-    std::cerr << "can't find matched I2C or GPIO configuration for intrusion "
-                 "sensor. \n";
-    *pBusId = -1;
-    *pSlaveAddr = -1;
-    return false;
+    std::cerr << " Can't find matched I2C, GPIO or Hwmon configuration\n";
+
+    // Make sure nothing runs when there's failure in configuration for the
+    // sensor after rescan
+    if (pSensor)
+    {
+        std::cerr << " Reset the occupied sensor pointer\n";
+        pSensor = nullptr;
+    }
 }
 
 static constexpr bool debugLanLeash = false;
@@ -180,48 +238,47 @@ static void getNicNameInfo(
 {
     auto getter = std::make_shared<GetSensorConfiguration>(
         dbusConnection, [](const ManagedObjectType& sensorConfigurations) {
-            // Get NIC name and save to map
-            lanInfoMap.clear();
-            for (const auto& [path, cfgData] : sensorConfigurations)
+        // Get NIC name and save to map
+        lanInfoMap.clear();
+        for (const auto& [path, cfgData] : sensorConfigurations)
+        {
+            const std::pair<std::string, SensorBaseConfigMap>*
+                baseConfiguration = nullptr;
+
+            // find base configuration
+            auto sensorBase = cfgData.find(configInterfaceName(nicType));
+            if (sensorBase == cfgData.end())
             {
-                const std::pair<std::string, SensorBaseConfigMap>*
-                    baseConfiguration = nullptr;
+                continue;
+            }
+            baseConfiguration = &(*sensorBase);
 
-                // find base configuration
-                auto sensorBase = cfgData.find(configInterfaceName(nicType));
-                if (sensorBase == cfgData.end())
+            auto findEthIndex = baseConfiguration->second.find("EthIndex");
+            auto findName = baseConfiguration->second.find("Name");
+
+            if (findEthIndex != baseConfiguration->second.end() &&
+                findName != baseConfiguration->second.end())
+            {
+                const auto* pEthIndex =
+                    std::get_if<uint64_t>(&findEthIndex->second);
+                const auto* pName = std::get_if<std::string>(&findName->second);
+                if (pEthIndex != nullptr && pName != nullptr)
                 {
-                    continue;
-                }
-                baseConfiguration = &(*sensorBase);
-
-                auto findEthIndex = baseConfiguration->second.find("EthIndex");
-                auto findName = baseConfiguration->second.find("Name");
-
-                if (findEthIndex != baseConfiguration->second.end() &&
-                    findName != baseConfiguration->second.end())
-                {
-                    const auto* pEthIndex =
-                        std::get_if<uint64_t>(&findEthIndex->second);
-                    const auto* pName =
-                        std::get_if<std::string>(&findName->second);
-                    if (pEthIndex != nullptr && pName != nullptr)
+                    lanInfoMap[*pEthIndex] = *pName;
+                    if (debugLanLeash)
                     {
-                        lanInfoMap[*pEthIndex] = *pName;
-                        if (debugLanLeash)
-                        {
-                            std::cout << "find name of eth" << *pEthIndex
-                                      << " is " << *pName << "\n";
-                        }
+                        std::cout << "find name of eth" << *pEthIndex << " is "
+                                  << *pName << "\n";
                     }
                 }
             }
+        }
 
-            if (lanInfoMap.empty())
-            {
-                std::cerr << "can't find matched NIC name. \n";
-            }
-        });
+        if (lanInfoMap.empty())
+        {
+            std::cerr << "can't find matched NIC name. \n";
+        }
+    });
 
     getter->getConfiguration(
         std::vector<std::string>{nicTypes.begin(), nicTypes.end()});
@@ -304,8 +361,8 @@ static void processLanStatusChange(sdbusplus::message_t& message)
     {
         std::string strEthNum = "eth" + std::to_string(ethNum) + lanInfo;
         const auto* strState = newLanConnected ? "connected" : "lost";
-        const auto* strMsgId =
-            newLanConnected ? "OpenBMC.0.1.LanRegained" : "OpenBMC.0.1.LanLost";
+        const auto* strMsgId = newLanConnected ? "OpenBMC.0.1.LanRegained"
+                                               : "OpenBMC.0.1.LanLost";
 
         lg2::info("{ETHDEV} LAN leash {STATE}", "ETHDEV", strEthNum, "STATE",
                   strState, "REDFISH_MESSAGE_ID", strMsgId,
@@ -391,9 +448,9 @@ static bool initializeLanStatus(
                 std::cerr << "Unable to read lan status value\n";
                 return;
             }
-            bool isLanConnected =
-                (*pState == "routable" || *pState == "carrier" ||
-                 *pState == "degraded");
+            bool isLanConnected = (*pState == "routable" ||
+                                   *pState == "carrier" ||
+                                   *pState == "degraded");
             if (debugLanLeash)
             {
                 std::cout << "ethNum = " << std::to_string(ethNum)
@@ -401,7 +458,7 @@ static bool initializeLanStatus(
                           << (isLanConnected ? "true" : "false") << "\n";
             }
             lanStatusMap[ethNum] = isLanConnected;
-            },
+        },
             "org.freedesktop.network1",
             "/org/freedesktop/network1/link/_" + pathSuffix,
             "org.freedesktop.DBus.Properties", "Get",
@@ -412,13 +469,10 @@ static bool initializeLanStatus(
 
 int main()
 {
-    int busId = -1;
-    int slaveAddr = -1;
-    bool gpioInverted = false;
-    IntrusionSensorType type = IntrusionSensorType::gpio;
+    std::shared_ptr<ChassisIntrusionSensor> intrusionSensor;
 
     // setup connection to dbus
-    boost::asio::io_service io;
+    boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
 
     // setup object server, define interface
@@ -426,20 +480,9 @@ int main()
 
     sdbusplus::asio::object_server objServer(systemBus, true);
 
-    objServer.add_manager("/xyz/openbmc_project/sensors");
+    objServer.add_manager("/xyz/openbmc_project/Chassis");
 
-    std::shared_ptr<sdbusplus::asio::dbus_interface> ifaceChassis =
-        objServer.add_interface(
-            "/xyz/openbmc_project/Intrusion/Chassis_Intrusion",
-            "xyz.openbmc_project.Chassis.Intrusion");
-
-    ChassisIntrusionSensor chassisIntrusionSensor(io, ifaceChassis);
-
-    if (getIntrusionSensorConfig(systemBus, &type, &busId, &slaveAddr,
-                                 &gpioInverted))
-    {
-        chassisIntrusionSensor.start(type, busId, slaveAddr, gpioInverted);
-    }
+    createSensorsFromConfig(io, objServer, systemBus, intrusionSensor);
 
     // callback to handle configuration change
     std::function<void(sdbusplus::message_t&)> eventHandler =
@@ -451,11 +494,7 @@ int main()
         }
 
         std::cout << "rescan due to configuration change \n";
-        if (getIntrusionSensorConfig(systemBus, &type, &busId, &slaveAddr,
-                                     &gpioInverted))
-        {
-            chassisIntrusionSensor.start(type, busId, slaveAddr, gpioInverted);
-        }
+        createSensorsFromConfig(io, objServer, systemBus, intrusionSensor);
     };
 
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
@@ -485,7 +524,7 @@ int main()
                 return;
             }
             getNicNameInfo(systemBus);
-            });
+        });
     }
 
     io.run();

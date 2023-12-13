@@ -45,7 +45,7 @@ HwmonTempSensor::HwmonTempSensor(
     const std::string& path, const std::string& objectType,
     sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
-    boost::asio::io_service& io, const std::string& sensorName,
+    boost::asio::io_context& io, const std::string& sensorName,
     std::vector<thresholds::Threshold>&& thresholdsIn,
     const struct SensorParams& thisSensorParameters, const float pollRate,
     const std::string& sensorConfiguration, const PowerState powerState,
@@ -161,13 +161,13 @@ void HwmonTempSensor::setupRead(void)
         {
             self->handleResponse(ec, bytesRead);
         }
-        });
+    });
 }
 
 void HwmonTempSensor::restartRead()
 {
     std::weak_ptr<HwmonTempSensor> weakRef = weak_from_this();
-    waitTimer.expires_from_now(std::chrono::milliseconds(sensorPollMs));
+    waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
@@ -197,8 +197,8 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err,
     {
         const char* bufEnd = readBuf.data() + bytesRead;
         int nvalue = 0;
-        std::from_chars_result ret =
-            std::from_chars(readBuf.data(), bufEnd, nvalue);
+        std::from_chars_result ret = std::from_chars(readBuf.data(), bufEnd,
+                                                     nvalue);
         if (ret.ec != std::errc())
         {
             incrementError();

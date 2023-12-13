@@ -21,7 +21,7 @@ unit_files = [
 ]
 
 foreach tuple : unit_files
-    if get_option(tuple[0]).enabled()
+    if get_option(tuple[0]).allowed()
         configure_file(
             copy: true,
             input: tuple[1],

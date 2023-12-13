@@ -1,6 +1,6 @@
 #pragma once
 
-#include <boost/asio/io_service.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <gpiod.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -8,56 +8,90 @@
 #include <memory>
 #include <string>
 
-enum IntrusionSensorType
-{
-    pch,
-    gpio
-};
+namespace fs = std::filesystem;
 
 class ChassisIntrusionSensor
 {
   public:
-    ChassisIntrusionSensor(
-        boost::asio::io_service& io,
-        std::shared_ptr<sdbusplus::asio::dbus_interface> iface);
+    explicit ChassisIntrusionSensor(bool autoRearm,
+                                    sdbusplus::asio::object_server& objServer);
 
-    ~ChassisIntrusionSensor();
+    virtual ~ChassisIntrusionSensor();
 
-    void start(IntrusionSensorType type, int busId, int slaveAddr,
-               bool gpioInverted);
+    void start();
+
+  protected:
+    virtual int readSensor() = 0;
+    virtual void pollSensorStatus() = 0;
+    void updateValue(const size_t& value);
 
   private:
+    std::string mValue;
+    // If this sensor uses automatic rearm method. Otherwise, manually rearm it
+    bool mAutoRearm;
     std::shared_ptr<sdbusplus::asio::dbus_interface> mIface;
-    std::shared_ptr<sdbusplus::asio::connection> mDbusConn;
+    sdbusplus::asio::object_server& mObjServer;
+    bool mOverridenState = false;
+    bool mInternalSet = false;
+    bool mRearmFlag = false;
 
-    IntrusionSensorType mType{IntrusionSensorType::gpio};
+    int setSensorValue(const std::string& req, std::string& propertyValue);
+};
 
-    // intrusion status. 0: not intruded, 1: intruded
-    std::string mValue = "unknown";
-    std::string mOldValue = "unknown";
+class ChassisIntrusionPchSensor :
+    public ChassisIntrusionSensor,
+    public std::enable_shared_from_this<ChassisIntrusionPchSensor>
+{
+  public:
+    ChassisIntrusionPchSensor(bool autoRearm, boost::asio::io_context& io,
+                              sdbusplus::asio::object_server& objServer,
+                              int busId, int slaveAddr);
 
-    // valid if it is PCH register via i2c
-    int mBusId{-1};
+    ~ChassisIntrusionPchSensor() override;
+
+  private:
+    int mBusFd{-1};
     int mSlaveAddr{-1};
     boost::asio::steady_timer mPollTimer;
+    int readSensor() override;
+    void pollSensorStatus() override;
+};
 
-    // valid if it is via GPIO
+class ChassisIntrusionGpioSensor :
+    public ChassisIntrusionSensor,
+    public std::enable_shared_from_this<ChassisIntrusionGpioSensor>
+{
+  public:
+    ChassisIntrusionGpioSensor(bool autoRearm, boost::asio::io_context& io,
+                               sdbusplus::asio::object_server& objServer,
+                               bool gpioInverted);
+
+    ~ChassisIntrusionGpioSensor() override;
+
+  private:
     bool mGpioInverted{false};
     std::string mPinName = "CHASSIS_INTRUSION";
     gpiod::line mGpioLine;
     boost::asio::posix::stream_descriptor mGpioFd;
+    int readSensor() override;
+    void pollSensorStatus() override;
+};
 
-    // common members
-    bool mOverridenState = false;
-    bool mInternalSet = false;
+class ChassisIntrusionHwmonSensor :
+    public ChassisIntrusionSensor,
+    public std::enable_shared_from_this<ChassisIntrusionHwmonSensor>
+{
+  public:
+    ChassisIntrusionHwmonSensor(bool autoRearm, boost::asio::io_context& io,
+                                sdbusplus::asio::object_server& objServer,
+                                std::string hwmonName);
 
-    bool mInitialized = false;
+    ~ChassisIntrusionHwmonSensor() override;
 
-    void updateValue(const std::string& newValue);
-    static int i2cReadFromPch(int busId, int slaveAddr);
-    void pollSensorStatusByPch();
-    void readGpio();
-    void pollSensorStatusByGpio();
-    void initGpioDeviceFile();
-    int setSensorValue(const std::string& req, std::string& propertyValue);
+  private:
+    std::string mHwmonName;
+    std::string mHwmonPath;
+    boost::asio::steady_timer mPollTimer;
+    int readSensor() override;
+    void pollSensorStatus() override;
 };

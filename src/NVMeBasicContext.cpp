@@ -185,7 +185,7 @@ static ssize_t processBasicQueryStream(FileHandle& in, FileHandle& out)
 
 /* Throws std::error_code on failure */
 /* FIXME: Probably shouldn't do fallible stuff in a constructor */
-NVMeBasicContext::NVMeBasicContext(boost::asio::io_service& io, int rootBus) :
+NVMeBasicContext::NVMeBasicContext(boost::asio::io_context& io, int rootBus) :
     NVMeContext::NVMeContext(io, rootBus), io(io), reqStream(io), respStream(io)
 {
     std::array<int, 2> responsePipe{};
@@ -263,7 +263,7 @@ void NVMeBasicContext::readAndProcessNVMeSensor()
         return;
     }
 
-    auto command = encodeBasicQuery(sensor->bus, 0x6a, 0x00);
+    auto command = encodeBasicQuery(sensor->bus, sensor->address, 0x00);
 
     /* Issue the request */
     boost::asio::async_write(
@@ -273,7 +273,7 @@ void NVMeBasicContext::readAndProcessNVMeSensor()
         {
             std::cerr << "Got error writing basic query: " << ec << "\n";
         }
-        });
+    });
 
     auto response = std::make_shared<boost::asio::streambuf>();
     response->prepare(1);
@@ -316,7 +316,7 @@ void NVMeBasicContext::readAndProcessNVMeSensor()
 
         response->prepare(len);
         return len;
-        },
+    },
         [weakSelf{weak_from_this()}, sensor, response](
             const boost::system::error_code& ec, std::size_t length) mutable {
         if (ec)
@@ -352,7 +352,7 @@ void NVMeBasicContext::pollNVMeDevices()
 {
     pollCursor = sensors.begin();
 
-    scanTimer.expires_from_now(std::chrono::seconds(1));
+    scanTimer.expires_after(std::chrono::seconds(1));
     scanTimer.async_wait([weakSelf{weak_from_this()}](
                              const boost::system::error_code errorCode) {
         if (errorCode == boost::asio::error::operation_aborted)

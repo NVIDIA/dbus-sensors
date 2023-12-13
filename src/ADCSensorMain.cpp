@@ -35,6 +35,7 @@
 #include <variant>
 #include <vector>
 
+static constexpr bool debug = false;
 static constexpr float pollRateDefault = 0.5;
 static constexpr float gpioBridgeSetupTimeDefault = 0.02;
 
@@ -70,7 +71,7 @@ bool isAdc(const fs::path& parentPath)
 }
 
 void createSensors(
-    boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
+    boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
     boost::container::flat_map<std::string, std::shared_ptr<ADCSensor>>&
         sensors,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
@@ -153,8 +154,11 @@ void createSensors(
             }
             if (sensorData == nullptr)
             {
-                std::cerr << "failed to find match for " << path.string()
-                          << "\n";
+                if constexpr (debug)
+                {
+                    std::cerr << "failed to find match for " << path.string()
+                              << "\n";
+                }
                 continue;
             }
 
@@ -201,8 +205,8 @@ void createSensors(
             auto findCPU = baseConfiguration->second.find("CPURequired");
             if (findCPU != baseConfiguration->second.end())
             {
-                size_t index =
-                    std::visit(VariantToIntVisitor(), findCPU->second);
+                size_t index = std::visit(VariantToIntVisitor(),
+                                          findCPU->second);
                 auto presenceFind = cpuPresence.find(index);
                 if (presenceFind == cpuPresence.end())
                 {
@@ -239,8 +243,8 @@ void createSensors(
                 }
             }
 
-            float pollRate =
-                getPollRate(baseConfiguration->second, pollRateDefault);
+            float pollRate = getPollRate(baseConfiguration->second,
+                                         pollRateDefault);
             PowerState readState = getPowerState(baseConfiguration->second);
 
             auto& sensor = sensors[sensorName];
@@ -290,7 +294,7 @@ void createSensors(
                 *interfacePath, std::move(bridgeGpio));
             sensor->setupRead();
         }
-        });
+    });
 
     getter->getConfiguration(
         std::vector<std::string>{sensorTypes.begin(), sensorTypes.end()});
@@ -298,7 +302,7 @@ void createSensors(
 
 int main()
 {
-    boost::asio::io_service io;
+    boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server objectServer(systemBus, true);
     objectServer.add_manager("/xyz/openbmc_project/sensors");
@@ -308,7 +312,7 @@ int main()
     auto sensorsChanged =
         std::make_shared<boost::container::flat_set<std::string>>();
 
-    io.post([&]() {
+    boost::asio::post(io, [&]() {
         createSensors(io, objectServer, sensors, systemBus, nullptr,
                       UpdateType::init);
     });
@@ -323,7 +327,7 @@ int main()
         }
         sensorsChanged->insert(message.get_path());
         // this implicitly cancels the timer
-        filterTimer.expires_from_now(std::chrono::seconds(1));
+        filterTimer.expires_after(std::chrono::seconds(1));
 
         filterTimer.async_wait([&](const boost::system::error_code& ec) {
             if (ec == boost::asio::error::operation_aborted)
@@ -374,7 +378,7 @@ int main()
         }
 
         // this implicitly cancels the timer
-        cpuFilterTimer.expires_from_now(std::chrono::seconds(1));
+        cpuFilterTimer.expires_after(std::chrono::seconds(1));
 
         cpuFilterTimer.async_wait([&](const boost::system::error_code& ec) {
             if (ec == boost::asio::error::operation_aborted)

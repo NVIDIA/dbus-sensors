@@ -45,7 +45,7 @@ TachSensor::TachSensor(const std::string& path, const std::string& objectType,
                        std::shared_ptr<sdbusplus::asio::connection>& conn,
                        std::unique_ptr<PresenceSensor>&& presenceSensor,
                        std::optional<RedundancySensor>* redundancy,
-                       boost::asio::io_service& io, const std::string& fanName,
+                       boost::asio::io_context& io, const std::string& fanName,
                        std::vector<thresholds::Threshold>&& thresholdsIn,
                        const std::string& sensorConfiguration,
                        const std::pair<double, double>& limits,
@@ -123,13 +123,13 @@ void TachSensor::setupRead()
         {
             self->handleResponse(ec, bytesRead);
         }
-        });
+    });
 }
 
 void TachSensor::restartRead(size_t pollTime)
 {
     std::weak_ptr<TachSensor> weakRef = weak_from_this();
-    waitTimer.expires_from_now(std::chrono::milliseconds(pollTime));
+    waitTimer.expires_after(std::chrono::milliseconds(pollTime));
     waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
@@ -172,8 +172,8 @@ void TachSensor::handleResponse(const boost::system::error_code& err,
         {
             const char* bufEnd = readBuf.data() + bytesRead;
             int nvalue = 0;
-            std::from_chars_result ret =
-                std::from_chars(readBuf.data(), bufEnd, nvalue);
+            std::from_chars_result ret = std::from_chars(readBuf.data(), bufEnd,
+                                                         nvalue);
             if (ret.ec != std::errc())
             {
                 incrementError();
@@ -219,7 +219,7 @@ void TachSensor::checkThresholds(void)
 }
 
 PresenceSensor::PresenceSensor(const std::string& gpioName, bool inverted,
-                               boost::asio::io_service& io,
+                               boost::asio::io_context& io,
                                const std::string& name) :
     gpioLine(gpiod::find_line(gpioName)),
     gpioFd(io), name(name)

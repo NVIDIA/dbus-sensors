@@ -38,7 +38,7 @@ IntelCPUSensor::IntelCPUSensor(
     const std::string& path, const std::string& objectType,
     sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
-    boost::asio::io_service& io, const std::string& sensorName,
+    boost::asio::io_context& io, const std::string& sensorName,
     std::vector<thresholds::Threshold>&& thresholdsIn,
     const std::string& sensorConfiguration, int cpuId, bool show,
     double dtsOffset) :
@@ -66,8 +66,8 @@ IntelCPUSensor::IntelCPUSensor(
             }
             else
             {
-                interfacePath =
-                    "/xyz/openbmc_project/sensors/temperature/" + name;
+                interfacePath = "/xyz/openbmc_project/sensors/temperature/" +
+                                name;
                 units = sensor_paths::unitDegreesC;
                 minValue = -128;
                 maxValue = 127;
@@ -114,7 +114,7 @@ IntelCPUSensor::~IntelCPUSensor()
 void IntelCPUSensor::restartRead(void)
 {
     std::weak_ptr<IntelCPUSensor> weakRef = weak_from_this();
-    waitTimer.expires_from_now(std::chrono::milliseconds(pollTime));
+    waitTimer.expires_after(std::chrono::milliseconds(pollTime));
     waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
@@ -192,8 +192,8 @@ void IntelCPUSensor::updateMinMaxValues(void)
             {
                 const auto& [suffix, oldValue, dbusName] = vectorItem;
                 auto attrPath = boost::replace_all_copy(path, fileItem, suffix);
-                if (auto newVal =
-                        readFile(attrPath, IntelCPUSensor::sensorScaleFactor))
+                if (auto newVal = readFile(attrPath,
+                                           IntelCPUSensor::sensorScaleFactor))
                 {
                     updateProperty(sensorInterface, oldValue, *newVal,
                                    dbusName);
@@ -258,7 +258,6 @@ void IntelCPUSensor::handleResponse(const boost::system::error_code& err)
 
     if (rdLen > 0)
     {
-
         try
         {
             rawValue = std::stod(response);

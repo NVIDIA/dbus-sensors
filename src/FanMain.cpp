@@ -41,14 +41,15 @@
 namespace fs = std::filesystem;
 
 // The following two structures need to be consistent
-static auto sensorTypes{
-    std::to_array<const char*>({"AspeedFan", "I2CFan", "NuvotonFan"})};
+static auto sensorTypes{std::to_array<const char*>(
+    {"AspeedFan", "I2CFan", "NuvotonFan", "HPEFan"})};
 
 enum FanTypes
 {
     aspeed = 0,
     i2c,
     nuvoton,
+    hpe,
     max,
 };
 
@@ -62,20 +63,47 @@ static std::regex inputRegex(R"(fan(\d+)_input)");
 // todo: power supply fan redundancy
 std::optional<RedundancySensor> systemRedundancy;
 
+static const std::map<std::string, FanTypes> compatibleFanTypes = {
+    {"aspeed,ast2400-pwm-tacho", FanTypes::aspeed},
+    {"aspeed,ast2500-pwm-tacho", FanTypes::aspeed},
+    {"nuvoton,npcm750-pwm-fan", FanTypes::nuvoton},
+    {"nuvoton,npcm845-pwm-fan", FanTypes::nuvoton},
+    {"hpe,gxp-fan-ctrl", FanTypes::hpe}
+    // add compatible string here for new fan type
+};
+
 FanTypes getFanType(const fs::path& parentPath)
 {
-    fs::path linkPath = parentPath / "device";
-    std::string canonical = fs::read_symlink(linkPath);
-    if (canonical.ends_with("pwm-tacho-controller") ||
-        canonical.ends_with("pwm_tach:tach"))
+    fs::path linkPath = parentPath / "of_node";
+    if (!fs::exists(linkPath))
     {
-        return FanTypes::aspeed;
+        return FanTypes::i2c;
     }
-    if (canonical.ends_with("pwm-fan-controller"))
+
+    std::string canonical = fs::canonical(linkPath);
+    std::string compatiblePath = canonical + "/compatible";
+    std::ifstream compatibleStream(compatiblePath);
+
+    if (!compatibleStream)
     {
-        return FanTypes::nuvoton;
+        std::cerr << "Error opening " << compatiblePath << "\n";
+        return FanTypes::i2c;
     }
-    // todo: will we need to support other types?
+
+    std::string compatibleString;
+    while (std::getline(compatibleStream, compatibleString))
+    {
+        compatibleString.pop_back(); // trim EOL before comparisons
+
+        std::map<std::string, FanTypes>::const_iterator compatibleIterator =
+            compatibleFanTypes.find(compatibleString);
+
+        if (compatibleIterator != compatibleFanTypes.end())
+        {
+            return compatibleIterator->second;
+        }
+    }
+
     return FanTypes::i2c;
 }
 void enablePwm(const fs::path& filePath)
@@ -182,7 +210,6 @@ void createRedundancySensor(
     const std::shared_ptr<sdbusplus::asio::connection>& conn,
     sdbusplus::asio::object_server& objectServer)
 {
-
     conn->async_method_call(
         [&objectServer, &sensors](boost::system::error_code& ec,
                                   const ManagedObjectType& managedObj) {
@@ -221,13 +248,13 @@ void createRedundancySensor(
                 }
             }
         }
-        },
+    },
         "xyz.openbmc_project.EntityManager", "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 }
 
 void createSensors(
-    boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
+    boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
     boost::container::flat_map<std::string, std::shared_ptr<TachSensor>>&
         tachSensors,
     boost::container::flat_map<std::string, std::unique_ptr<PwmSensor>>&
@@ -296,29 +323,25 @@ void createSensors(
                 {
                     continue;
                 }
-                if (fanType == FanTypes::aspeed || fanType == FanTypes::nuvoton)
+                if (fanType == FanTypes::aspeed ||
+                    fanType == FanTypes::nuvoton || fanType == FanTypes::hpe)
                 {
-                    // there will be only 1 aspeed or nuvoton sensor object
-                    // in sysfs, we found the fan
+                    // there will be only 1 aspeed or nuvoton or hpe sensor
+                    // object in sysfs, we found the fan
                     sensorData = &cfgData;
                     break;
                 }
                 if (fanType == FanTypes::i2c)
                 {
-                    size_t bus = 0;
-                    size_t address = 0;
-
-                    std::string link =
+                    std::string deviceName =
                         fs::read_symlink(directory / "device").filename();
 
-                    size_t findDash = link.find('-');
-                    if (findDash == std::string::npos ||
-                        link.size() <= findDash + 1)
+                    size_t bus = 0;
+                    size_t addr = 0;
+                    if (!getDeviceBusAddr(deviceName, bus, addr))
                     {
-                        std::cerr << "Error finding device from symlink";
+                        continue;
                     }
-                    bus = std::stoi(link.substr(0, findDash));
-                    address = std::stoi(link.substr(findDash + 1), nullptr, 16);
 
                     auto findBus = baseConfiguration->second.find("Bus");
                     auto findAddress =
@@ -335,7 +358,7 @@ void createSensors(
                     unsigned int configAddress = std::visit(
                         VariantToUnsignedIntVisitor(), findAddress->second);
 
-                    if (configBus == bus && configAddress == address)
+                    if (configBus == bus && configAddress == addr)
                     {
                         sensorData = &cfgData;
                         break;
@@ -472,8 +495,8 @@ void createSensors(
                         continue;
                     }
 
-                    fs::path pwmEnableFile =
-                        "pwm" + std::to_string(pwm + 1) + "_enable";
+                    fs::path pwmEnableFile = "pwm" + std::to_string(pwm + 1) +
+                                             "_enable";
                     fs::path enablePath = pwmPath.parent_path() / pwmEnableFile;
                     enablePwm(enablePath);
 
@@ -548,7 +571,7 @@ void createSensors(
         }
 
         createRedundancySensor(tachSensors, dbusConnection, objectServer);
-        });
+    });
     getter->getConfiguration(
         std::vector<std::string>{sensorTypes.begin(), sensorTypes.end()},
         retries);
@@ -556,7 +579,7 @@ void createSensors(
 
 int main()
 {
-    boost::asio::io_service io;
+    boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server objectServer(systemBus, true);
 
@@ -571,7 +594,7 @@ int main()
     auto sensorsChanged =
         std::make_shared<boost::container::flat_set<std::string>>();
 
-    io.post([&]() {
+    boost::asio::post(io, [&]() {
         createSensors(io, objectServer, tachSensors, pwmSensors, systemBus,
                       nullptr);
     });
@@ -586,7 +609,7 @@ int main()
         }
         sensorsChanged->insert(message.get_path());
         // this implicitly cancels the timer
-        filterTimer.expires_from_now(std::chrono::seconds(1));
+        filterTimer.expires_after(std::chrono::seconds(1));
 
         filterTimer.async_wait([&](const boost::system::error_code& ec) {
             if (ec == boost::asio::error::operation_aborted)

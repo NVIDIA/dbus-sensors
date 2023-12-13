@@ -49,8 +49,8 @@ class TestUtils : public testing::Test
     void createPECIDir()
     {
         peciDir = fs::path(testDir) / "peci";
-        auto peci0 =
-            peciDir / "peci-0/device/0-30/peci-cputemp.0/hwmon/hwmon25";
+        auto peci0 = peciDir /
+                     "peci-0/device/0-30/peci-cputemp.0/hwmon/hwmon25";
         fs::create_directories(peci0);
         {
             std::ofstream temp0Input{peci0 / "temp0_input"};
@@ -108,9 +108,9 @@ TEST_F(TestUtils, findFiles_in_hwmon_match)
 TEST_F(TestUtils, findFiles_in_peci_no_match)
 {
     std::vector<fs::path> foundPaths;
-    auto ret =
-        findFiles(peciDir, R"(peci-\d+/\d+-.+/peci-.+/hwmon/hwmon\d+/aaa$)",
-                  foundPaths, 6);
+    auto ret = findFiles(peciDir,
+                         R"(peci-\d+/\d+-.+/peci-.+/hwmon/hwmon\d+/aaa$)",
+                         foundPaths, 6);
 
     EXPECT_TRUE(ret);
     EXPECT_TRUE(foundPaths.empty());
@@ -119,9 +119,9 @@ TEST_F(TestUtils, findFiles_in_peci_no_match)
 TEST_F(TestUtils, findFiles_in_peci_match)
 {
     std::vector<fs::path> foundPaths;
-    auto ret =
-        findFiles(peciDir, R"(peci-\d+/\d+-.+/peci-.+/hwmon/hwmon\d+/name$)",
-                  foundPaths, 6);
+    auto ret = findFiles(peciDir,
+                         R"(peci-\d+/\d+-.+/peci-.+/hwmon/hwmon\d+/name$)",
+                         foundPaths, 6);
     EXPECT_TRUE(ret);
     EXPECT_EQ(foundPaths.size(), 1U);
 
@@ -159,9 +159,9 @@ TEST_F(TestUtils, findFiles_peciPath_end_with_slash)
 TEST_F(TestUtils, findFiles_in_sub_peci_match)
 {
     std::vector<fs::path> foundPaths;
-    auto ret =
-        findFiles(peciDir / "peci-0", R"(\d+-.+/peci-.+/hwmon/hwmon\d+/name$)",
-                  foundPaths, 5);
+    auto ret = findFiles(peciDir / "peci-0",
+                         R"(\d+-.+/peci-.+/hwmon/hwmon\d+/name$)", foundPaths,
+                         5);
     EXPECT_TRUE(ret);
     EXPECT_EQ(foundPaths.size(), 1U);
 
@@ -172,4 +172,54 @@ TEST_F(TestUtils, findFiles_in_sub_peci_match)
                     foundPaths, 5);
     EXPECT_TRUE(ret);
     EXPECT_EQ(foundPaths.size(), 3U);
+}
+
+TEST(GetDeviceBusAddrTest, DevNameInvalid)
+{
+    size_t bus = 0;
+    size_t addr = 0;
+    std::string devName;
+
+    auto ret = getDeviceBusAddr(devName, bus, addr);
+    EXPECT_FALSE(ret);
+
+    devName = "NoHyphen";
+    ret = getDeviceBusAddr(devName, bus, addr);
+    EXPECT_FALSE(ret);
+
+    devName = "pwm-fan";
+    ret = getDeviceBusAddr(devName, bus, addr);
+    EXPECT_FALSE(ret);
+}
+
+TEST(GetDeviceBusAddrTest, BusInvalid)
+{
+    size_t bus = 0;
+    size_t addr = 0;
+    std::string devName = "FF-00FF";
+
+    auto ret = getDeviceBusAddr(devName, bus, addr);
+    EXPECT_FALSE(ret);
+}
+
+TEST(GetDeviceBusAddrTest, AddrInvalid)
+{
+    size_t bus = 0;
+    size_t addr = 0;
+    std::string devName = "12-fan";
+
+    auto ret = getDeviceBusAddr(devName, bus, addr);
+    EXPECT_FALSE(ret);
+}
+
+TEST(GetDeviceBusAddrTest, AllValid)
+{
+    size_t bus = 0;
+    size_t addr = 0;
+    std::string devName = "12-00af";
+
+    auto ret = getDeviceBusAddr(devName, bus, addr);
+    EXPECT_TRUE(ret);
+    EXPECT_EQ(bus, 12);
+    EXPECT_EQ(addr, 0xaf);
 }

@@ -30,13 +30,13 @@ static constexpr double psuPwmMax = 100.0;
 static constexpr double defaultPwm = 30.0;
 static constexpr double targetIfaceMax = sysPwmMax;
 
-PwmSensor::PwmSensor(const std::string& name, const std::string& sysPath,
+PwmSensor::PwmSensor(const std::string& pwmname, const std::string& sysPath,
                      std::shared_ptr<sdbusplus::asio::connection>& conn,
                      sdbusplus::asio::object_server& objectServer,
                      const std::string& sensorConfiguration,
                      const std::string& sensorType, bool isValueMutable) :
     sysPath(sysPath),
-    objectServer(objectServer), name(name)
+    objectServer(objectServer), name(sensor_paths::escapePathForDbus(pwmname))
 {
     // add interface under sensor and Control.FanPwm as Control is used
     // in obmc project, also add sensor so it can be viewed as a sensor
@@ -91,7 +91,7 @@ PwmSensor::PwmSensor(const std::string& name, const std::string& sysPath,
         controlInterface->signal_property("Target");
 
         return 1;
-        },
+    },
         [this](double& curVal) {
         double currScaled = (curVal / 100.0) * pwmMax;
         auto currInt = static_cast<uint32_t>(std::round(currScaled));
@@ -134,7 +134,7 @@ PwmSensor::PwmSensor(const std::string& name, const std::string& sysPath,
         sensorInterface->signal_property("Value");
 
         return 1;
-        },
+    },
         [this](uint64_t& curVal) {
         auto getInt = getValue();
         auto scaledValue = static_cast<double>(getInt) / pwmMax;

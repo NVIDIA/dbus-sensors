@@ -66,7 +66,7 @@ struct Sensor
            PowerState readState = PowerState::always) :
         name(sensor_paths::escapePathForDbus(name)),
         configurationPath(configurationPath),
-        objectType(configInterfaceName(objectType)),
+        configInterface(configInterfaceName(objectType)),
         isSensorSettable(isSettable), isValueMutable(isMutable), maxValue(max),
         minValue(min), thresholds(std::move(thresholdData)),
         hysteresisTrigger((max - min) * 0.01),
@@ -80,7 +80,7 @@ struct Sensor
     virtual void checkThresholds(void) = 0;
     std::string name;
     std::string configurationPath;
-    std::string objectType;
+    std::string configInterface;
     bool isSensorSettable;
 
     /* A flag indicates if properties of xyz.openbmc_project.Sensor.Value
@@ -154,7 +154,7 @@ struct Sensor
         if ((inst.numCollectsGood == 0) && (inst.numCollectsMiss == 0))
         {
             std::cerr << "Sensor " << name << ": Configuration min=" << minValue
-                      << ", max=" << maxValue << ", type=" << objectType
+                      << ", max=" << maxValue << ", type=" << configInterface
                       << ", path=" << configurationPath << "\n";
         }
 
@@ -267,8 +267,8 @@ struct Sensor
         sensorInterface->register_property("MinValue", minValue);
         sensorInterface->register_property(
             "Value", value, [this](const double& newValue, double& oldValue) {
-                return setSensorValue(newValue, oldValue);
-            });
+            return setSensorValue(newValue, oldValue);
+        });
 
         fillMissingThresholds();
 
@@ -288,23 +288,23 @@ struct Sensor
                 continue;
             }
 
-            std::string level =
-                propertyLevel(threshold.level, threshold.direction);
-            std::string alarm =
-                propertyAlarm(threshold.level, threshold.direction);
+            std::string level = propertyLevel(threshold.level,
+                                              threshold.direction);
+            std::string alarm = propertyAlarm(threshold.level,
+                                              threshold.direction);
 
             if ((level.empty()) || (alarm.empty()))
             {
                 continue;
             }
-            size_t thresSize =
-                label.empty() ? thresholds.size() : thresholdSize;
+            size_t thresSize = label.empty() ? thresholds.size()
+                                             : thresholdSize;
             iface->register_property(
                 level, threshold.value,
                 [&, label, thresSize](const double& request, double& oldValue) {
                 oldValue = request; // todo, just let the config do this?
                 threshold.value = request;
-                thresholds::persistThreshold(configurationPath, objectType,
+                thresholds::persistThreshold(configurationPath, configInterface,
                                              threshold, dbusConnection,
                                              thresSize, label);
                 // Invalidate previously remembered value,
@@ -317,7 +317,7 @@ struct Sensor
                 // using updateValue(), which can check conditions like
                 // poweron, etc., before raising any event.
                 return 1;
-                });
+            });
             iface->register_property(alarm, false);
         }
         if (!sensorInterface->initialize())
@@ -359,17 +359,17 @@ struct Sensor
                     availableInterfaceName);
             availableInterface->register_property(
                 "Available", true, [this](const bool propIn, bool& old) {
-                    if (propIn == old)
-                    {
-                        return 1;
-                    }
-                    old = propIn;
-                    if (!propIn)
-                    {
-                        updateValue(std::numeric_limits<double>::quiet_NaN());
-                    }
+                if (propIn == old)
+                {
                     return 1;
-                });
+                }
+                old = propIn;
+                if (!propIn)
+                {
+                    updateValue(std::numeric_limits<double>::quiet_NaN());
+                }
+                return 1;
+            });
             availableInterface->initialize();
         }
         if (!operationalInterface)
@@ -490,6 +490,11 @@ struct Sensor
         if (!readingStateGood())
         {
             markAvailable(false);
+            for (auto& threshold : thresholds)
+            {
+                assertThresholds(this, value, threshold.level,
+                                 threshold.direction, false);
+            }
             updateValueProperty(std::numeric_limits<double>::quiet_NaN());
             return;
         }
@@ -544,8 +549,10 @@ struct Sensor
     // optional.
     void fillMissingThresholds()
     {
-        for (thresholds::Threshold& thisThreshold : thresholds)
+        const std::size_t thresholdsLen = thresholds.size();
+        for (std::size_t index = 0; index < thresholdsLen; ++index)
         {
+            const thresholds::Threshold& thisThreshold = thresholds[index];
             bool foundOpposite = false;
             thresholds::Direction opposite = thresholds::Direction::HIGH;
             if (thisThreshold.direction == thresholds::Direction::HIGH)

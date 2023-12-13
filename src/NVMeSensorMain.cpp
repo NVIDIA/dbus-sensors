@@ -23,6 +23,8 @@
 #include <optional>
 #include <regex>
 
+static constexpr uint8_t nvmeMiDefaultSlaveAddr = 0x6A;
+
 static NVMEMap nvmeDeviceMap;
 
 NVMEMap& getNVMEMap()
@@ -42,6 +44,21 @@ static std::optional<int>
     }
 
     return std::visit(VariantToIntVisitor(), findBus->second);
+}
+
+static uint8_t extractSlaveAddr(const std::string& path,
+                                const SensorBaseConfigMap& properties)
+{
+    auto findSlaveAddr = properties.find("Address");
+    if (findSlaveAddr == properties.end())
+    {
+        std::cerr << "could not determine slave address for " << path << "\n"
+                  << "using default as specified in nvme-mi"
+                  << "\n";
+        return nvmeMiDefaultSlaveAddr;
+    }
+
+    return std::visit(VariantToUnsignedIntVisitor(), findSlaveAddr->second);
 }
 
 static std::optional<std::string>
@@ -91,7 +108,7 @@ static std::optional<int> deriveRootBus(std::optional<int> busNumber)
 }
 
 static std::shared_ptr<NVMeContext>
-    provideRootBusContext(boost::asio::io_service& io, NVMEMap& map,
+    provideRootBusContext(boost::asio::io_context& io, NVMEMap& map,
                           int rootBus)
 {
     auto findRoot = map.find(rootBus);
@@ -108,7 +125,7 @@ static std::shared_ptr<NVMeContext>
 }
 
 static void handleSensorConfigurations(
-    boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
+    boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
     const ManagedObjectType& sensorConfigurations)
 {
@@ -134,10 +151,11 @@ static void handleSensorConfigurations(
         }
 
         const SensorBaseConfigMap& sensorConfig = sensorBase->second;
-        std::optional<int> busNumber =
-            extractBusNumber(interfacePath, sensorConfig);
-        std::optional<std::string> sensorName =
-            extractSensorName(interfacePath, sensorConfig);
+        std::optional<int> busNumber = extractBusNumber(interfacePath,
+                                                        sensorConfig);
+        std::optional<std::string> sensorName = extractSensorName(interfacePath,
+                                                                  sensorConfig);
+        uint8_t slaveAddr = extractSlaveAddr(interfacePath, sensorConfig);
         std::optional<int> rootBus = deriveRootBus(busNumber);
 
         if (!(busNumber && sensorName && rootBus))
@@ -163,7 +181,8 @@ static void handleSensorConfigurations(
             std::shared_ptr<NVMeSensor> sensorPtr =
                 std::make_shared<NVMeSensor>(
                     objectServer, io, dbusConnection, *sensorName,
-                    std::move(sensorThresholds), interfacePath, *busNumber);
+                    std::move(sensorThresholds), interfacePath, *busNumber,
+                    slaveAddr);
 
             context->addSensor(sensorPtr);
         }
@@ -180,17 +199,16 @@ static void handleSensorConfigurations(
     }
 }
 
-void createSensors(boost::asio::io_service& io,
+void createSensors(boost::asio::io_context& io,
                    sdbusplus::asio::object_server& objectServer,
                    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
 {
-
     auto getter = std::make_shared<GetSensorConfiguration>(
         dbusConnection, [&io, &objectServer, &dbusConnection](
                             const ManagedObjectType& sensorConfigurations) {
-            handleSensorConfigurations(io, objectServer, dbusConnection,
-                                       sensorConfigurations);
-        });
+        handleSensorConfigurations(io, objectServer, dbusConnection,
+                                   sensorConfigurations);
+    });
     getter->getConfiguration(std::vector<std::string>{NVMeSensor::sensorType});
 }
 
@@ -217,7 +235,7 @@ static void interfaceRemoved(sdbusplus::message_t& message, NVMEMap& contexts)
         }
 
         auto interface = std::find(interfaces.begin(), interfaces.end(),
-                                   (*sensor)->objectType);
+                                   (*sensor)->configInterface);
         if (interface == interfaces.end())
         {
             continue;
@@ -229,19 +247,20 @@ static void interfaceRemoved(sdbusplus::message_t& message, NVMEMap& contexts)
 
 int main()
 {
-    boost::asio::io_service io;
+    boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     systemBus->request_name("xyz.openbmc_project.NVMeSensor");
     sdbusplus::asio::object_server objectServer(systemBus, true);
     objectServer.add_manager("/xyz/openbmc_project/sensors");
 
-    io.post([&]() { createSensors(io, objectServer, systemBus); });
+    boost::asio::post(io,
+                      [&]() { createSensors(io, objectServer, systemBus); });
 
     boost::asio::steady_timer filterTimer(io);
     std::function<void(sdbusplus::message_t&)> eventHandler =
         [&filterTimer, &io, &objectServer, &systemBus](sdbusplus::message_t&) {
         // this implicitly cancels the timer
-        filterTimer.expires_from_now(std::chrono::seconds(1));
+        filterTimer.expires_after(std::chrono::seconds(1));
 
         filterTimer.async_wait([&](const boost::system::error_code& ec) {
             if (ec == boost::asio::error::operation_aborted)
@@ -272,7 +291,7 @@ int main()
             std::string(inventoryPath) + "/'",
         [](sdbusplus::message_t& msg) {
         interfaceRemoved(msg, nvmeDeviceMap);
-        });
+    });
 
     setupManufacturingModeMatch(*systemBus);
     io.run();

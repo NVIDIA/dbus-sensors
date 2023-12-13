@@ -59,7 +59,7 @@ boost::container::flat_map<uint8_t, std::shared_ptr<IpmbSDRDevice>> sdrsensor;
 std::unique_ptr<boost::asio::steady_timer> initCmdTimer;
 
 IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
-                       boost::asio::io_service& io,
+                       boost::asio::io_context& io,
                        const std::string& sensorName,
                        const std::string& sensorConfiguration,
                        sdbusplus::asio::object_server& objectServer,
@@ -156,7 +156,7 @@ void IpmbSensor::runInitCmd()
         [weakRef{weak_from_this()}](const boost::system::error_code& ec,
                                     const IpmbMethodType& response) {
         initCmdCb(weakRef, ec, response);
-        },
+    },
         "xyz.openbmc_project.Ipmi.Channel.Ipmb",
         "/xyz/openbmc_project/Ipmi/Channel/Ipmb", "org.openbmc.Ipmb",
         "sendRequest", commandAddress, netfn, lun, *initCommand, initData);
@@ -268,7 +268,6 @@ void IpmbSensor::checkThresholds(void)
 
 bool IpmbSensor::processReading(const std::vector<uint8_t>& data, double& resp)
 {
-
     switch (readingFormat)
     {
         case (ReadingFormat::byte0):
@@ -405,7 +404,7 @@ void IpmbSensor::ipmbRequestCompletionCb(const boost::system::error_code& ec,
 
 void IpmbSensor::read(void)
 {
-    waitTimer.expires_from_now(std::chrono::milliseconds(sensorPollMs));
+    waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait(
         [weakRef{weak_from_this()}](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
@@ -438,7 +437,7 @@ void IpmbSensor::sendIpmbRequest()
             return;
         }
         self->ipmbRequestCompletionCb(ec, response);
-        },
+    },
         "xyz.openbmc_project.Ipmi.Channel.Ipmb",
         "/xyz/openbmc_project/Ipmi/Channel/Ipmb", "org.openbmc.Ipmb",
         "sendRequest", commandAddress, netfn, lun, command, commandData);
@@ -516,7 +515,7 @@ void IpmbSensor::parseConfigValues(const SensorBaseConfigMap& entry)
 }
 
 void createSensors(
-    boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
+    boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
     boost::container::flat_map<std::string, std::shared_ptr<IpmbSensor>>&
         sensors,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
@@ -551,8 +550,8 @@ void createSensors(
                 }
                 uint8_t deviceAddress = loadVariant<uint8_t>(cfg, "Address");
 
-                std::string sensorClass =
-                    loadVariant<std::string>(cfg, "Class");
+                std::string sensorClass = loadVariant<std::string>(cfg,
+                                                                   "Class");
 
                 uint8_t hostSMbusIndex = hostSMbusIndexDefault;
                 auto findSmType = cfg.find("HostSMbusIndex");
@@ -579,8 +578,8 @@ void createSensors(
                 auto findType = cfg.find("SensorType");
                 if (findType != cfg.end())
                 {
-                    sensorTypeName =
-                        std::visit(VariantToStringVisitor(), findType->second);
+                    sensorTypeName = std::visit(VariantToStringVisitor(),
+                                                findType->second);
                 }
 
                 auto& sensor = sensors[name];
@@ -599,7 +598,7 @@ void createSensors(
                 sensor->init();
             }
         }
-        },
+    },
         entityManagerName, "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 }
@@ -646,7 +645,7 @@ void reinitSensors(sdbusplus::message_t& message)
             }
             // we seem to send this command too fast sometimes, wait before
             // sending
-            initCmdTimer->expires_from_now(
+            initCmdTimer->expires_after(
                 std::chrono::seconds(reinitWaitSeconds));
 
             initCmdTimer->async_wait([](const boost::system::error_code ec) {
@@ -667,10 +666,43 @@ void reinitSensors(sdbusplus::message_t& message)
     }
 }
 
+void interfaceRemoved(
+    sdbusplus::message_t& message,
+    boost::container::flat_map<std::string, std::shared_ptr<IpmbSensor>>&
+        sensors)
+{
+    if (message.is_method_error())
+    {
+        std::cerr << "interfacesRemoved callback method error\n";
+        return;
+    }
+
+    sdbusplus::message::object_path removedPath;
+    std::vector<std::string> interfaces;
+
+    message.read(removedPath, interfaces);
+
+    // If the xyz.openbmc_project.Confguration.X interface was removed
+    // for one or more sensors, delete those sensor objects.
+    auto sensorIt = sensors.begin();
+    while (sensorIt != sensors.end())
+    {
+        if ((sensorIt->second->configurationPath == removedPath) &&
+            (std::find(interfaces.begin(), interfaces.end(),
+                       configInterfaceName(sdrInterface)) != interfaces.end()))
+        {
+            sensorIt = sensors.erase(sensorIt);
+        }
+        else
+        {
+            sensorIt++;
+        }
+    }
+}
+
 int main()
 {
-
-    boost::asio::io_service io;
+    boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server objectServer(systemBus, true);
     objectServer.add_manager("/xyz/openbmc_project/sensors");
@@ -678,13 +710,14 @@ int main()
 
     initCmdTimer = std::make_unique<boost::asio::steady_timer>(io);
 
-    io.post([&]() { createSensors(io, objectServer, sensors, systemBus); });
+    boost::asio::post(
+        io, [&]() { createSensors(io, objectServer, sensors, systemBus); });
 
     boost::asio::steady_timer configTimer(io);
 
     std::function<void(sdbusplus::message_t&)> eventHandler =
         [&](sdbusplus::message_t&) {
-        configTimer.expires_from_now(std::chrono::seconds(1));
+        configTimer.expires_after(std::chrono::seconds(1));
         // create a timer because normally multiple properties change
         configTimer.async_wait([&](const boost::system::error_code& ec) {
             if (ec == boost::asio::error::operation_aborted)
@@ -717,7 +750,15 @@ int main()
             configInterfaceName(sdrInterface) + "'",
         [&systemBus](sdbusplus::message_t& msg) {
         sdrHandler(msg, systemBus);
-        });
+    });
+
+    // Watch for entity-manager to remove configuration interfaces
+    // so the corresponding sensors can be removed.
+    auto ifaceRemovedMatch = std::make_shared<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*systemBus),
+        "type='signal',member='InterfacesRemoved',arg0path='" +
+            std::string(inventoryPath) + "/'",
+        [](sdbusplus::message_t& msg) { interfaceRemoved(msg, sensors); });
 
     setupManufacturingModeMatch(*systemBus);
     io.run();

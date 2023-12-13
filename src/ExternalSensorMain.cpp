@@ -190,8 +190,8 @@ void createSensors(
                           << interfacePath << "\n";
                 continue;
             }
-            double minValue =
-                std::visit(VariantToDoubleVisitor(), minFound->second);
+            double minValue = std::visit(VariantToDoubleVisitor(),
+                                         minFound->second);
             if (!std::isfinite(minValue))
             {
                 std::cerr << "MinValue parameter not parsed for "
@@ -206,8 +206,8 @@ void createSensors(
                           << interfacePath << "\n";
                 continue;
             }
-            double maxValue =
-                std::visit(VariantToDoubleVisitor(), maxFound->second);
+            double maxValue = std::visit(VariantToDoubleVisitor(),
+                                         maxFound->second);
             if (!std::isfinite(maxValue))
             {
                 std::cerr << "MaxValue parameter not parsed for "
@@ -221,8 +221,8 @@ void createSensors(
             auto timeoutFound = baseConfigMap.find("Timeout");
             if (timeoutFound != baseConfigMap.end())
             {
-                timeoutSecs =
-                    std::visit(VariantToDoubleVisitor(), timeoutFound->second);
+                timeoutSecs = std::visit(VariantToDoubleVisitor(),
+                                         timeoutFound->second);
             }
             if (!std::isfinite(timeoutSecs) || (timeoutSecs < 0.0))
             {
@@ -242,8 +242,8 @@ void createSensors(
                           << "\n";
                 continue;
             }
-            sensorName =
-                std::visit(VariantToStringVisitor(), nameFound->second);
+            sensorName = std::visit(VariantToStringVisitor(),
+                                    nameFound->second);
             if (sensorName.empty())
             {
                 std::cerr << "Name parameter not parsed for " << interfacePath
@@ -258,8 +258,8 @@ void createSensors(
                           << "\n";
                 continue;
             }
-            sensorUnits =
-                std::visit(VariantToStringVisitor(), unitsFound->second);
+            sensorUnits = std::visit(VariantToStringVisitor(),
+                                     unitsFound->second);
             if (sensorUnits.empty())
             {
                 std::cerr << "Units parameter not parsed for " << interfacePath
@@ -325,7 +325,7 @@ void createSensors(
                 std::cerr << "ExternalSensor " << sensorName << " created\n";
             }
         }
-        });
+    });
 
     getter->getConfiguration(std::vector<std::string>{sensorType});
 }
@@ -337,7 +337,7 @@ int main()
         std::cerr << "ExternalSensor service starting up\n";
     }
 
-    boost::asio::io_service io;
+    boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server objectServer(systemBus, true);
 
@@ -350,7 +350,8 @@ int main()
         std::make_shared<boost::container::flat_set<std::string>>();
     boost::asio::steady_timer reaperTimer(io);
 
-    io.post([&objectServer, &sensors, &systemBus, &reaperTimer]() {
+    boost::asio::post(io,
+                      [&objectServer, &sensors, &systemBus, &reaperTimer]() {
         createSensors(objectServer, sensors, systemBus, nullptr, reaperTimer);
     });
 
@@ -373,7 +374,7 @@ int main()
         }
 
         // this implicitly cancels the timer
-        filterTimer.expires_from_now(std::chrono::seconds(1));
+        filterTimer.expires_after(std::chrono::seconds(1));
 
         filterTimer.async_wait(
             [&objectServer, &sensors, &systemBus, &sensorsChanged,

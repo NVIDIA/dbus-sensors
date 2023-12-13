@@ -25,6 +25,7 @@
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/bus/match.hpp>
 
+#include <charconv>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -361,7 +362,7 @@ static void
             return;
         }
         powerStatusOn = std::get<std::string>(state).ends_with(".Running");
-        },
+    },
         power::busname, power::path, properties::interface, properties::get,
         power::interface, power::property);
 }
@@ -395,7 +396,7 @@ static void
         biosHasPost = (value != "Inactive") &&
                       (value != "xyz.openbmc_project.State.OperatingSystem."
                                 "Status.OSStatus.Inactive");
-        },
+    },
         post::busname, post::path, properties::interface, properties::get,
         post::interface, post::property);
 }
@@ -428,7 +429,7 @@ static void
             return;
         }
         chassisStatusOn = std::get<std::string>(state).ends_with(chassis::sOn);
-        },
+    },
         chassis::busname, chassis::path, properties::interface, properties::get,
         chassis::interface, chassis::property);
 }
@@ -485,7 +486,7 @@ void setupPowerMatchCallback(
                 hostStatusCallback(PowerState::on, powerStatusOn);
             });
         }
-        });
+    });
 
     postMatch = std::make_unique<sdbusplus::bus::match_t>(
         static_cast<sdbusplus::bus_t&>(*conn),
@@ -506,7 +507,7 @@ void setupPowerMatchCallback(
                                     "Status.OSStatus.Inactive");
             hostStatusCallback(PowerState::biosPost, biosHasPost);
         }
-        });
+    });
 
     chassisMatch = std::make_unique<sdbusplus::bus::match_t>(
         static_cast<sdbusplus::bus_t&>(*conn),
@@ -547,7 +548,7 @@ void setupPowerMatchCallback(
                 hostStatusCallback(PowerState::chassisOn, chassisStatusOn);
             });
         }
-        });
+    });
     getPowerStatus(conn);
     getPostStatus(conn);
     getChassisStatus(conn);
@@ -597,26 +598,47 @@ void createAssociation(
 
 void setInventoryAssociation(
     const std::shared_ptr<sdbusplus::asio::dbus_interface>& association,
-    const std::string& path,
-    const std::vector<std::string>& chassisPaths = std::vector<std::string>())
+    const std::string& inventoryPath, const std::string& chassisPath)
 {
     if (association)
     {
-        fs::path p(path);
         std::vector<Association> associations;
-        std::string objPath(p.parent_path().string());
-
-        associations.emplace_back("inventory", "sensors", objPath);
-        associations.emplace_back("chassis", "all_sensors", objPath);
-
-        for (const std::string& chassisPath : chassisPaths)
-        {
-            associations.emplace_back("chassis", "all_sensors", chassisPath);
-        }
+        associations.emplace_back("inventory", "sensors", inventoryPath);
+        associations.emplace_back("chassis", "all_sensors", chassisPath);
 
         association->register_property("Associations", associations);
         association->initialize();
     }
+}
+
+std::optional<std::string> findContainingChassis(std::string_view configParent,
+                                                 const GetSubTreeType& subtree)
+{
+    // A parent that is a chassis takes precedence
+    for (const auto& [obj, services] : subtree)
+    {
+        if (obj == configParent)
+        {
+            return obj;
+        }
+    }
+
+    // If the parent is not a chassis, the system chassis is used. This does not
+    // work if there is more than one System, but we assume there is only one
+    // today.
+    for (const auto& [obj, services] : subtree)
+    {
+        for (const auto& [service, interfaces] : services)
+        {
+            if (std::find(interfaces.begin(), interfaces.end(),
+                          "xyz.openbmc_project.Inventory.Item.System") !=
+                interfaces.end())
+            {
+                return obj;
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 void createInventoryAssoc(
@@ -629,22 +651,31 @@ void createInventoryAssoc(
         return;
     }
 
+    constexpr auto allInterfaces = std::to_array({
+        "xyz.openbmc_project.Inventory.Item.Board",
+        "xyz.openbmc_project.Inventory.Item.Chassis",
+    });
+
     conn->async_method_call(
         [association, path](const boost::system::error_code ec,
-                            const std::vector<std::string>& invSysObjPaths) {
+                            const GetSubTreeType& subtree) {
+        // The parent of the config is always the inventory object, and may be
+        // the associated chassis. If the parent is not itself a chassis or
+        // board, the sensor is associated with the system chassis.
+        std::string parent = fs::path(path).parent_path().string();
         if (ec)
         {
             // In case of error, set the default associations and
             // initialize the association Interface.
-            setInventoryAssociation(association, path);
+            setInventoryAssociation(association, parent, parent);
             return;
         }
-        setInventoryAssociation(association, path, invSysObjPaths);
-        },
-        mapper::busName, mapper::path, mapper::interface, "GetSubTreePaths",
-        "/xyz/openbmc_project/inventory/system", 2,
-        std::array<std::string, 1>{
-            "xyz.openbmc_project.Inventory.Item.System"});
+        setInventoryAssociation(
+            association, parent,
+            findContainingChassis(parent, subtree).value_or(parent));
+    },
+        mapper::busName, mapper::path, mapper::interface, "GetSubTree",
+        "/xyz/openbmc_project/inventory/system", 2, allInterfaces);
 }
 
 std::optional<double> readFile(const std::string& thresholdFile,
@@ -718,9 +749,8 @@ void setupManufacturingModeMatch(sdbusplus::asio::connection& conn)
         rules::interfacesAdded() +
         rules::argNpath(0, "/xyz/openbmc_project/security/special_mode");
     static std::unique_ptr<sdbusplus::bus::match_t> specialModeIntfMatch =
-        std::make_unique<sdbusplus::bus::match_t>(conn,
-                                                  filterSpecialModeIntfAdd,
-                                                  [](sdbusplus::message_t& m) {
+        std::make_unique<sdbusplus::bus::match_t>(
+            conn, filterSpecialModeIntfAdd, [](sdbusplus::message_t& m) {
         sdbusplus::message::object_path path;
         using PropertyMap =
             boost::container::flat_map<std::string, std::variant<std::string>>;
@@ -741,7 +771,7 @@ void setupManufacturingModeMatch(sdbusplus::asio::connection& conn)
         }
         auto* manufacturingModeStatus = std::get_if<std::string>(&itr->second);
         handleSpecialModeChange(*manufacturingModeStatus);
-        });
+    });
 
     const std::string filterSpecialModeChange =
         rules::type::signal() + rules::member("PropertiesChanged") +
@@ -762,7 +792,7 @@ void setupManufacturingModeMatch(sdbusplus::asio::connection& conn)
         }
         auto* manufacturingModeStatus = std::get_if<std::string>(&itr->second);
         handleSpecialModeChange(*manufacturingModeStatus);
-        });
+    });
 
     conn.async_method_call(
         [](const boost::system::error_code ec,
@@ -776,7 +806,7 @@ void setupManufacturingModeMatch(sdbusplus::asio::connection& conn)
         const auto* manufacturingModeStatus =
             std::get_if<std::string>(&getManufactMode);
         handleSpecialModeChange(*manufacturingModeStatus);
-        },
+    },
         "xyz.openbmc_project.SpecialMode",
         "/xyz/openbmc_project/security/special_mode",
         "org.freedesktop.DBus.Properties", "Get", specialModeInterface,
@@ -819,4 +849,32 @@ std::vector<std::unique_ptr<sdbusplus::bus::match_t>>
         types.push_back(type.data());
     }
     return setupPropertiesChangedMatches(bus, {types}, handler);
+}
+
+bool getDeviceBusAddr(const std::string& deviceName, size_t& bus, size_t& addr)
+{
+    auto findHyphen = deviceName.find('-');
+    if (findHyphen == std::string::npos)
+    {
+        std::cerr << "found bad device " << deviceName << "\n";
+        return false;
+    }
+    std::string busStr = deviceName.substr(0, findHyphen);
+    std::string addrStr = deviceName.substr(findHyphen + 1);
+
+    std::from_chars_result res{};
+    res = std::from_chars(&*busStr.begin(), &*busStr.end(), bus);
+    if (res.ec != std::errc{} || res.ptr != &*busStr.end())
+    {
+        std::cerr << "Error finding bus for " << deviceName << "\n";
+        return false;
+    }
+    res = std::from_chars(&*addrStr.begin(), &*addrStr.end(), addr, 16);
+    if (res.ec != std::errc{} || res.ptr != &*addrStr.end())
+    {
+        std::cerr << "Error finding addr for " << deviceName << "\n";
+        return false;
+    }
+
+    return true;
 }

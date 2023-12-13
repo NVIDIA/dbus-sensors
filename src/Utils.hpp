@@ -134,7 +134,7 @@ const static constexpr char* busname = "xyz.openbmc_project.State.Chassis";
 const static constexpr char* interface = "xyz.openbmc_project.State.Chassis";
 const static constexpr char* path = "/xyz/openbmc_project/state/chassis0";
 const static constexpr char* property = "CurrentPowerState";
-const static constexpr char* sOn = "On";
+const static constexpr char* sOn = ".On";
 } // namespace chassis
 
 namespace post
@@ -182,7 +182,6 @@ inline T loadVariant(const SensorBaseConfigMap& data, const std::string& key)
 
 inline void setReadState(const std::string& str, PowerState& val)
 {
-
     if (str == "On")
     {
         val = PowerState::on;
@@ -207,8 +206,8 @@ inline PowerState getPowerState(const SensorBaseConfigMap& cfg)
     auto findPowerState = cfg.find("PowerState");
     if (findPowerState != cfg.end())
     {
-        std::string powerState =
-            std::visit(VariantToStringVisitor(), findPowerState->second);
+        std::string powerState = std::visit(VariantToStringVisitor(),
+                                            findPowerState->second);
         setReadState(powerState, state);
     }
     return state;
@@ -238,7 +237,7 @@ inline void setLed(const std::shared_ptr<sdbusplus::asio::connection>& conn,
         {
             std::cerr << "Failed to set LED " << name << "\n";
         }
-        },
+    },
         "xyz.openbmc_project.LED.GroupManager",
         "/xyz/openbmc_project/led/groups/" + name, properties::interface,
         properties::set, "xyz.openbmc_project.Led.Group", "Asserted",
@@ -296,7 +295,7 @@ struct GetSensorConfiguration :
             }
 
             self->respData[path][interface] = std::move(data);
-            },
+        },
             owner, path, "org.freedesktop.DBus.Properties", "GetAll",
             interface);
     }
@@ -356,14 +355,14 @@ struct GetSensorConfiguration :
                     if (std::find_if(interfaces.begin(), interfaces.end(),
                                      [interface](const std::string& possible) {
                         return interface.starts_with(possible);
-                        }) == interfaces.end())
+                    }) == interfaces.end())
                     {
                         continue;
                     }
                     self->getPath(path, interface, owner);
                 }
             }
-            },
+        },
             mapper::busName, mapper::path, mapper::interface, mapper::subtree,
             "/", 0, interfaces);
     }
@@ -390,3 +389,4 @@ std::vector<std::unique_ptr<sdbusplus::bus::match_t>>
     setupPropertiesChangedMatches(
         sdbusplus::asio::connection& bus, std::span<const char* const> types,
         const std::function<void(sdbusplus::message_t&)>& handler);
+bool getDeviceBusAddr(const std::string& deviceName, size_t& bus, size_t& addr);

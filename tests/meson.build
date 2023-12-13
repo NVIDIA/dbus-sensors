@@ -13,7 +13,7 @@ if not gtest_dep.found() or not gmock_dep.found()
         gmock_dep = gtest_proj.dependency('gmock')
     else
         assert(
-            not get_option('tests').enabled(),
+            not get_option('tests').allowed(),
             'Googletest is required if tests are enabled'
         )
     endif
@@ -24,31 +24,6 @@ ut_deps_list = [
 ]
 
 ut_deps_list += default_deps
-
-have_boost_dbus = meson.get_compiler('cpp').has_header('dbus/connection.hpp')
-if have_boost_dbus
-test(
-    'test_hwmon_temp_sensor',
-    executable(
-        'test_hwmon_temp_sensor',
-        'test_HwmonTempSensor.cpp',
-        dependencies: ut_deps_list,
-        implicit_include_directories: false,
-        include_directories: '../src',
-    )
-)
-
-test(
-    'test_tach_sensor',
-    executable(
-        'test_tach_sensor',
-        'test_TachSensor.cpp',
-        dependencies: ut_deps_list,
-        implicit_include_directories: false,
-        include_directories: '../src',
-    )
-)
-endif
 
 test(
     'test_utils',

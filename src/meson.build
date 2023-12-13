@@ -1,6 +1,6 @@
 conf_data = configuration_data()
-conf_data.set10('VALIDATION_UNSECURE_FEATURE', get_option('validate-unsecure-feature').enabled())
-conf_data.set10('INSECURE_UNRESTRICTED_SENSOR_OVERRIDE', get_option('insecure-sensor-override').enabled())
+conf_data.set10('VALIDATION_UNSECURE_FEATURE', get_option('validate-unsecure-feature').allowed())
+conf_data.set10('INSECURE_UNRESTRICTED_SENSOR_OVERRIDE', get_option('insecure-sensor-override').allowed())
 configure_file(input: 'dbus-sensor_config.h.in',
                output: 'dbus-sensor_config.h',
                configuration: conf_data)
@@ -60,7 +60,11 @@ if not meson.get_compiler('cpp').has_header('linux/peci-ioctl.h')
     peci_incdirs = ['../include']
 endif
 
-if get_option('adc').enabled()
+if get_option('intel-cpu').allowed()
+    peci_dep = dependency('libpeci', required : true)
+endif
+
+if get_option('adc').allowed()
     executable(
         'adcsensor',
         'ADCSensor.cpp',
@@ -71,12 +75,11 @@ if get_option('adc').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        cpp_args: uring_args,
         install: true,
     )
 endif
 
-if get_option('intel-cpu').enabled()
+if get_option('intel-cpu').allowed()
     executable(
         'intelcpusensor',
         'IntelCPUSensorMain.cpp',
@@ -86,13 +89,14 @@ if get_option('intel-cpu').enabled()
             gpiodcxx,
             thresholds_dep,
             utils_dep,
+            peci_dep,
         ],
         include_directories: peci_incdirs,
         install: true,
     )
 endif
 
-if get_option('exit-air').enabled()
+if get_option('exit-air').allowed()
     executable(
         'exitairtempsensor',
         'ExitAirTempSensor.cpp',
@@ -101,12 +105,11 @@ if get_option('exit-air').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        cpp_args: uring_args,
         install: true,
     )
 endif
 
-if get_option('fan').enabled()
+if get_option('fan').allowed()
     executable(
         'fansensor',
         'FanMain.cpp',
@@ -119,12 +122,11 @@ if get_option('fan').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        cpp_args: uring_args,
         install: true,
     )
 endif
 
-if get_option('hwmon-temp').enabled()
+if get_option('hwmon-temp').allowed()
     executable(
         'hwmontempsensor',
         'HwmonTempMain.cpp',
@@ -135,12 +137,11 @@ if get_option('hwmon-temp').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        cpp_args: uring_args,
         install: true,
     )
 endif
 
-if get_option('plx-temp').enabled()
+if get_option('plx-temp').allowed()
     executable(
         'plxtempsensor',
         'PLXTempMain.cpp',
@@ -156,7 +157,7 @@ if get_option('plx-temp').enabled()
     )
 endif
 
-if get_option('intrusion').enabled()
+if get_option('intrusion').allowed()
     executable(
         'intrusionsensor',
         'ChassisIntrusionSensor.cpp',
@@ -167,12 +168,11 @@ if get_option('intrusion').enabled()
             i2c,
             utils_dep,
         ],
-        cpp_args: uring_args,
         install: true,
     )
 endif
 
-if get_option('ipmb').enabled()
+if get_option('ipmb').allowed()
     executable(
         'ipmbsensor',
         'IpmbSensor.cpp',
@@ -182,12 +182,11 @@ if get_option('ipmb').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        cpp_args: uring_args,
         install: true,
     )
 endif
 
-if get_option('mcu').enabled()
+if get_option('mcu').allowed()
     executable(
         'mcutempsensor',
         'MCUTempSensor.cpp',
@@ -197,12 +196,11 @@ if get_option('mcu').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        cpp_args: uring_args,
         install: true,
     )
 endif
 
-if get_option('nvme').enabled()
+if get_option('nvme').allowed()
     nvme_srcs = files('NVMeSensorMain.cpp', 'NVMeSensor.cpp')
     nvme_srcs += files('NVMeBasicContext.cpp')
 
@@ -212,12 +210,11 @@ if get_option('nvme').enabled()
         'nvmesensor',
         sources: nvme_srcs,
         dependencies: nvme_deps,
-        cpp_args: uring_args,
         install: true,
     )
 endif
 
-if get_option('psu').enabled()
+if get_option('psu').allowed()
     executable(
         'psusensor',
         'PSUEvent.cpp',
@@ -225,16 +222,16 @@ if get_option('psu').enabled()
         'PSUSensorMain.cpp',
         dependencies: [
             default_deps,
+            devicemgmt_dep,
             pwmsensor_dep,
             thresholds_dep,
             utils_dep,
         ],
-        cpp_args: uring_args,
         install: true,
     )
 endif
 
-if get_option('external').enabled()
+if get_option('external').allowed()
     executable(
         'externalsensor',
         'ExternalSensor.cpp',
@@ -244,7 +241,6 @@ if get_option('external').enabled()
             thresholds_dep,
             utils_dep,
         ],
-        cpp_args: uring_args,
         install: true,
     )
 endif
