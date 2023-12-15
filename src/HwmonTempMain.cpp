@@ -71,6 +71,7 @@ static auto sensorTypes{
                                 "xyz.openbmc_project.Configuration.TMP421",
                                 "xyz.openbmc_project.Configuration.TMP441",
                                 "xyz.openbmc_project.Configuration.TMP75",
+                                "xyz.openbmc_project.Configuration.TMP75C",
                                 "xyz.openbmc_project.Configuration.W83773G"})};
 
 std::string getPlatform() {
