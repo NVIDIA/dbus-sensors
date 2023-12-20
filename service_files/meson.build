@@ -17,7 +17,7 @@ unit_files = [
     ['system', 'xyz.openbmc_project.systemsensor.service'],
     ['gpu', 'xyz.openbmc_project.gpustatus.service'],
     ['psuredundancy', 'xyz.openbmc_project.psuredundancy.service'],
-
+    ['boot-progress', 'xyz.openbmc_project.bootprogress.service'],
 ]
 
 foreach tuple : unit_files

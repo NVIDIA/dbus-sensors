@@ -64,13 +64,15 @@ IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                        const std::string& sensorConfiguration,
                        sdbusplus::asio::object_server& objectServer,
                        std::vector<thresholds::Threshold>&& thresholdData,
-                       uint8_t deviceAddress, 
+                       uint8_t deviceAddress, uint8_t channelAddress,
                        uint8_t hostSMbusIndex, const float pollRate,
-                       std::string& sensorTypeName) :
+                       std::string& sensorTypeName, double ipmbMaxReading,
+                       double ipmbMinReading) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
            sensorConfiguration, "IpmbSensor", false, false, ipmbMaxReading,
            ipmbMinReading, conn, PowerState::on),
-    deviceAddress(deviceAddress), hostSMbusIndex(hostSMbusIndex),
+    deviceAddress(deviceAddress), channelAddress(channelAddress),
+    hostSMbusIndex(hostSMbusIndex),
     sensorPollMs(static_cast<int>(pollRate * 1000)), objectServer(objectServer),
     waitTimer(io)
 {
@@ -256,6 +258,7 @@ void IpmbSensor::loadDefaults()
     if (subType == IpmbSubType::util)
     {
         // Utilization need to be scaled to percent
+       
         maxValue = 100;
         minValue = 0;
     }
@@ -561,6 +564,14 @@ void createSensors(
                                                 findSmType->second);
                 }
 
+                uint8_t channelAddress = meAddressDefault;
+                auto findmType = cfg.find("ChannelAddress");
+                if (findmType != cfg.end())
+                {
+                    channelAddress = std::visit(VariantToUnsignedIntVisitor(),
+                                                findmType->second);
+                }
+
                 float pollRate = getPollRate(cfg, pollRateDefault);
 
                 uint8_t ipmbBusIndex = ipmbBusIndexDefault;
@@ -572,7 +583,16 @@ void createSensors(
                     std::cerr << "Ipmb Bus Index for " << name << " is "
                               << static_cast<int>(ipmbBusIndex) << "\n";
                 }
-
+                double maxValue = 255;
+                double minValue = 0;
+                for (auto sensorThreshold : sensorThresholds)
+                {
+                    if (sensorThreshold.value < 0)
+                    {
+                        minValue = -128;
+                        maxValue = 127;
+                    }
+                }
                 /* Default sensor type is "temperature" */
                 std::string sensorTypeName = "temperature";
                 auto findType = cfg.find("SensorType");
@@ -587,7 +607,8 @@ void createSensors(
                 sensor = std::make_shared<IpmbSensor>(
                     dbusConnection, io, name, path, objectServer,
                     std::move(sensorThresholds), deviceAddress, hostSMbusIndex,
-                    pollRate, sensorTypeName);
+                    channelAddress, pollRate, sensorTypeName, maxValue,
+                    minValue);
 
                 sensor->parseConfigValues(cfg);
                 if (!(sensor->sensorClassType(sensorClass)))

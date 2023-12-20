@@ -12,7 +12,7 @@
 ProcessorStatus::ProcessorStatus(
     sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
-    boost::asio::io_service& io, const std::string& sensorName,
+    boost::asio::io_context& io, const std::string& sensorName,
     const std::string& gpioName, const std::string& sensorConfiguration) :
     ItemInterface(
         static_cast<sdbusplus::bus::bus&>(*conn),

@@ -1,7 +1,8 @@
 #pragma once
 
 #include "Utils.hpp"
-#include <boost/asio/deadline_timer.hpp>
+
+#include <boost/asio/steady_timer.hpp
 #include <boost/asio/io_service.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -13,8 +14,8 @@
 #include <string>
 #include <vector>
 
-constexpr auto OPERATIONAL_STATE_IFACE =
-    "xyz.openbmc_project.State.Decorator.OperationalStatus";
+    constexpr auto OPERATIONAL_STATE_IFACE =
+        "xyz.openbmc_project.State.Decorator.OperationalStatus";
 constexpr auto PSU_SERVICE = "com.Nvidia.Powersupply";
 constexpr auto PSU_OBJ =
     "/xyz/openbmc_project/inventory/system/chassis/motherboard/powersupply";

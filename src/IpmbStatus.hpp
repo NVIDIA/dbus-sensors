@@ -53,6 +53,9 @@ struct IpmbSensor
     std::optional<uint8_t> initCommand;
     std::vector<uint8_t> initData;
     int sensorPollMs;
+    bool sensorReport = false; 
+    bool sensorMaskEnable = false;
+    std::string statusSensorName;
 
   private:
     std::shared_ptr<sdbusplus::asio::connection> dbusConnection;

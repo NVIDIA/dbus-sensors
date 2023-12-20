@@ -1,9 +1,10 @@
 #pragma once
 
 #include "Utils.hpp"
-#include <boost/asio/deadline_timer.hpp>
-#include <boost/asio/io_service.hpp>
+
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <xyz/openbmc_project/Association/Definitions/server.hpp>
 #include <xyz/openbmc_project/Inventory/Item/Drive/server.hpp>
@@ -34,7 +35,7 @@ class NVMeMIStatus :
   public:
     NVMeMIStatus(sdbusplus::asio::object_server& objectServer,
                  std::shared_ptr<sdbusplus::asio::connection>& conn,
-                 boost::asio::io_service& io, const std::string& sensorName,
+                 boost::asio::io_context& io, const std::string& sensorName,
                  const std::string& sensorConfiguration, unsigned int pollRate,
                  uint8_t busId, uint8_t nvmeAddress);
     ~NVMeMIStatus() override;
@@ -50,5 +51,5 @@ class NVMeMIStatus :
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
     sdbusplus::asio::object_server& objServer;
     int getNVMeInfo(int bus, uint8_t addr, std::vector<uint8_t>& resp);
-    boost::asio::deadline_timer waitTimer;
+    boost::asio::steady_timer waitTimer;
 };

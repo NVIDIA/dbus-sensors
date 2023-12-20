@@ -389,6 +389,17 @@ void createSensors(
                           << deviceName << "\n";
                 continue;
             }
+            
+            std::string sensorPhysicalContext = "";
+            auto configurationSensorPhysicalContext =
+                baseConfigMap.find("PhysicalContext");
+
+            if (configurationSensorPhysicalContext != baseConfigMap.end())
+            {
+                sensorPhysicalContext = std::get<std::string>(
+                    configurationSensorPhysicalContext->second);
+            }
+
             std::string sensorName =
                 std::get<std::string>(findSensorName->second);
             // on rescans, only update sensors we were signaled by
@@ -450,7 +461,7 @@ void createSensors(
                         *hwmonFile, sensorType, objectServer, dbusConnection,
                         io, sensorName, std::move(sensorThresholds),
                         thisSensorParameters, pollRate, interfacePath,
-                        readState, i2cDev);
+                        readState, i2cDev, sensorPhysicalContext);
                     sensor->setupRead();
                 }
             }
@@ -464,6 +475,7 @@ void createSensors(
             while (true)
             {
                 ++i;
+                std::string context = "";
                 auto findKey = baseConfigMap.find("Name" + std::to_string(i));
                 if (findKey == baseConfigMap.end())
                 {
@@ -509,7 +521,8 @@ void createSensors(
                             *hwmonFile, sensorType, objectServer,
                             dbusConnection, io, sensorName,
                             std::move(thresholds), thisSensorParameters,
-                            pollRate, interfacePath, readState, i2cDev);
+                            pollRate, interfacePath, readState, i2cDev,
+                            context);
                         sensor->setupRead();
                     }
                 }
@@ -595,6 +608,7 @@ int main()
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server objectServer(systemBus, true);
     objectServer.add_manager("/xyz/openbmc_project/sensors");
+    objectServer.add_manager("/xyz/openbmc_project/inventory");
     systemBus->request_name("xyz.openbmc_project.HwmonTempSensor");
 
     boost::container::flat_map<std::string, std::shared_ptr<HwmonTempSensor>>

@@ -2,7 +2,7 @@
 
 #include "NVMeMIStatus.hpp"
 #include <boost/asio/read_until.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
+
 
 #include <cerrno>
 #include <fstream>
@@ -27,7 +27,7 @@ const static constexpr size_t nvmeDriveFailureStatus = 0x00;
 
 NVMeMIStatus::NVMeMIStatus(sdbusplus::asio::object_server& objectServer,
                            std::shared_ptr<sdbusplus::asio::connection>& conn,
-                           boost::asio::io_service& io,
+                           boost::asio::io_context& io,
                            const std::string& sensorName,
                            const std::string& sensorConfiguration,
                            unsigned int pollRate, uint8_t busId,
@@ -98,6 +98,12 @@ int NVMeMIStatus::getNVMeInfo(int bus, uint8_t addr, std::vector<uint8_t>& resp)
     size = i2c_smbus_read_block_data(dev, statusCmd, resp.data());
     if (size < 0)
     {
+        // Ignore the error message when the drive is not present.
+        if (errno == ENXIO)
+        {
+            close(dev);
+            return -1;
+        }
         std::cerr << "Failed to read block data from device 0x" << std::hex
                   << (int)addr << " on bus " << std::dec << bus << ": "
                   << strerror(errno) << "\n";
@@ -112,8 +118,7 @@ int NVMeMIStatus::getNVMeInfo(int bus, uint8_t addr, std::vector<uint8_t>& resp)
 
 void NVMeMIStatus::monitor(void)
 {
-
-    waitTimer.expires_from_now(boost::posix_time::seconds(sensorPollSec));
+    waitTimer.expires_after(std::chrono::seconds(sensorPollSec));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
@@ -127,8 +132,8 @@ void NVMeMIStatus::monitor(void)
             return;
         }
         std::vector<uint8_t> resp{};
-	int32_t statusMask = nvmeDriveFaultMask;
-	int32_t statusFailure = nvmeDriveFailureStatus;
+        int32_t statusMask = nvmeDriveFaultMask;
+        int32_t statusFailure = nvmeDriveFailureStatus;
         int ret = getNVMeInfo(busId, nvmeAddress, resp);
         if (ret >= 0)
         {

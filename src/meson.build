@@ -96,6 +96,22 @@ if get_option('intel-cpu').allowed()
     )
 endif
 
+if get_option('boot-progress').allowed()
+    executable(
+        'bootprogress',
+        'BootProgressSensor.cpp',
+        dependencies: [
+            default_deps,
+            utils_dep,
+        ],
+        implicit_include_directories: false,
+        include_directories: [
+            '../include'
+        ] + peci_incdirs,
+        install: true,
+    )
+endif
+
 if get_option('exit-air').allowed()
     executable(
         'exitairtempsensor',
@@ -245,7 +261,7 @@ if get_option('external').allowed()
     )
 endif
 
-if get_option('procstatus').enabled()
+if get_option('procstatus').allowed()
     executable(
         'processorstatus',
         'ProcessorStatus.cpp',
@@ -261,7 +277,7 @@ if get_option('procstatus').enabled()
     )
 endif
 
-if get_option('nvmeu2').enabled()
+if get_option('nvmeu2').allowed()
     executable(
         'nvmestatus',
         'NVMeStatus.cpp',
@@ -278,7 +294,7 @@ if get_option('nvmeu2').enabled()
     )
 endif
 
-if get_option('ipmbstatus').enabled()
+if get_option('ipmbstatus').allowed()
     executable(
         'ipmbstatus',
         'IpmbStatus.cpp',
@@ -293,7 +309,7 @@ if get_option('ipmbstatus').enabled()
     )
 endif
 
-if get_option('system').enabled()
+if get_option('system').allowed()
     executable(
         'watchdogsensor',
         'WatchdogSensor.cpp',
@@ -309,7 +325,7 @@ if get_option('system').enabled()
     )
 endif
 
-if get_option('gpu').enabled()
+if get_option('gpu').allowed()
     executable(
         'gpustatus',
         'GPUStatus.cpp',
@@ -324,7 +340,7 @@ if get_option('gpu').enabled()
     )
 endif
 
-if get_option('psuredundancy').enabled()
+if get_option('psuredundancy').allowed()
     executable(
         'psuredundancy',
         'PSURedundancy.cpp',

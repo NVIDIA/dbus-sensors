@@ -44,7 +44,8 @@ class HwmonTempSensor :
                     const struct SensorParams& thisSensorParameters,
                     float pollRate, const std::string& sensorConfiguration,
                     PowerState powerState,
-                    const std::shared_ptr<I2CDevice>& i2cDevice);
+                    const std::shared_ptr<I2CDevice>& i2cDevice,
+                    const std::string& sensorPhysicalContext);
     ~HwmonTempSensor() override;
     void setupRead(void);
     void activate(const std::string& newPath,
@@ -74,7 +75,9 @@ class HwmonTempSensor :
     std::string inventoryChassis;
     bool enablePlatformMetrics;
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorMetricIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> areaIface;
     sensorMap sensorMetric;
+    std::string physicalContext;
 
     void handleResponse(const boost::system::error_code& err, size_t bytesRead);
     void restartRead();

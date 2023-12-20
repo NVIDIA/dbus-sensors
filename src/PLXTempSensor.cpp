@@ -8,7 +8,7 @@
 #include "PLXTempSensor.hpp"
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/read_until.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
+
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 

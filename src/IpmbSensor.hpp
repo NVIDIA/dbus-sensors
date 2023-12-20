@@ -87,10 +87,11 @@ struct IpmbSensor :
                const std::string& sensorConfiguration,
                sdbusplus::asio::object_server& objectServer,
                std::vector<thresholds::Threshold>&& thresholdData,
-               uint8_t deviceAddress, 
+               uint8_t deviceAddress, uint8_t channelAddress,
                uint8_t hostSMbusIndex, float pollRate,
-               std::string& sensorTypeName);
-	~IpmbSensor() override;
+               std::string& sensorTypeName, double ipmbMaxReading,
+               double ipmbMinReading);
+    ~IpmbSensor() override;
 
     void checkThresholds(void) override;
     void read(void);

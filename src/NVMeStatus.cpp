@@ -2,7 +2,7 @@
 
 #include "NVMeStatus.hpp"
 #include <boost/asio/read_until.hpp>
-#include <boost/date_time/posix_time/posix_time.hpp>
+
 
 #include <cerrno>
 #include <fstream>
@@ -20,7 +20,7 @@ extern "C"
 
 NVMeStatus::NVMeStatus(sdbusplus::asio::object_server& objectServer,
                        std::shared_ptr<sdbusplus::asio::connection>& conn,
-                       boost::asio::io_service& io,
+                       boost::asio::io_context& io,
                        const std::string& sensorName,
                        const std::string& sensorConfiguration,
                        unsigned int pollRate, uint8_t index, uint8_t busId,
@@ -109,8 +109,7 @@ int NVMeStatus::getCPLDRegsInfo(uint8_t regs, int16_t* pu16data)
 
 void NVMeStatus::monitor(void)
 {
-
-    waitTimer.expires_from_now(boost::posix_time::seconds(sensorPollSec));
+    waitTimer.expires_after(std::chrono::seconds(sensorPollSec));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
