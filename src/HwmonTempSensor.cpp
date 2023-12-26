@@ -229,8 +229,9 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err,
                     std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now().time_since_epoch())
                         .count();
+                double reading = (nvalue + offsetValue) * scaleValue;
                 sensorMetric[name] =
-                    std::make_tuple(nvalue, time, inventoryChassis);
+                    std::make_tuple(reading, time, inventoryChassis);
                 ;
                 sensorMetricIface->set_property("SensorMetrics", sensorMetric);
             }
