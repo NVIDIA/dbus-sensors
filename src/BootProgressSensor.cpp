@@ -1,12 +1,13 @@
-#include <Utils.hpp>
+#include "Utils.hpp"
+
+#include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <boost/asio/io_service.hpp>
 
 constexpr const char* objectPath = "/xyz/openbmc_project/state/boot_progress/boot_progress_sensor";
 
 int main()
 {
-    boost::asio::io_service io;
+    boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     systemBus->request_name("xyz.openbmc_project.BootProgressSensor");
 

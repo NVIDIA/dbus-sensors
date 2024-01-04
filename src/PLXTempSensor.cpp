@@ -26,7 +26,7 @@ static constexpr double minReading = -128;
 PLXTempSensor::PLXTempSensor(const std::string& objectType,
                              sdbusplus::asio::object_server& objectServer,
                              std::shared_ptr<sdbusplus::asio::connection>& conn,
-                             boost::asio::io_service& io,
+                             boost::asio::io_context& io,
                              const std::string& sensorName,
                              std::vector<thresholds::Threshold>&& thresholdsIn,
                              const std::string& sensorConfiguration,
@@ -87,7 +87,7 @@ void PLXTempSensor::setupRead(void)
 void PLXTempSensor::restartRead()
 {
     std::weak_ptr<PLXTempSensor> weakRef = weak_from_this();
-    waitTimer.expires_from_now(std::chrono::seconds(sensorPollMs));
+    waitTimer.expires_after(std::chrono::seconds(sensorPollMs));
     waitTimer.async_wait([weakRef](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {

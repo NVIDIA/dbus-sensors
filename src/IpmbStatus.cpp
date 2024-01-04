@@ -18,7 +18,7 @@ static constexpr float pollRateDefault = 1; // in seconds
 static constexpr uint8_t cableStatusBit = 0;
 static constexpr uint8_t configurationErrorBit = 1;
 
-boost::asio::io_service io;
+boost::asio::io_context io;
 auto conn = std::make_shared<sdbusplus::asio::connection>(io);
 
 using IpmbMethodType =
@@ -29,7 +29,7 @@ boost::container::flat_map<std::string, std::shared_ptr<IpmbSensor>> sensors;
 std::unique_ptr<boost::asio::steady_timer> initCmdTimer;
 
 IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
-                       boost::asio::io_service& io,
+                       boost::asio::io_context& io,
                        const std::string& sensorName,
                        const std::string& sensorConfiguration,
                        sdbusplus::asio::object_server& objectServer,
@@ -142,8 +142,7 @@ bool IpmbSensor::processReading(const std::vector<uint8_t>& data, double& resp)
 
 void IpmbSensor::read(void)
 {
-    
-    waitTimer.expires_from_now(std::chrono::milliseconds(sensorPollMs));
+    waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
@@ -230,7 +229,7 @@ void IpmbSensor::read(void)
     });
 }
 void createSensors(
-    boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
+    boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
     boost::container::flat_map<std::string, std::shared_ptr<IpmbSensor>>&
         sensors,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
@@ -343,7 +342,7 @@ void reinitSensors(sdbusplus::message::message& message)
             }
             // we seem to send this command too fast sometimes, wait before
             // sending
-            initCmdTimer->expires_from_now(
+            initCmdTimer->expires_after(
                 std::chrono::seconds(reinitWaitSeconds));
 
             initCmdTimer->async_wait([](const boost::system::error_code ec) {
@@ -365,7 +364,7 @@ void reinitSensors(sdbusplus::message::message& message)
 }
 int main()
 {
-    boost::asio::io_service io;
+    boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server objectServer(systemBus, true);
     objectServer.add_manager("/xyz/openbmc_project/sensors");
@@ -373,26 +372,27 @@ int main()
 
     initCmdTimer = std::make_unique<boost::asio::steady_timer>(io);
 
-    io.post([&]() { createSensors(io, objectServer, sensors, systemBus); });
+    boost::asio::post(
+        io, [&]() { createSensors(io, objectServer, sensors, systemBus); });
 
     boost::asio::steady_timer configTimer(io);
 
     std::function<void(sdbusplus::message::message&)> eventHandler =
         [&](sdbusplus::message::message&) {
-            configTimer.expires_from_now(std::chrono::seconds(1));
-            // create a timer because normally multiple properties change
-            configTimer.async_wait([&](const boost::system::error_code& ec) {
-                if (ec == boost::asio::error::operation_aborted)
-                {
-                    return; // we're being canceled
-                }
-                createSensors(io, objectServer, sensors, systemBus);
-                if (sensors.empty())
-                {
-                    std::cout << "Configuration not detected\n";
-                }
-            });
-        };
+        configTimer.expires_after(std::chrono::seconds(1));
+        // create a timer because normally multiple properties change
+        configTimer.async_wait([&](const boost::system::error_code& ec) {
+            if (ec == boost::asio::error::operation_aborted)
+            {
+                return; // we're being canceled
+            }
+            createSensors(io, objectServer, sensors, systemBus);
+            if (sensors.empty())
+            {
+                std::cout << "Configuration not detected\n";
+            }
+        });
+    };
 
     sdbusplus::bus::match::match configMatch(
         static_cast<sdbusplus::bus::bus&>(*systemBus),

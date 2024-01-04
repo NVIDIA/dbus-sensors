@@ -14,7 +14,7 @@
 WatchdogSensor::WatchdogSensor(
     sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
-    /*boost::asio::io_service& io,*/
+    /*boost::asio::io_context& io,*/
     const std::string& sensorName, const std::string& sensorConfiguration) :
     AssocInterface(
         static_cast<sdbusplus::bus::bus&>(*conn),

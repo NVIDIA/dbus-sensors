@@ -20,7 +20,7 @@ static constexpr auto sensorTypes{
                                 "xyz.openbmc_project.Configuration.SEL"})};
 
 void createSensors(
-    boost::asio::io_service& io, sdbusplus::asio::object_server& objectServer,
+    boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
     boost::container::flat_map<std::string, std::shared_ptr<WatchdogSensor>>&
         watchdogSensors,
     boost::container::flat_map<std::string, std::shared_ptr<SELSensor>>&
@@ -164,7 +164,7 @@ void createSensors(
 
 int main()
 {
-    boost::asio::io_service io;
+    boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server objectServer(systemBus, true);
     objectServer.add_manager("/xyz/openbmc_project/sensors");
@@ -178,9 +178,9 @@ int main()
     auto sensorsChanged =
         std::make_shared<boost::container::flat_set<std::string>>();
 
-    io.post([&]() {
+    boost::asio::post(io, [&]() {
         createSensors(io, objectServer, watchdogSensors, selSensors, systemBus,
-                      nullptr);
+                      sensorsChanged);
     });
 
     boost::asio::steady_timer filterTimer(io);
@@ -193,7 +193,7 @@ int main()
             }
             sensorsChanged->insert(message.get_path());
             // this implicitly cancels the timer
-            filterTimer.expires_from_now(std::chrono::seconds(1));
+            filterTimer.expires_after(std::chrono::seconds(1));
 
             filterTimer.async_wait([&](const boost::system::error_code& ec) {
                 if (ec == boost::asio::error::operation_aborted)

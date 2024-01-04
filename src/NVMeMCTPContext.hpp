@@ -7,7 +7,7 @@
 class NVMeMCTPContext : public NVMeContext
 {
   public:
-    NVMeMCTPContext(boost::asio::io_service& io, int rootBus);
+    NVMeMCTPContext(boost::asio::io_context& io, int rootBus);
 
     ~NVMeMCTPContext() override;
 

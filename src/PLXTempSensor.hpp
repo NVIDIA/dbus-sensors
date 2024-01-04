@@ -39,7 +39,7 @@ class PLXTempSensor :
     PLXTempSensor(const std::string& objectType,
                   sdbusplus::asio::object_server& objectServer,
                   std::shared_ptr<sdbusplus::asio::connection>& conn,
-                  boost::asio::io_service& io, const std::string& sensorName,
+                  boost::asio::io_context& io, const std::string& sensorName,
                   std::vector<thresholds::Threshold>&& thresholds,
                   const std::string& sensorConfiguration,
                   const PowerState powerState, uint8_t deviceBus,
