@@ -229,6 +229,10 @@ if get_option('ipmb').allowed()
     )
 endif
 
+if get_option('mctp').allowed()
+    subdir('mctp')
+endif
+
 if get_option('mcu').allowed()
     executable(
         'mcutempsensor',
