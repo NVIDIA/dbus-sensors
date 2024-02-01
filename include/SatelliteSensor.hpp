@@ -54,7 +54,8 @@ std::map<uint8_t, uint8_t> sensorMap = {
     {0xDE, 4}, // GPU_SXM_5_DRAM_0_Power_0
     {0xE2, 4}, // GPU_SXM_6_DRAM_0_Power_0
     {0xE6, 4}, // GPU_SXM_7_DRAM_0_Power_0
-    {0xEA, 4} // GPU_SXM_8_DRAM_0_Power_0
+    {0xEA, 4}, // GPU_SXM_8_DRAM_0_Power_0
+    {0xEF, 4}  // Temperature_Sensor
 };
 struct SatelliteSensor : public Sensor
 {
