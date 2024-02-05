@@ -56,6 +56,7 @@ std::map<uint16_t, uint8_t> sensorMap = {
     {0xE6, 4},  // GPU_SXM_7_DRAM_0_Power_0
     {0xEA, 4},  // GPU_SXM_8_DRAM_0_Power_0
     {0xEF, 4},  // Temperature_Sensor
+    {0xF3, 4},  // Temperature Threshold
     {0x280, 4}, // ProcessorModule_0_CPU_0_Energy_0
     {0x284, 4}, // ProcessorModule_0_CPU_0_Power_0
     {0x288, 4}, // ProcessorModule_0_Vreg_0_CpuPower_0
