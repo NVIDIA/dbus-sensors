@@ -78,12 +78,14 @@ if not uring.found()
   uring = uring.as_system('system')
 endif
 
+nvidia_shmem =dependency('nvidia-shmem', required : true)
 default_deps = [
     boost,
     nlohmann_json_dep,
     phosphor_logging_dep,
     sdbusplus,
     uring,
+    nvidia_shmem
 ]
 
 subdir('service_files')

@@ -23,6 +23,7 @@
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <charconv>
+#include <telemetry_mrd_producer.hpp>
 #include <iostream>
 #include <istream>
 #include <limits>
@@ -62,7 +63,6 @@ HwmonTempSensor::HwmonTempSensor(
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
     platform(thisSensorParameters.platform),
     inventoryChassis(thisSensorParameters.inventoryChassis),
-    enablePlatformMetrics(thisSensorParameters.enablePlatformMetrics),
     physicalContext(sensorPhysicalContext)
 
 {
@@ -70,23 +70,6 @@ HwmonTempSensor::HwmonTempSensor(
         "/xyz/openbmc_project/sensors/" + thisSensorParameters.typeName + "/" +
             name,
         "xyz.openbmc_project.Sensor.Value");
-
-    if (enablePlatformMetrics)
-    {
-        std::string telemetryDataPath =
-            "/xyz/openbmc_project/inventory/platformmetrics";
-        std::string telemetryDataIntf =
-            "xyz.openbmc_project.Sensor.Aggregation";
-
-        // Register telemetry sensor collection interface/property
-        sensorMetricIface = objectServer.add_interface(telemetryDataPath,  telemetryDataIntf);
-        sensorMetricIface->register_property("SensorMetrics", sensorMetric);
-        sensorMetricIface->register_property(
-            "StaleSensorUpperLimitms",
-            static_cast<uint32_t>(750),
-            sdbusplus::asio::PropertyPermission::readWrite);
-        sensorMetricIface->initialize(true);
-    }
 
     if (!physicalContext.empty())
     {
@@ -153,10 +136,6 @@ HwmonTempSensor::~HwmonTempSensor()
     }
     objServer.remove_interface(sensorInterface);
     objServer.remove_interface(association);
-    if (enablePlatformMetrics)
-    {
-        objServer.remove_interface(sensorMetricIface);
-    }
 }
 
 void HwmonTempSensor::setupRead(void)
@@ -223,18 +202,20 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err,
         else
         {
             updateValue((nvalue + offsetValue) * scaleValue);
-            if(enablePlatformMetrics)
-            {
-                uint64_t time =
-                    std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
-                double reading = (nvalue + offsetValue) * scaleValue;
-                sensorMetric[name] =
-                    std::make_tuple(reading, time, inventoryChassis);
-                ;
-                sensorMetricIface->set_property("SensorMetrics", sensorMetric);
-            }
+            // Update Shared Memory Space
+            std::string propertyName = "Value";
+            std::string objPath = sensorInterface->get_object_path();
+            std::string ifaceName = sensorInterface->get_interface_name();
+
+            DbusVariantType propValue = value;
+            uint16_t retCode = 0;
+            uint64_t timestamp =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count();
+            nv::shmem::AggregationService::updateTelemetry(
+                objPath, ifaceName, propertyName, propValue, timestamp, retCode,
+                inventoryChassis);
         }
     }
     else

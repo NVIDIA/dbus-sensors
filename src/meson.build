@@ -153,6 +153,7 @@ if get_option('hwmon-temp').allowed()
             thresholds_dep,
             utils_dep,
         ],
+        include_directories: '../include',        
         install: true,
     )
 endif
@@ -354,3 +355,20 @@ if get_option('psuredundancy').allowed()
         install: true,
     )
 endif
+
+if get_option('satellite').enabled()
+    executable(
+        'satellitesensor',
+        'SatelliteSensor.cpp',
+        dependencies: [
+            default_deps,
+            i2c,
+            thresholds_dep,
+            utils_dep,
+        ],
+        implicit_include_directories: false,
+        include_directories: include_directories(['../include','../src']),
+        install: true,
+    )
+endif
+

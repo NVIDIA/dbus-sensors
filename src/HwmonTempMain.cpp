@@ -24,6 +24,7 @@
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/bus/match.hpp>
+#include <telemetry_mrd_producer.hpp>
 
 #include <array>
 #include <charconv>
@@ -78,6 +79,9 @@ static const I2CDeviceTypeMap sensorTypes{
     {"TMP461", I2CDeviceType{"tmp461", true}},
     {"TMP464", I2CDeviceType{"tmp464", true}},
     {"TMP75", I2CDeviceType{"tmp75", true}},
+    {"ADT7461", I2CDeviceType{"adt7461", true}},
+    {"TMP451", I2CDeviceType{"tpm451", true}},
+    {"TMP432", I2CDeviceType{"tpm432", true}},                                
     {"W83773G", I2CDeviceType{"w83773g", true}},
 };
 
@@ -114,15 +118,20 @@ static struct SensorParams
                                                    sensor_paths::unitDegreesC,
                                                .typeName = "temperature",
                                                .platform = getPlatform(),
-                                               .inventoryChassis = "",
-                                               .enablePlatformMetrics = false};
+                                               .inventoryChassis = ""};
 
     if (tmpSensorParameters.platform.compare("\"hgx\"") == 0)
     {
         // HGX HMC Temperature Sensor's Inventory Chassis
         tmpSensorParameters.inventoryChassis = "/xyz/openbmc_project/inventory/system/chassis/HGX_BMC_0";
-        tmpSensorParameters.enablePlatformMetrics = true;
     }
+    // Check to log error only once during init, if inventoryChassis is empty. inventoryChassis endpoint requried for shared memory update
+    if(tmpSensorParameters.inventoryChassis.empty())
+    {
+        std::cerr << "found empty chassis endpoint for HwmonTemp sensor on platform"
+                  << tmpSensorParameters.platform << "\n";
+    }
+
 
     // For IIO RAW sensors we get a raw_value, an offset, and scale
     // to compute the value = (raw_value + offset) * scale
@@ -669,6 +678,12 @@ int main()
     });
 
     matches.emplace_back(std::move(ifaceRemovedMatch));
+
+    // Intitializing shared memory space for hwmon
+    if (nv::shmem::AggregationService::namespaceInit("hwmontemp"))
+    {
+        std::cout << "Initialized shared memory hwmon\n";
+    }
 
     io.run();
 }
