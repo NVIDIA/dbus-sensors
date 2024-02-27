@@ -45,8 +45,6 @@ constexpr const char* configInterface =
     "xyz.openbmc_project.Configuration.Satellite";
 constexpr const char* sensorRootPath =
     "/xyz/openbmc_project/sensors/";
-static constexpr double satelliteMaxReading = 0xFF;
-static constexpr double satelliteMinReading = 0;
 
 boost::container::flat_map<std::string, std::unique_ptr<SatelliteSensor>> sensors;
 
@@ -56,11 +54,11 @@ SatelliteSensor::SatelliteSensor(
     const std::string& sensorConfiguration,
     sdbusplus::asio::object_server& objectServer,
     std::vector<thresholds::Threshold>&& thresholdData, uint8_t busId,
-    uint8_t addr, uint8_t tempReg, std::string& sensorType, size_t pollTime) :
+    uint8_t addr, uint16_t offset, std::string& sensorType, size_t pollTime,  double minVal, double maxVal) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
            sensorConfiguration, configInterface,
-           false, false, satelliteMaxReading, satelliteMinReading, conn),
-    busId(busId), addr(addr), tempReg(tempReg), objectServer(objectServer),
+           false, false, maxVal, minVal, conn),
+    busId(busId), addr(addr), offset(offset), objectServer(objectServer),
     waitTimer(io), pollRate(pollTime)
 {
     // make the string to lowercase for Dbus sensor type
@@ -107,7 +105,7 @@ void SatelliteSensor::checkThresholds(void)
     thresholds::checkThresholds(this);
 }
 
-int SatelliteSensor::readEepromData(uint8_t regs, uint8_t length, double* data)
+int SatelliteSensor::readEepromData(uint16_t regs, uint8_t length, double* data)
 {
     std::string i2cBus = "/dev/i2c-" + std::to_string(busId);
     int fd = open(i2cBus.c_str(), O_RDWR);
@@ -131,14 +129,25 @@ int SatelliteSensor::readEepromData(uint8_t regs, uint8_t length, double* data)
     struct i2c_rdwr_ioctl_data args;
     struct i2c_msg msg;
     uint64_t reading = 0;
+    uint8_t cmd[8];
 
     msg.addr = addr;
     args.msgs = &msg;
     args.nmsgs = 1;
 
     msg.flags = 0;
-    msg.len = 1;
-    msg.buf = &regs;
+    msg.buf = (uint8_t *)&cmd;
+    if (offset > 255) 
+    {
+        msg.len = 2;
+        msg.buf[0] = regs >> 8;
+        msg.buf[1] = regs & 0xFF;
+    }
+    else
+    {
+        msg.len = 1;
+        msg.buf[0] = regs & 0xFF;
+    }
 
     //write offset
     ret = ioctl(fd, I2C_RDWR, &args);
@@ -179,6 +188,10 @@ int SatelliteSensor::readEepromData(uint8_t regs, uint8_t length, double* data)
     {
         //skip the precision - floating number
         *data = reading >> 8; 
+        if (debug)
+        {
+            printf("offset: %x read %f\n", offset,*data);
+        }
     }
 
     close(fd);
@@ -202,13 +215,13 @@ void SatelliteSensor::read(void)
             return;
         }
         double temp = 0; 
-        int len = getLength(tempReg);
+        int len = getLength(offset);
         if (len == 0)
         {
             lg2::error("no offset is specified");
             return;
         }
-        int ret = readEepromData(tempReg, len, &temp);
+        int ret = readEepromData(offset, len, &temp);
         if (ret >= 0)
         {
             if constexpr (debug)
@@ -269,13 +282,19 @@ void createSensors(
                     uint8_t addr =
                         loadVariant<uint8_t>(entry.second, "Address");
 
-                    uint8_t tempReg = loadVariant<uint8_t>(entry.second, "Reg");
+                    uint16_t off = loadVariant<uint16_t>(entry.second, "Reg");
 
                     std::string sensorType =
                         loadVariant<std::string>(entry.second, "SensorType");
 
                     size_t rate =
                         loadVariant<uint8_t>(entry.second, "PollRate");
+
+                    double minVal =
+                        loadVariant<double>(entry.second, "MinValue");
+
+                    double maxVal =
+                        loadVariant<double>(entry.second, "MaxValue");
                     if constexpr (debug)
                     {
                         lg2::info("Configuration parsed for \n\t {CONF}\nwith\n"
@@ -284,12 +303,17 @@ void createSensors(
                                   "\tAddress:{ADDR}\n"
                                   "\tReg: {REG}\n"
                                   "\tType : {TYPE}\n"
-                                  "\tPollrate: {RATE}\n",
+                                  "\tPollrate: {RATE}\n"
+                                  "\tMinValue: {MIN}\n"
+                                  "\tMaxValue: {MAX}\n",
                                   "CONF", entry.first, "NAME", name, "BUS",
                                   static_cast<int>(busId), "ADDR",
                                   static_cast<int>(addr), "REG",
-                                  static_cast<int>(tempReg), "TYPE", sensorType,
-                                  "RATE", rate);
+                                  static_cast<int>(off), "TYPE", sensorType,
+                                  "RATE", rate,
+                                  "MIN", static_cast<double>(minVal),
+                                  "MAX", static_cast<double>(maxVal)
+                                  );
                     }
 
                     auto& sensor = sensors[name];
@@ -297,7 +321,7 @@ void createSensors(
                     sensor = std::make_unique<SatelliteSensor>(
                         dbusConnection, io, name, pathPair.first, objectServer,
                         std::move(sensorThresholds), busId, addr,
-                        tempReg, sensorType, rate);
+                        off, sensorType, rate, minVal, maxVal);
 
                     sensor->init();
                 }
