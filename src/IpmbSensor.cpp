@@ -606,8 +606,8 @@ void createSensors(
                 sensor = nullptr;
                 sensor = std::make_shared<IpmbSensor>(
                     dbusConnection, io, name, path, objectServer,
-                    std::move(sensorThresholds), deviceAddress, hostSMbusIndex,
-                    channelAddress, pollRate, sensorTypeName, maxValue,
+                    std::move(sensorThresholds), deviceAddress, channelAddress,
+                    hostSMbusIndex, pollRate, sensorTypeName, maxValue,
                     minValue);
 
                 sensor->parseConfigValues(cfg);
