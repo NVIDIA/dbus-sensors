@@ -24,7 +24,7 @@
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/bus/match.hpp>
-#include <telemetry_mrd_producer.hpp>
+#include <tal.hpp>
 
 #include <array>
 #include <charconv>
@@ -679,11 +679,8 @@ int main()
 
     matches.emplace_back(std::move(ifaceRemovedMatch));
 
-    // Intitializing shared memory space for hwmon
-    if (nv::shmem::AggregationService::namespaceInit("hwmontemp"))
-    {
-        std::cout << "Initialized shared memory hwmon\n";
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,"hwmontemp")){
+        std::cout << "Successfully registerd TAL namespaceInit for hwmontemp\n";
     }
-
     io.run();
 }

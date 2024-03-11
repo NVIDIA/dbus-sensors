@@ -23,7 +23,7 @@
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <charconv>
-#include <telemetry_mrd_producer.hpp>
+#include <tal.hpp>
 #include <iostream>
 #include <istream>
 #include <limits>
@@ -213,9 +213,10 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err,
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now().time_since_epoch())
                     .count();
-            nv::shmem::AggregationService::updateTelemetry(
-                objPath, ifaceName, propertyName, propValue, timestamp, retCode,
-                inventoryChassis);
+		    std::vector<uint8_t> rawPropValue = {};
+	    	tal::TelemetryAggregator::updateTelemetry(
+				objPath, ifaceName, propertyName, rawPropValue, timestamp, retCode, propValue, inventoryChassis);
+
         }
     }
     else
