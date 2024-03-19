@@ -105,11 +105,12 @@ void SatelliteSensor::checkThresholds(void)
     thresholds::checkThresholds(this);
 }
 
-int SatelliteSensor::readEepromData(uint16_t regs, uint8_t length, double* data)
+template <typename T>
+    int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T *reading, int length)
 {
-    std::string i2cBus = "/dev/i2c-" + std::to_string(busId);
-    int fd = open(i2cBus.c_str(), O_RDWR);
+    std::string i2cBus = "/dev/i2c-" + std::to_string(bus);
 
+    int fd = open(i2cBus.c_str(), O_RDWR);
     if (fd < 0)
     {
         lg2::error(" unable to open i2c device {BUS} err={FD}", "BUS", i2cBus,
@@ -128,7 +129,6 @@ int SatelliteSensor::readEepromData(uint16_t regs, uint8_t length, double* data)
     int ret = 0;
     struct i2c_rdwr_ioctl_data args;
     struct i2c_msg msg;
-    uint64_t reading = 0;
     uint8_t cmd[8];
 
     msg.addr = addr;
@@ -137,16 +137,17 @@ int SatelliteSensor::readEepromData(uint16_t regs, uint8_t length, double* data)
 
     msg.flags = 0;
     msg.buf = (uint8_t *)&cmd;
+    // handle two bytes offset 
     if (offset > 255) 
     {
         msg.len = 2;
-        msg.buf[0] = regs >> 8;
-        msg.buf[1] = regs & 0xFF;
+        msg.buf[0] = offset >> 8;
+        msg.buf[1] = offset & 0xFF;
     }
     else
     {
         msg.len = 1;
-        msg.buf[0] = regs & 0xFF;
+        msg.buf[0] = offset & 0xFF;
     }
 
     //write offset
@@ -157,9 +158,10 @@ int SatelliteSensor::readEepromData(uint16_t regs, uint8_t length, double* data)
         return ret;
     }
 
+    T data = 0;
     msg.flags = I2C_M_RD;
     msg.len = length;
-    msg.buf =(uint8_t *) &reading;
+    msg.buf =(uint8_t *) &data;
 
     ret = ioctl(fd, I2C_RDWR, &args);
     if(ret < 0)
@@ -169,32 +171,58 @@ int SatelliteSensor::readEepromData(uint16_t regs, uint8_t length, double* data)
     }
     // there is no value updated from HMC if reading data is all 0xff
     uint8_t emptyBytes = 0;
-    for (int i = 0; i < length; i ++)
+    uint8_t *ptr = (uint8_t *) &data;
+    for (int i = 0; i < length; i++, ptr++)
     {
-        uint8_t dataByte = reading >> (i*8);
-        if (dataByte != 0xFF)
+        if (*ptr != 0xFF)
         {
             continue;
         }
         emptyBytes++;
     }
 
-    // all bytes are 0xff.
+    // there is no reading if all bytes are 0xff 
     if (emptyBytes == length)
     {
-        *data = 0;
+        *reading = 0;
     }
-    else
+    else 
     {
-        //skip the precision - floating number
-        *data = reading >> 8; 
+        *reading = data;
+    }
+    close(fd);
+    return 0;
+}
+
+int SatelliteSensor::readEepromData(size_t off, uint8_t length, double* data)
+{
+
+    uint64_t reading = 0;
+    int ret = i2cCmd<uint64_t>(busId, addr, off, &reading, length);
+    if (ret >= 0 )
+    {
         if (debug)
         {
-            printf("offset: %x read %f\n", offset,*data);
+            printf("offset: %d reading: %llx \n", off, reading);
         }
+        // skip the floating number
+        *data = reading >> 8; 
+        return 0;
     }
+    return ret;
+}
 
-    close(fd);
+int SatelliteSensor::getPLDMSensorReading(size_t off, uint8_t length,
+                                          double* data)
+{
+
+    double reading = 0;
+    int ret = i2cCmd<double>(busId, addr, off, &reading, length);
+    if (ret >= 0 )
+    {
+        *data = reading; 
+        return 0;
+    }
     return ret;
 }
 
@@ -221,7 +249,19 @@ void SatelliteSensor::read(void)
             lg2::error("no offset is specified");
             return;
         }
-        int ret = readEepromData(offset, len, &temp);
+
+        int ret;
+        // there are newly added PLDM sensors if the offset > 255.
+        if (offset <= 255)
+        {
+            ret = readEepromData(offset, len, &temp);
+        }
+        else 
+        {
+            ret = getPLDMSensorReading(offset, len, &temp);
+        }
+
+
         if (ret >= 0)
         {
             if constexpr (debug)
@@ -282,7 +322,8 @@ void createSensors(
                     uint8_t addr =
                         loadVariant<uint8_t>(entry.second, "Address");
 
-                    uint16_t off = loadVariant<uint16_t>(entry.second, "Reg");
+                    uint16_t off =
+                        loadVariant<uint16_t>(entry.second, "OffsetValue");
 
                     std::string sensorType =
                         loadVariant<std::string>(entry.second, "SensorType");
@@ -301,14 +342,14 @@ void createSensors(
                                   "\tName: {NAME}\n"
                                   "\tBus: {BUS}\n"
                                   "\tAddress:{ADDR}\n"
-                                  "\tReg: {REG}\n"
+                                  "\tOffset: {OFF}\n"
                                   "\tType : {TYPE}\n"
                                   "\tPollrate: {RATE}\n"
                                   "\tMinValue: {MIN}\n"
                                   "\tMaxValue: {MAX}\n",
                                   "CONF", entry.first, "NAME", name, "BUS",
                                   static_cast<int>(busId), "ADDR",
-                                  static_cast<int>(addr), "REG",
+                                  static_cast<int>(addr), "OFF",
                                   static_cast<int>(off), "TYPE", sensorType,
                                   "RATE", rate,
                                   "MIN", static_cast<double>(minVal),
