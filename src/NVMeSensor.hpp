@@ -1,7 +1,8 @@
 #pragma once
 
+#include "sensor.hpp"
+
 #include <boost/asio/io_context.hpp>
-#include <sensor.hpp>
 
 class NVMeSensor : public Sensor
 {

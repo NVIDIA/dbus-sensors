@@ -40,7 +40,7 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
         "RedundancyLost", redundancyLost,
         [&](const bool& newStatus, bool& oldStatus) {
             oldStatus = newStatus;
-            status = newStatus;
+            redundancyLost = newStatus;
             return 1;
         });
 

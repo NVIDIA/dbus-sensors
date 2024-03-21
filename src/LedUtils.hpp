@@ -1,6 +1,11 @@
+#pragma once
+
+#include <fcntl.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <cstdint>
+#include <cstring>
 #include <iostream>
 
 extern "C"

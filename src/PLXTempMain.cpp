@@ -183,7 +183,7 @@ void interfaceRemoved(
     {
         if ((sensorIt->second->configurationPath == path) &&
             (std::find(interfaces.begin(), interfaces.end(),
-                       sensorIt->second->objectType) != interfaces.end()))
+                       sensorIt->second->configInterface) != interfaces.end()))
         {
             sensorIt = sensors.erase(sensorIt);
         }

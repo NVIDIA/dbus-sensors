@@ -13,15 +13,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 */
-#include <SatelliteSensor.hpp>
-#include <Utils.hpp>
-#include <VariantVisitors.hpp>
+#include "SatelliteSensor.hpp"
+
+#include "Utils.hpp"
+#include "VariantVisitors.hpp"
+
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/container/flat_map.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/bus/match.hpp>
-#include <phosphor-logging/lg2.hpp>
 
 #include <chrono>
 #include <cmath>

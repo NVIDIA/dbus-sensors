@@ -1,3 +1,14 @@
+#pragma once
+
+#include <sdbusplus/asio/object_server.hpp>
+
+#include <cstdint>
+#include <map>
+#include <string>
+#include <tuple>
+#include <variant>
+#include <vector>
+
 using DbusVariantType = std::variant<
     std::vector<std::tuple<std::string, std::string, std::string>>,
     std::vector<std::string>, std::vector<double>, std::string, int64_t,
