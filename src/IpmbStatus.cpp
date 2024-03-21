@@ -81,16 +81,15 @@ void IpmbSensor::runInitCmd()
     {
         // setup connection to dbus
         conn->async_method_call(
-            [this](boost::system::error_code ec,
-                   const IpmbMethodType& response) {
-                const int& status = std::get<0>(response);
+            [](boost::system::error_code ec, const IpmbMethodType& response) {
+            const int& status = std::get<0>(response);
 
-                if (ec || status)
-                {
-                    std::cerr << "Error setting init command for device: "
-                              << "\n";
-                }
-            },
+            if (ec || status)
+            {
+                std::cerr << "Error setting init command for device: "
+                          << "\n";
+            }
+        },
             "xyz.openbmc_project.Ipmi.Channel.Ipmb",
             "/xyz/openbmc_project/Ipmi/Channel/Ipmb", "org.openbmc.Ipmb",
             "sendRequest", commandAddress, netfn, lun, *initCommand, initData);

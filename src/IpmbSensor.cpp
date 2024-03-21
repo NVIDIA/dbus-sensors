@@ -42,9 +42,6 @@ constexpr const bool debug = false;
 constexpr const char* sensorType = "IpmbSensor";
 constexpr const char* sdrInterface = "IpmbDevice";
 
-static constexpr double ipmbMaxReading = 0xFF;
-static constexpr double ipmbMinReading = 0;
-
 static constexpr uint8_t meAddressDefault = 1;
 static constexpr uint8_t lun = 0;
 static constexpr uint8_t hostSMbusIndexDefault = 0x03;
