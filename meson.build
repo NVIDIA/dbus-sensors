@@ -88,6 +88,10 @@ default_deps = [
     nvidia_shmem
 ]
 
+if get_option('satellite').enabled()
+    add_project_arguments('-DAUTO_GEN_SENSOR_HEADER', language : 'cpp')
+endif
+
 subdir('service_files')
 subdir('src')
 

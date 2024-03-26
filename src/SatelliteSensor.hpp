@@ -11,7 +11,9 @@
 #include <string>
 #include <vector>
 
+#ifdef AUTO_GEN_SENSOR_HEADER
 #include <HmcSensor.hpp>
+#endif
 
 template <typename T>
     int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading,
@@ -23,9 +25,10 @@ struct SatelliteSensor : public Sensor
                     boost::asio::io_context& io, const std::string& name,
                     const std::string& sensorConfiguration,
                     sdbusplus::asio::object_server& objectServer,
-                    std::vector<thresholds::Threshold>&& thresholds,
+                    std::vector<thresholds::Threshold>&& thresholdData,
                     uint8_t busId, uint8_t addr, uint16_t offset,
-                    std::string& sensorType, size_t pollTime, double minVal, double maxVal);
+                    std::string& sensorType, size_t pollTime, double minVal,
+                    double maxVal);
     ~SatelliteSensor() override;
 
     void checkThresholds(void) override; 
@@ -46,13 +49,18 @@ struct SatelliteSensor : public Sensor
     int getPLDMSensorReading(size_t off, uint8_t length, double* data);
     uint8_t getLength(uint16_t offset)
     {
-      auto it = sensorMap.find(offset);
-      // offset is not in the map.
-      if(it == sensorMap.end())
-      {
-        return 0;
-      }
-      return sensorMap[offset];
+#ifdef AUTO_GEN_SENSOR_HEADER
+        auto it = sensorMap.find(offset);
+        // offset is not in the map.
+        if (it == sensorMap.end())
+        {
+            return 0;
+        }
+        return sensorMap[offset];
+#else 
+      // return offset to avoid the unused variable error.
+      return offset; 
+#endif
     }
     sdbusplus::asio::object_server& objectServer;
     boost::asio::steady_timer waitTimer;
