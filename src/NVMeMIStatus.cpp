@@ -37,13 +37,11 @@ NVMeMIStatus::NVMeMIStatus(sdbusplus::asio::object_server& objectServer,
         ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))
             .c_str(),
         StatusInterface::action::defer_emit),
-    std::enable_shared_from_this<NVMeMIStatus>(), name(sensorName),
-    sensorPollSec(pollRate), busId(busId), nvmeAddress(nvmeAddress),
-    objServer(objectServer), waitTimer(io)
+    name(sensorName), sensorPollSec(pollRate), busId(busId),
+    nvmeAddress(nvmeAddress), objServer(objectServer), waitTimer(io)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))
-            .c_str(),
+        ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName)),
         DriveInterface::interface);
 
     fs::path p(sensorConfiguration);
@@ -71,6 +69,7 @@ int NVMeMIStatus::getNVMeInfo(int bus, uint8_t addr, std::vector<uint8_t>& resp)
     int32_t statusCmd = nvmeStatusCmd;
 
     std::string i2cBus = "/dev/i2c-" + std::to_string(bus);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     int dev = open(i2cBus.c_str(), O_RDWR);
     if (dev < 0)
     {
@@ -80,6 +79,7 @@ int NVMeMIStatus::getNVMeInfo(int bus, uint8_t addr, std::vector<uint8_t>& resp)
     }
 
     /* Select the target device */
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     if (::ioctl(dev, I2C_SLAVE, addr) == -1)
     {
         std::cerr << "Failed to configure device address 0x" << std::hex
@@ -139,7 +139,7 @@ void NVMeMIStatus::monitor(void)
         {
             sdbusplus::xyz::openbmc_project::Inventory::server::Item::present(
                 true);
-            if (!(resp[1] & statusMask))
+            if ((resp[1] & statusMask) == 0)
             {
                 sdbusplus::xyz::openbmc_project::State::Decorator::server::
                     OperationalStatus::state(

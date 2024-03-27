@@ -76,8 +76,7 @@ class TachSensor :
                const std::pair<double, double>& limits,
                const PowerState& powerState,
                const std::optional<std::string>& led,
-               const std::optional<uint8_t> ledReg,
-               const std::optional<uint8_t> offset);
+               std::optional<uint8_t> ledReg, std::optional<uint8_t> offset);
     ~TachSensor() override;
     void setupRead();
 

@@ -20,13 +20,12 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
         static_cast<sdbusplus::bus::bus&>(*conn),
         ("/xyz/openbmc_project/sensors/PSU/" + escapeName(sensorName)).c_str(),
         AssocInterface::action::defer_emit),
-    std::enable_shared_from_this<PSURedundancy>(), name(sensorName),
-    totalPSU(totalPSUCount), redundantPSU(redundantPSUCount),
+    name(sensorName), totalPSU(totalPSUCount), redundantPSU(redundantPSUCount),
     previousWorkablePSU(totalPSUCount), sufficientPSU(sufficientPSUCount),
     objServer(objectServer)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/PSU/" + escapeName(sensorName)).c_str(),
+        ("/xyz/openbmc_project/sensors/PSU/" + escapeName(sensorName)),
         "xyz.openbmc_project.Control.PowerSupplyRedundancy");
     sensorInterface->register_property(
         "Status", status,
@@ -61,12 +60,12 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
     for (int i = 0; i < totalPSU; i++)
     {
         std::variant<bool> value;
-        std::string objPath = PSU_OBJ + std::to_string(i);
+        std::string objPath = psuObj + std::to_string(i);
         auto method = static_cast<sdbusplus::bus::bus&>(*conn).new_method_call(
-            PSU_SERVICE, objPath.c_str(), "org.freedesktop.DBus.Properties",
+            psuService, objPath.c_str(), "org.freedesktop.DBus.Properties",
             "Get");
 
-        method.append(OPERATIONAL_STATE_IFACE, "Functional");
+        method.append(operationalStateIface, "Functional");
 
         auto reply = static_cast<sdbusplus::bus::bus&>(*conn).call(method);
 
@@ -124,8 +123,8 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
     psuEventMatcher = std::make_shared<sdbusplus::bus::match::match>(
         static_cast<sdbusplus::bus::bus&>(*conn),
         "type='signal',member='PropertiesChanged',path_namespace='" +
-            std::string(PSU_BASE_OBJ) + "',arg0namespace='" +
-            std::string(OPERATIONAL_STATE_IFACE) + "'",
+            std::string(psuBaseObj) + "',arg0namespace='" +
+            std::string(operationalStateIface) + "'",
         std::move(psuEventMatcherCallback));
 }
 

@@ -20,12 +20,10 @@ SELSensor::SELSensor(sdbusplus::asio::object_server& objectServer,
         ("/xyz/openbmc_project/sensors/EventLogging/" + escapeName(sensorName))
             .c_str(),
         AssocInterface::action::defer_emit),
-    std::enable_shared_from_this<SELSensor>(), name(sensorName),
-    objServer(objectServer)
+    name(sensorName), objServer(objectServer)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/EventLogging/" + escapeName(sensorName))
-            .c_str(),
+        ("/xyz/openbmc_project/sensors/EventLogging/" + escapeName(sensorName)),
         "xyz.openbmc_project.Inventory.Item.SEL");
     sensorInterface->register_property(
         "Status", status,
@@ -53,7 +51,7 @@ SELSensor::SELSensor(sdbusplus::asio::object_server& objectServer,
 
         std::string_view signalStrView = selSignal;
         signalStrView.remove_prefix(std::min(
-            signalStrView.find_last_of(".") + 1, signalStrView.size()));
+            signalStrView.find_last_of('.') + 1, signalStrView.size()));
         std::optional<std::string_view> signal = signalStrView;
 
         if (*signal == "Full")

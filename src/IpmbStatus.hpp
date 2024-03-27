@@ -33,15 +33,14 @@ struct IpmbSensor
                boost::asio::io_context& io, const std::string& name,
                const std::string& sensorConfiguration,
                sdbusplus::asio::object_server& objectServer,
-               uint8_t deviceAddress, uint8_t channelAddress,
-               const float pollRate);
+               uint8_t deviceAddress, uint8_t channelAddress, float pollRate);
     ~IpmbSensor();
 
     void read(void);
     void init(void);
     void loadDefaults(void);
     void runInitCmd(void);
-    bool processReading(const std::vector<uint8_t>& data, double& resp);
+    bool processReading(const std::vector<uint8_t>& data, double& resp) const;
 
     IpmbType type = IpmbType::none;
     uint8_t commandAddress = 0;

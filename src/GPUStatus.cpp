@@ -24,11 +24,10 @@ GPUStatus::GPUStatus(sdbusplus::asio::object_server& objectServer,
         static_cast<sdbusplus::bus::bus&>(*conn),
         ("/xyz/openbmc_project/sensors/GPU/" + escapeName(sensorName)).c_str(),
         AssocInterface::action::defer_emit),
-    std::enable_shared_from_this<GPUStatus>(), name(sensorName),
-    totalGPU(totalGPU), objServer(objectServer)
+    name(sensorName), totalGPU(totalGPU), objServer(objectServer)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/GPU/" + escapeName(sensorName)).c_str(),
+        ("/xyz/openbmc_project/sensors/GPU/" + escapeName(sensorName)),
         "xyz.openbmc_project.Inventory.Item.GPU");
 
     fs::path p(sensorConfiguration);
@@ -78,7 +77,7 @@ GPUStatus::GPUStatus(sdbusplus::asio::object_server& objectServer,
 
     auto gpuEventMatcherCallback = [this,
                                     conn](sdbusplus::message::message& msg) {
-        bool resetRequired;
+        bool resetRequired = false;
         try
         {
             msg.read(resetRequired);
@@ -107,7 +106,7 @@ GPUStatus::GPUStatus(sdbusplus::asio::object_server& objectServer,
         gpuStatus[gpuName] = resetRequired;
     };
 
-    std::size_t indexLast = gpuObject.find_last_of("/");
+    std::size_t indexLast = gpuObject.find_last_of('/');
     if (indexLast == std::string::npos)
     {
         return;

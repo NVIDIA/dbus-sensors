@@ -41,9 +41,8 @@ class PLXTempSensor :
                   std::shared_ptr<sdbusplus::asio::connection>& conn,
                   boost::asio::io_context& io, const std::string& sensorName,
                   std::vector<thresholds::Threshold>&& thresholds,
-                  const std::string& sensorConfiguration,
-                  const PowerState powerState, uint8_t deviceBus,
-                  uint8_t deviceAddress, const float pollRate);
+                  const std::string& sensorConfiguration, PowerState powerState,
+                  uint8_t deviceBus, uint8_t deviceAddress, float pollRate);
     ~PLXTempSensor() override;
     void setupRead(void);
 
@@ -84,7 +83,7 @@ class PLXTempSensor :
      *  @param buffer
      *  @param count bytes to write
      */
-    int i2cWrite(int fd, const void* buf, ssize_t len)
+    static int i2cWrite(int fd, const void* buf, ssize_t len)
     {
         if (write(fd, buf, len) != len)
         {

@@ -139,7 +139,7 @@ void createSensors(
                 {
                     pollRate = std::visit(VariantToFloatVisitor(),
                                           findPollRate->second);
-                    if (pollRate <= 0.0f)
+                    if (pollRate <= 0.0F)
                     {
                         std::cerr << "polling time too short for " << sensorName
                                   << "\n";

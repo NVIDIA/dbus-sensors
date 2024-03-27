@@ -18,12 +18,11 @@ ProcessorStatus::ProcessorStatus(
         static_cast<sdbusplus::bus::bus&>(*conn),
         ("/xyz/openbmc_project/sensors/cpu/" + escapeName(sensorName)).c_str(),
         ItemInterface::action::defer_emit),
-    std::enable_shared_from_this<ProcessorStatus>(),
     name(escapeName(sensorName)), gpio(gpioName), objServer(objectServer),
     procPresentEvent(io)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/cpu/" + escapeName(sensorName)).c_str(),
+        ("/xyz/openbmc_project/sensors/cpu/" + escapeName(sensorName)),
         CpuInterface::interface);
 
     fs::path p(sensorConfiguration);

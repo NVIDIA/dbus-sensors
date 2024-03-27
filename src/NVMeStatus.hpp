@@ -50,6 +50,6 @@ class NVMeStatus :
   private:
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
     sdbusplus::asio::object_server& objServer;
-    int getCPLDRegsInfo(uint8_t regs, int16_t* pu16data);
+    int getCPLDRegsInfo(uint8_t regs, int16_t* pu16data) const;
     boost::asio::steady_timer waitTimer;
 };

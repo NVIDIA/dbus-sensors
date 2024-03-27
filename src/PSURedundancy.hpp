@@ -14,12 +14,12 @@
 #include <string>
 #include <vector>
 
-constexpr auto OPERATIONAL_STATE_IFACE =
+constexpr auto operationalStateIface =
     "xyz.openbmc_project.State.Decorator.OperationalStatus";
-constexpr auto PSU_SERVICE = "com.Nvidia.Powersupply";
-constexpr auto PSU_OBJ =
+constexpr auto psuService = "com.Nvidia.Powersupply";
+constexpr auto psuObj =
     "/xyz/openbmc_project/inventory/system/chassis/motherboard/powersupply";
-constexpr auto PSU_BASE_OBJ =
+constexpr auto psuBaseObj =
     "/xyz/openbmc_project/inventory/system/chassis/motherboard";
 
 namespace fs = std::filesystem;

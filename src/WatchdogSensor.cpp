@@ -21,12 +21,10 @@ WatchdogSensor::WatchdogSensor(
         ("/xyz/openbmc_project/sensors/watchdog/" + escapeName(sensorName))
             .c_str(),
         AssocInterface::action::defer_emit),
-    std::enable_shared_from_this<WatchdogSensor>(), name(sensorName),
-    objServer(objectServer)
+    name(sensorName), objServer(objectServer)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/watchdog/" + escapeName(sensorName))
-            .c_str(),
+        ("/xyz/openbmc_project/sensors/watchdog/" + escapeName(sensorName)),
         "xyz.openbmc_project.Inventory.Item.Watchdog");
     sensorInterface->register_property(
         "Status", status,

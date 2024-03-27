@@ -84,7 +84,7 @@ void IpmbSensor::runInitCmd()
             [](boost::system::error_code ec, const IpmbMethodType& response) {
             const int& status = std::get<0>(response);
 
-            if (ec || status)
+            if (ec || (status != 0))
             {
                 std::cerr << "Error setting init command for device: "
                           << "\n";
@@ -120,7 +120,7 @@ bool isValid(const std::vector<uint8_t>& data)
     }
 
     // Per IPMI 'Get Sensor Reading' specification
-    if (data[1] & (1 << readingUnavailableBit))
+    if ((data[1] & (1 << readingUnavailableBit)) != 0)
     {
         return false;
     }
@@ -128,7 +128,8 @@ bool isValid(const std::vector<uint8_t>& data)
     return true;
 }
 
-bool IpmbSensor::processReading(const std::vector<uint8_t>& data, double& resp)
+bool IpmbSensor::processReading(const std::vector<uint8_t>& data,
+                                double& resp) const
 {
 
     if (command == ipmi::sensor::getSensorReading && !isValid(data))
@@ -152,7 +153,7 @@ void IpmbSensor::read(void)
             [this](boost::system::error_code ec,
                    const IpmbMethodType& response) {
                 const int& status = std::get<0>(response);
-                if (ec || status)
+                if (ec || (status != 0))
                 {
                     read();
                     return;
@@ -276,7 +277,7 @@ void createSensors(
                     {
                         pollRate = std::visit(VariantToFloatVisitor(),
                                               findPollRate->second);
-                        if (pollRate <= 0.0f)
+                        if (pollRate <= 0.0F)
                         {
                             pollRate = pollRateDefault;
                         }

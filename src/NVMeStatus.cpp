@@ -30,14 +30,12 @@ NVMeStatus::NVMeStatus(sdbusplus::asio::object_server& objectServer,
         ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))
             .c_str(),
         ItemInterface::action::defer_emit),
-    std::enable_shared_from_this<NVMeStatus>(), name(sensorName),
-    sensorPollSec(pollRate), index(index), busId(busId),
+    name(sensorName), sensorPollSec(pollRate), index(index), busId(busId),
     cpldAddress(cpldAddress), statusReg(statusReg), objServer(objectServer),
     waitTimer(io)
 {
     sensorInterface = objectServer.add_interface(
-        ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))
-            .c_str(),
+        ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName)),
         DriveInterface::interface);
 
     fs::path p(sensorConfiguration);
@@ -59,9 +57,10 @@ NVMeStatus::~NVMeStatus()
     objServer.remove_interface(sensorInterface);
 }
 
-int NVMeStatus::getCPLDRegsInfo(uint8_t regs, int16_t* pu16data)
+int NVMeStatus::getCPLDRegsInfo(uint8_t regs, int16_t* pu16data) const
 {
     std::string i2cBus = "/dev/i2c-" + std::to_string(busId);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     int fd = open(i2cBus.c_str(), O_RDWR);
 
     if (fd < 0)
@@ -71,6 +70,7 @@ int NVMeStatus::getCPLDRegsInfo(uint8_t regs, int16_t* pu16data)
         return -1;
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     if (ioctl(fd, I2C_SLAVE_FORCE, cpldAddress) < 0)
     {
         std::cerr << " unable to set device address: " << strerror(errno)
@@ -80,6 +80,7 @@ int NVMeStatus::getCPLDRegsInfo(uint8_t regs, int16_t* pu16data)
     }
 
     unsigned long funcs = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     if (ioctl(fd, I2C_FUNCS, &funcs) < 0)
     {
         std::cerr << "not support I2C_FUNCS: " << strerror(errno) << "\n";
@@ -87,7 +88,7 @@ int NVMeStatus::getCPLDRegsInfo(uint8_t regs, int16_t* pu16data)
         return -1;
     }
 
-    if (!(funcs & I2C_FUNC_SMBUS_READ_WORD_DATA))
+    if ((funcs & I2C_FUNC_SMBUS_READ_WORD_DATA) == 0U)
     {
         std::cerr << " not support I2C_FUNC_SMBUS_READ_WORD_DATA\n";
         close(fd);
@@ -126,7 +127,7 @@ void NVMeStatus::monitor(void)
         int ret = getCPLDRegsInfo(statusReg, &status);
         if (ret >= 0)
         {
-            if (status & (1 << index))
+            if ((status & (1 << index)) != 0)
             {
                 sdbusplus::xyz::openbmc_project::Inventory::server::Item::
                     present(false);

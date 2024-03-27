@@ -50,6 +50,6 @@ class NVMeMIStatus :
   private:
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
     sdbusplus::asio::object_server& objServer;
-    int getNVMeInfo(int bus, uint8_t addr, std::vector<uint8_t>& resp);
+    static int getNVMeInfo(int bus, uint8_t addr, std::vector<uint8_t>& resp);
     boost::asio::steady_timer waitTimer;
 };

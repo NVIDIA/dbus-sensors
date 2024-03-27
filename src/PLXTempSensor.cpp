@@ -35,8 +35,8 @@ PLXTempSensor::PLXTempSensor(const std::string& objectType,
     Sensor(boost::replace_all_copy(sensorName, " ", "_"),
            std::move(thresholdsIn), sensorConfiguration, objectType, false,
            false, maxReading, minReading, conn, powerState),
-    std::enable_shared_from_this<PLXTempSensor>(), objServer(objectServer),
-    waitTimer(io), deviceBus(deviceBus), deviceAddress(deviceAddress),
+    objServer(objectServer), waitTimer(io), deviceBus(deviceBus),
+    deviceAddress(deviceAddress),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000))
 {
     // add interface under sensor so it can be viewed as a sensor
@@ -123,6 +123,7 @@ bool PLXTempSensor::updateReading()
     int16_t respValue = 0;
     int16_t reading = 0;
     std::array<uint16_t, 2> regValue{};
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     int file = open(i2cBus.c_str(), O_RDWR);
     if (file < 0)
     {
@@ -130,6 +131,7 @@ bool PLXTempSensor::updateReading()
                   << std::string(std::strerror(errno)) << "\n";
         return false;
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     if (ioctl(file, I2C_SLAVE, slaveAddr) < 0)
     {
         std::cerr << "unable to set device address "
@@ -141,7 +143,8 @@ bool PLXTempSensor::updateReading()
     // setting register to read
     std::array<uint8_t, arrayLenWrite> setReg1{0x03, 0x58, 0x3c, 0x40,
                                                0xff, 0xe7, 0x85, 0x04};
-    if (i2cWrite(file, setReg1.data(), static_cast<ssize_t>(setReg1.size())))
+    if (i2cWrite(file, setReg1.data(), static_cast<ssize_t>(setReg1.size())) !=
+        0)
     {
         std::cerr << "Error while setting register to read, Register:";
         for (const auto itr : setReg1)
@@ -153,7 +156,8 @@ bool PLXTempSensor::updateReading()
 
     std::array<uint8_t, arrayLenWrite> setReg2{0x03, 0x58, 0x3c, 0x41,
                                                0x20, 0x06, 0x53, 0xe8};
-    if (i2cWrite(file, setReg2.data(), static_cast<ssize_t>(setReg2.size())))
+    if (i2cWrite(file, setReg2.data(), static_cast<ssize_t>(setReg2.size())) !=
+        0)
     {
         std::cerr << "Error while setting register to read, Register:";
         for (const auto itr : setReg2)
@@ -164,7 +168,8 @@ bool PLXTempSensor::updateReading()
     }
     std::array<uint8_t, arrayLenWrite> setReg3{0x03, 0x58, 0x3c, 0x42,
                                                0x00, 0x00, 0x00, 0x01};
-    if (i2cWrite(file, setReg3.data(), static_cast<ssize_t>(setReg3.size())))
+    if (i2cWrite(file, setReg3.data(), static_cast<ssize_t>(setReg3.size())) !=
+        0)
     {
         std::cerr << "Error while setting register to read, Register:";
         for (const auto itr : setReg3)
@@ -175,7 +180,8 @@ bool PLXTempSensor::updateReading()
     }
     std::array<uint8_t, arrayLenWrite> setReg4{0x03, 0x58, 0x3c, 0x40,
                                                0xff, 0xe7, 0x85, 0x34};
-    if (i2cWrite(file, setReg4.data(), static_cast<ssize_t>(setReg4.size())))
+    if (i2cWrite(file, setReg4.data(), static_cast<ssize_t>(setReg4.size())) !=
+        0)
     {
         std::cerr << "Error while setting register to read, Register:";
         for (const auto itr : setReg4)
@@ -186,7 +192,8 @@ bool PLXTempSensor::updateReading()
     }
     std::array<uint8_t, arrayLenWrite> setReg5{0x03, 0x58, 0x3c, 0x42,
                                                0x00, 0x00, 0x00, 0x02};
-    if (i2cWrite(file, setReg5.data(), static_cast<ssize_t>(setReg5.size())))
+    if (i2cWrite(file, setReg5.data(), static_cast<ssize_t>(setReg5.size())) !=
+        0)
     {
         std::cerr << "Error while setting register to read, Register:";
         for (const auto itr : setReg5)
@@ -201,7 +208,7 @@ bool PLXTempSensor::updateReading()
     std::array<uint8_t, arrayLenWrite> readRegValue1{0x03, 0x00, 0x3c, 0xb3,
                                                      0x00, 0x00, 0x00, 0x07};
     if (i2cWrite(file, readRegValue1.data(),
-                 static_cast<ssize_t>(readRegValue1.size())))
+                 static_cast<ssize_t>(readRegValue1.size())) != 0)
     {
         std::cerr << "Error while writing to register:";
         for (const auto itr : readRegValue1)
@@ -214,7 +221,7 @@ bool PLXTempSensor::updateReading()
     std::array<uint8_t, arrayLenWrite> readRegValue2{0x03, 0x58, 0x3c, 0x40,
                                                      0xff, 0xe7, 0x85, 0x38};
     if (i2cWrite(file, readRegValue2.data(),
-                 static_cast<ssize_t>(readRegValue2.size())))
+                 static_cast<ssize_t>(readRegValue2.size())) != 0)
     {
         std::cerr << "Error while writing to register:";
         for (const auto itr : readRegValue2)
@@ -227,7 +234,7 @@ bool PLXTempSensor::updateReading()
     std::array<uint8_t, arrayLenWrite> readRegValue3{0x03, 0x58, 0x3c, 0x42,
                                                      0x00, 0x00, 0x00, 0x02};
     if (i2cWrite(file, readRegValue3.data(),
-                 static_cast<ssize_t>(readRegValue3.size())))
+                 static_cast<ssize_t>(readRegValue3.size())) != 0)
     {
         std::cerr << "Error while writing to register:";
         for (const auto itr : readRegValue3)
@@ -239,7 +246,7 @@ bool PLXTempSensor::updateReading()
 
     std::array<uint8_t, arrayLenRead> selectReg1{0x04, 0x58, 0x3c, 0x42};
     if (i2cWrite(file, selectReg1.data(),
-                 static_cast<ssize_t>(selectReg1.size())))
+                 static_cast<ssize_t>(selectReg1.size())) != 0)
     {
         std::cerr << "Error while selecting register:";
         for (const auto itr : selectReg1)
@@ -251,7 +258,7 @@ bool PLXTempSensor::updateReading()
 
     std::array<uint8_t, arrayLenRead> selectReg2{0x04, 0x58, 0x3c, 0x41};
     if (i2cWrite(file, selectReg2.data(),
-                 static_cast<ssize_t>(selectReg2.size())))
+                 static_cast<ssize_t>(selectReg2.size())) != 0)
     {
         std::cerr << "Error while selecting register:";
         for (const auto itr : selectReg2)
@@ -269,12 +276,12 @@ bool PLXTempSensor::updateReading()
     }
     respValue = static_cast<int16_t>((regValue[0] >> 8) | (regValue[0] << 8));
 
-    if (respValue & readingAvailableBit)
+    if ((respValue & readingAvailableBit) != 0U)
     {
         rawValue =
             static_cast<int16_t>((regValue[1] >> 8) | (regValue[1] << 8));
         // 2's complement
-        if (rawValue & readingSignedBit)
+        if ((rawValue & readingSignedBit) != 0U)
         {
             rawValue = -((~rawValue & 0xffff) + 1);
         }
@@ -297,13 +304,14 @@ void PLXTempSensor::hwInit()
 
     std::string i2cBus = "/dev/i2c-" + std::to_string(deviceBus);
     uint8_t slaveAddr = deviceAddress;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     int file = open(i2cBus.c_str(), O_RDWR);
     if (file < 0)
     {
         std::cerr << "Plx temp sensor " << name << " not valid " << i2cBus
                   << std::string(std::strerror(errno)) << "\n";
     }
-
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     if (ioctl(file, I2C_SLAVE, slaveAddr) < 0)
     {
         std::cerr << "unable to set device address "
@@ -315,7 +323,7 @@ void PLXTempSensor::hwInit()
     std::array<uint8_t, arrayLenWrite> initRegValue1{0x03, 0x00, 0x3c, 0xb3,
                                                      0x00, 0x00, 0x00, 0x07};
     if (i2cWrite(file, initRegValue1.data(),
-                 static_cast<ssize_t>(initRegValue1.size())))
+                 static_cast<ssize_t>(initRegValue1.size())) != 0)
     {
         std::cerr << "Error while initialization, register:";
         for (const auto itr : initRegValue1)
@@ -328,7 +336,7 @@ void PLXTempSensor::hwInit()
     std::array<uint8_t, arrayLenWrite> initRegValue2{0x03, 0x58, 0x3c, 0x40,
                                                      0xff, 0xe7, 0x85, 0x04};
     if (i2cWrite(file, initRegValue2.data(),
-                 static_cast<ssize_t>(initRegValue2.size())))
+                 static_cast<ssize_t>(initRegValue2.size())) != 0)
     {
         std::cerr << "Error while initialization, register:";
         for (const auto itr : initRegValue2)
@@ -341,7 +349,7 @@ void PLXTempSensor::hwInit()
     std::array<uint8_t, arrayLenWrite> initRegValue3{0x03, 0x58, 0x3c, 0x42,
                                                      0x00, 0x00, 0x00, 0x02};
     if (i2cWrite(file, initRegValue3.data(),
-                 static_cast<ssize_t>(initRegValue3.size())))
+                 static_cast<ssize_t>(initRegValue3.size())) != 0)
     {
         std::cerr << "Error while initialization, register:";
         for (const auto itr : initRegValue3)

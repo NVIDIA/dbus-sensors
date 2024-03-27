@@ -120,7 +120,7 @@ static struct SensorParams
                                                .platform = getPlatform(),
                                                .inventoryChassis = ""};
 
-    if (tmpSensorParameters.platform.compare("\"hgx\"") == 0)
+    if (tmpSensorParameters.platform == "\"hgx\"")
     {
         // HGX HMC Temperature Sensor's Inventory Chassis
         tmpSensorParameters.inventoryChassis = "/xyz/openbmc_project/inventory/system/chassis/HGX_BMC_0";
@@ -398,8 +398,8 @@ void createSensors(
                           << deviceName << "\n";
                 continue;
             }
-            
-            std::string sensorPhysicalContext = "";
+
+            std::string sensorPhysicalContext;
             auto configurationSensorPhysicalContext =
                 baseConfigMap.find("PhysicalContext");
 
@@ -484,7 +484,7 @@ void createSensors(
             while (true)
             {
                 ++i;
-                std::string context = "";
+                std::string context;
                 auto findKey = baseConfigMap.find("Name" + std::to_string(i));
                 if (findKey == baseConfigMap.end())
                 {
