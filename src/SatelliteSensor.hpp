@@ -31,8 +31,8 @@ struct SatelliteSensor : public Sensor
                     double maxVal);
     ~SatelliteSensor() override;
 
-    void checkThresholds(void) override; 
-    size_t getPollRate()
+    void checkThresholds(void) override;
+    size_t getPollRate() const
     {
       return pollRate;
     }
@@ -45,9 +45,9 @@ struct SatelliteSensor : public Sensor
 
 
   private:
-    int readEepromData(size_t off, uint8_t length ,double* data);
-    int getPLDMSensorReading(size_t off, uint8_t length, double* data);
-    uint8_t getLength(uint16_t offset)
+    int readEepromData(size_t off, uint8_t length, double* data) const;
+    int getPLDMSensorReading(size_t off, uint8_t length, double* data) const;
+    static uint8_t getLength(uint16_t offset)
     {
 #ifdef AUTO_GEN_SENSOR_HEADER
         auto it = sensorMap.find(offset);

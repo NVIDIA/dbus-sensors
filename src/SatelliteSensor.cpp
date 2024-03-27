@@ -27,6 +27,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -112,6 +113,7 @@ template <typename T>
 {
     std::string i2cBus = "/dev/i2c-" + std::to_string(bus);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     int fd = open(i2cBus.c_str(), O_RDWR);
     if (fd < 0)
     {
@@ -121,6 +123,7 @@ template <typename T>
     }
 
     unsigned long funcs = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     if (ioctl(fd, I2C_FUNCS, &funcs) < 0)
     {
         lg2::error(" not support I2C_FUNCS");
@@ -129,16 +132,16 @@ template <typename T>
     }
 
     int ret = 0;
-    struct i2c_rdwr_ioctl_data args;
-    struct i2c_msg msg;
-    uint8_t cmd[8];
+    struct i2c_rdwr_ioctl_data args = {nullptr};
+    struct i2c_msg msg = {0, 0, 0, nullptr};
+    std::array<uint8_t, 8> cmd{};
 
     msg.addr = addr;
     args.msgs = &msg;
     args.nmsgs = 1;
 
     msg.flags = 0;
-    msg.buf = (uint8_t *)&cmd;
+    msg.buf = cmd.data();
     // handle two bytes offset 
     if (offset > 255) 
     {
@@ -152,7 +155,8 @@ template <typename T>
         msg.buf[0] = offset & 0xFF;
     }
 
-    //write offset
+    // write offset
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     ret = ioctl(fd, I2C_RDWR, &args);
     if(ret < 0)
     {
@@ -165,6 +169,7 @@ template <typename T>
     msg.len = length;
     msg.buf =(uint8_t *) &data;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     ret = ioctl(fd, I2C_RDWR, &args);
     if(ret < 0)
     {
@@ -196,7 +201,8 @@ template <typename T>
     return 0;
 }
 
-int SatelliteSensor::readEepromData(size_t off, uint8_t length, double* data)
+int SatelliteSensor::readEepromData(size_t off, uint8_t length,
+                                    double* data) const
 {
 
     uint64_t reading = 0;
@@ -205,7 +211,8 @@ int SatelliteSensor::readEepromData(size_t off, uint8_t length, double* data)
     {
         if (debug)
         {
-            printf("offset: %d reading: %llx \n", off, reading);
+            std::cout << "offset: " << off << std::hex
+                      << " reading: " << reading << "\n";
         }
         // skip the floating number
         *data = reading >> 8; 
@@ -215,7 +222,7 @@ int SatelliteSensor::readEepromData(size_t off, uint8_t length, double* data)
 }
 
 int SatelliteSensor::getPLDMSensorReading(size_t off, uint8_t length,
-                                          double* data)
+                                          double* data) const
 {
 
     double reading = 0;
@@ -252,7 +259,7 @@ void SatelliteSensor::read(void)
             return;
         }
 
-        int ret;
+        int ret = 0;
         // there are newly added PLDM sensors if the offset > 255.
         if (offset <= 255)
         {
