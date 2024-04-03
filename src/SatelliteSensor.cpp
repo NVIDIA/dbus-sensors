@@ -132,7 +132,7 @@ template <typename T>
     }
 
     int ret = 0;
-    struct i2c_rdwr_ioctl_data args = {nullptr};
+    struct i2c_rdwr_ioctl_data args = {nullptr, 0};
     struct i2c_msg msg = {0, 0, 0, nullptr};
     std::array<uint8_t, 8> cmd{};
 
