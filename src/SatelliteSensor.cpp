@@ -97,13 +97,13 @@ SatelliteSensor::~SatelliteSensor()
     objectServer.remove_interface(association);
 }
 
-void SatelliteSensor::init(void)
+void SatelliteSensor::init()
 {
     setInitialProperties(sensor_paths::unitDegreesC);
     read();
 }
 
-void SatelliteSensor::checkThresholds(void)
+void SatelliteSensor::checkThresholds()
 {
     thresholds::checkThresholds(this);
 }
@@ -235,7 +235,7 @@ int SatelliteSensor::getPLDMSensorReading(size_t off, uint8_t length,
     return ret;
 }
 
-void SatelliteSensor::read(void)
+void SatelliteSensor::read()
 {
     size_t pollTime = getPollRate(); // in seconds
 

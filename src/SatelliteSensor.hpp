@@ -31,13 +31,13 @@ struct SatelliteSensor : public Sensor
                     double maxVal);
     ~SatelliteSensor() override;
 
-    void checkThresholds(void) override;
+    void checkThresholds() override;
     size_t getPollRate() const
     {
       return pollRate;
     }
-    void read(void);
-    void init(void);
+    void read();
+    void init();
 
     uint8_t busId;
     uint8_t addr;

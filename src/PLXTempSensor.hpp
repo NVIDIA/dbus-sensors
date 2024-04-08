@@ -44,7 +44,7 @@ class PLXTempSensor :
                   const std::string& sensorConfiguration, PowerState powerState,
                   uint8_t deviceBus, uint8_t deviceAddress, float pollRate);
     ~PLXTempSensor() override;
-    void setupRead(void);
+    void setupRead();
 
   private:
     sdbusplus::asio::object_server& objServer;
@@ -67,7 +67,7 @@ class PLXTempSensor :
     /**
      * @brief perform threshold monitoring
      */
-    void checkThresholds(void) override;
+    void checkThresholds() override;
 
     /**
      * @brief polling plx regsiters

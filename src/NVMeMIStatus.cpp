@@ -116,7 +116,7 @@ int NVMeMIStatus::getNVMeInfo(int bus, uint8_t addr, std::vector<uint8_t>& resp)
     return 0;
 }
 
-void NVMeMIStatus::monitor(void)
+void NVMeMIStatus::monitor()
 {
     waitTimer.expires_after(std::chrono::seconds(sensorPollSec));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {

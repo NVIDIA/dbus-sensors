@@ -40,7 +40,7 @@ class NVMeMIStatus :
                  uint8_t busId, uint8_t nvmeAddress);
     ~NVMeMIStatus() override;
 
-    void monitor(void);
+    void monitor();
 
     std::string name;
     unsigned int sensorPollSec;

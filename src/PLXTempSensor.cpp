@@ -69,7 +69,7 @@ PLXTempSensor::~PLXTempSensor()
     objServer.remove_interface(association);
 }
 
-void PLXTempSensor::setupRead(void)
+void PLXTempSensor::setupRead()
 {
     if (!readingStateGood())
     {
@@ -294,7 +294,7 @@ bool PLXTempSensor::updateReading()
     return true;
 }
 
-void PLXTempSensor::checkThresholds(void)
+void PLXTempSensor::checkThresholds()
 {
     thresholds::checkThresholds(this);
 }

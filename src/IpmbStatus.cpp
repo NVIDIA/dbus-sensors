@@ -65,7 +65,7 @@ IpmbSensor::~IpmbSensor()
     objectServer.remove_interface(association);
 }
 
-void IpmbSensor::init(void)
+void IpmbSensor::init()
 {
     loadDefaults();
     if (initCommand)
@@ -140,7 +140,7 @@ bool IpmbSensor::processReading(const std::vector<uint8_t>& data,
     return true;
 }
 
-void IpmbSensor::read(void)
+void IpmbSensor::read()
 {
     waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {

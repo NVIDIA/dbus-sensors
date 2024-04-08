@@ -36,10 +36,10 @@ struct IpmbSensor
                uint8_t deviceAddress, uint8_t channelAddress, float pollRate);
     ~IpmbSensor();
 
-    void read(void);
-    void init(void);
-    void loadDefaults(void);
-    void runInitCmd(void);
+    void read();
+    void init();
+    void loadDefaults();
+    void runInitCmd();
     bool processReading(const std::vector<uint8_t>& data, double& resp) const;
 
     IpmbType type = IpmbType::none;

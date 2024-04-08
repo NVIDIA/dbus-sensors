@@ -108,7 +108,7 @@ int NVMeStatus::getCPLDRegsInfo(uint8_t regs, int16_t* pu16data) const
     return 0;
 }
 
-void NVMeStatus::monitor(void)
+void NVMeStatus::monitor()
 {
     waitTimer.expires_after(std::chrono::seconds(sensorPollSec));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {

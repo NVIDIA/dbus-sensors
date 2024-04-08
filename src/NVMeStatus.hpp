@@ -38,7 +38,7 @@ class NVMeStatus :
                uint8_t statusReg);
     ~NVMeStatus() override;
 
-    void monitor(void);
+    void monitor();
 
     std::string name;
     unsigned int sensorPollSec;
