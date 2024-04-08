@@ -138,7 +138,7 @@ HwmonTempSensor::~HwmonTempSensor()
     objServer.remove_interface(association);
 }
 
-void HwmonTempSensor::setupRead(void)
+void HwmonTempSensor::setupRead()
 {
     if (!readingStateGood())
     {
@@ -227,7 +227,7 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err,
     restartRead();
 }
 
-void HwmonTempSensor::checkThresholds(void)
+void HwmonTempSensor::checkThresholds()
 {
     thresholds::checkThresholds(this);
 }

@@ -67,8 +67,10 @@ static const I2CDeviceTypeMap sensorTypes{
     {"MAX6581", I2CDeviceType{"max6581", true}},
     {"MAX6654", I2CDeviceType{"max6654", true}},
     {"MAX6639", I2CDeviceType{"max6639", true}},
+    {"MCP9600", I2CDeviceType{"mcp9600", false}},
     {"NCT6779", I2CDeviceType{"nct6779", true}},
     {"NCT7802", I2CDeviceType{"nct7802", true}},
+    {"PT5161L", I2CDeviceType{"pt5161l", true}},
     {"SBTSI", I2CDeviceType{"sbtsi", true}},
     {"SI7020", I2CDeviceType{"si7020", false}},
     {"TMP100", I2CDeviceType{"tmp100", true}},
@@ -330,19 +332,32 @@ void createSensors(
             fs::path device;
 
             std::string deviceName;
+            std::error_code ec;
             if (pathStr.starts_with("/sys/bus/iio/devices"))
             {
-                device = fs::canonical(directory);
+                device = fs::canonical(directory, ec);
+                if (ec)
+                {
+                    std::cerr << "Fail to find device in path [" << pathStr
+                              << "]\n";
+                    continue;
+                }
                 deviceName = device.parent_path().stem();
             }
             else
             {
-                device = directory / "device";
-                deviceName = fs::canonical(device).stem();
+                device = fs::canonical(directory / "device", ec);
+                if (ec)
+                {
+                    std::cerr << "Fail to find device in path [" << pathStr
+                              << "]\n";
+                    continue;
+                }
+                deviceName = device.stem();
             }
 
-            size_t bus = 0;
-            size_t addr = 0;
+            uint64_t bus = 0;
+            uint64_t addr = 0;
             if (!getDeviceBusAddr(deviceName, bus, addr))
             {
                 continue;

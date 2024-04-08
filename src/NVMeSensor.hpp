@@ -30,5 +30,5 @@ class NVMeSensor : public Sensor
     sdbusplus::asio::object_server& objServer;
     unsigned int scanDelay{0};
 
-    void checkThresholds(void) override;
+    void checkThresholds() override;
 };

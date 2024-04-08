@@ -73,17 +73,23 @@ static const I2CDeviceTypeMap sensorTypes{
     {"ISL69260", I2CDeviceType{"isl69260", true}},
     {"LM25066", I2CDeviceType{"lm25066", true}},
     {"LTC2945", I2CDeviceType{"ltc2945", true}},
+    {"LTC4286", I2CDeviceType{"ltc4286", true}},
+    {"LTC4287", I2CDeviceType{"ltc4287", true}},
     {"MAX5970", I2CDeviceType{"max5970", true}},
+    {"MAX11607", I2CDeviceType{"max11607", false}},
     {"MAX16601", I2CDeviceType{"max16601", true}},
     {"MAX20710", I2CDeviceType{"max20710", true}},
     {"MAX20730", I2CDeviceType{"max20730", true}},
     {"MAX20734", I2CDeviceType{"max20734", true}},
     {"MAX20796", I2CDeviceType{"max20796", true}},
     {"MAX34451", I2CDeviceType{"max34451", true}},
+    {"MP2856", I2CDeviceType{"mp2856", true}},
+    {"MP2857", I2CDeviceType{"mp2857", true}},
     {"MP2971", I2CDeviceType{"mp2971", true}},
     {"MP2973", I2CDeviceType{"mp2973", true}},
     {"MP2975", I2CDeviceType{"mp2975", true}},
     {"MP5023", I2CDeviceType{"mp5023", true}},
+    {"MP5990", I2CDeviceType{"mp5990", true}},
     {"NCP4200", I2CDeviceType{"ncp4200", true}},
     {"PLI1209BC", I2CDeviceType{"pli1209bc", true}},
     {"pmbus", I2CDeviceType{"pmbus", true}},
@@ -94,6 +100,7 @@ static const I2CDeviceTypeMap sensorTypes{
     {"RAA229001", I2CDeviceType{"raa229001", true}},
     {"RAA229004", I2CDeviceType{"raa229004", true}},
     {"RAA229126", I2CDeviceType{"raa229126", true}},
+    {"SBRMI", I2CDeviceType{"sbrmi", true}},
     {"TDA38640", I2CDeviceType{"tda38640", true}},
     {"TPS53679", I2CDeviceType{"tps53679", true}},
     {"TPS546D24", I2CDeviceType{"tps546d24", true}},
@@ -127,14 +134,9 @@ static boost::container::flat_map<std::string, std::unique_ptr<PwmSensor>>
 static boost::container::flat_map<std::string, std::string> sensorTable;
 static boost::container::flat_map<std::string, PSUProperty> labelMatch;
 static boost::container::flat_map<std::string, std::string> pwmTable;
-static boost::container::flat_map<std::string, std::vector<std::string>>
-    eventMatch;
-static boost::container::flat_map<
-    std::string,
-    boost::container::flat_map<std::string, std::vector<std::string>>>
-    groupEventMatch;
-static boost::container::flat_map<std::string, std::vector<std::string>>
-    limitEventMatch;
+static EventPathList eventMatch;
+static GroupEventPathList groupEventMatch;
+static EventPathList limitEventMatch;
 
 static std::vector<PSUProperty> psuProperties;
 static boost::container::flat_map<size_t, bool> cpuPresence;
@@ -143,12 +145,8 @@ static boost::container::flat_map<DevTypes, DevParams> devParamMap;
 // Function CheckEvent will check each attribute from eventMatch table in the
 // sysfs. If the attributes exists in sysfs, then store the complete path
 // of the attribute into eventPathList.
-void checkEvent(
-    const std::string& directory,
-    const boost::container::flat_map<std::string, std::vector<std::string>>&
-        eventMatch,
-    boost::container::flat_map<std::string, std::vector<std::string>>&
-        eventPathList)
+void checkEvent(const std::string& directory, const EventPathList& eventMatch,
+                EventPathList& eventPathList)
 {
     for (const auto& match : eventMatch)
     {
@@ -173,24 +171,15 @@ void checkEvent(
 
 // Check Group Events which contains more than one targets in each combine
 // events.
-void checkGroupEvent(
-    const std::string& directory,
-    const boost::container::flat_map<
-        std::string,
-        boost::container::flat_map<std::string, std::vector<std::string>>>&
-        groupEventMatch,
-    boost::container::flat_map<
-        std::string,
-        boost::container::flat_map<std::string, std::vector<std::string>>>&
-        groupEventPathList)
+void checkGroupEvent(const std::string& directory,
+                     const GroupEventPathList& groupEventMatch,
+                     GroupEventPathList& groupEventPathList)
 {
     for (const auto& match : groupEventMatch)
     {
         const std::string& groupEventName = match.first;
-        const boost::container::flat_map<std::string, std::vector<std::string>>
-            events = match.second;
-        boost::container::flat_map<std::string, std::vector<std::string>>
-            pathList;
+        const EventPathList events = match.second;
+        EventPathList pathList;
         for (const auto& match : events)
         {
             const std::string& eventName = match.first;
@@ -217,12 +206,9 @@ void checkGroupEvent(
 // in sysfs to see if xxx_crit_alarm xxx_lcrit_alarm xxx_max_alarm
 // xxx_min_alarm exist, then store the existing paths of the alarm attributes
 // to eventPathList.
-void checkEventLimits(
-    const std::string& sensorPathStr,
-    const boost::container::flat_map<std::string, std::vector<std::string>>&
-        limitEventMatch,
-    boost::container::flat_map<std::string, std::vector<std::string>>&
-        eventPathList)
+void checkEventLimits(const std::string& sensorPathStr,
+                      const EventPathList& limitEventMatch,
+                      EventPathList& eventPathList)
 {
     auto attributePartPos = sensorPathStr.find_last_of('_');
     if (attributePartPos == std::string::npos)
@@ -324,12 +310,8 @@ static void createSensorsCallback(
     boost::container::flat_set<std::string> directories;
     for (const auto& pmbusPath : pmbusPaths)
     {
-        boost::container::flat_map<std::string, std::vector<std::string>>
-            eventPathList;
-        boost::container::flat_map<
-            std::string,
-            boost::container::flat_map<std::string, std::vector<std::string>>>
-            groupEventPathList;
+        EventPathList eventPathList;
+        GroupEventPathList groupEventPathList;
 
         std::ifstream nameFile(pmbusPath);
         if (!nameFile.good())
@@ -1071,7 +1053,7 @@ void createSensors(
     getter->getConfiguration(types);
 }
 
-void propertyInitialize(void)
+void propertyInitialize()
 {
     sensorTable = {{"power", sensor_paths::unitWatts},
                    {"curr", sensor_paths::unitAmperes},

@@ -137,14 +137,6 @@ std::set<std::string> getPermitSet(const SensorBaseConfigMap& config)
 bool getSensorConfiguration(
     const std::string& type,
     const std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
-    ManagedObjectType& resp)
-{
-    return getSensorConfiguration(type, dbusConnection, resp, false);
-}
-
-bool getSensorConfiguration(
-    const std::string& type,
-    const std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
     ManagedObjectType& resp, bool useCache)
 {
     static ManagedObjectType managedObj;
@@ -290,7 +282,7 @@ bool findFiles(const fs::path& dirPath, std::string_view matchString,
     return true;
 }
 
-bool isPowerOn(void)
+bool isPowerOn()
 {
     if (!powerMatch)
     {
@@ -299,7 +291,7 @@ bool isPowerOn(void)
     return powerStatusOn;
 }
 
-bool hasBiosPost(void)
+bool hasBiosPost()
 {
     if (!postMatch)
     {
@@ -308,7 +300,7 @@ bool hasBiosPost(void)
     return biosHasPost;
 }
 
-bool isChassisOn(void)
+bool isChassisOn()
 {
     if (!chassisMatch)
     {
@@ -849,32 +841,4 @@ std::vector<std::unique_ptr<sdbusplus::bus::match_t>>
         types.push_back(type.data());
     }
     return setupPropertiesChangedMatches(bus, {types}, handler);
-}
-
-bool getDeviceBusAddr(const std::string& deviceName, size_t& bus, size_t& addr)
-{
-    auto findHyphen = deviceName.find('-');
-    if (findHyphen == std::string::npos)
-    {
-        std::cerr << "found bad device " << deviceName << "\n";
-        return false;
-    }
-    std::string busStr = deviceName.substr(0, findHyphen);
-    std::string addrStr = deviceName.substr(findHyphen + 1);
-
-    std::from_chars_result res{};
-    res = std::from_chars(&*busStr.begin(), &*busStr.end(), bus);
-    if (res.ec != std::errc{} || res.ptr != &*busStr.end())
-    {
-        std::cerr << "Error finding bus for " << deviceName << "\n";
-        return false;
-    }
-    res = std::from_chars(&*addrStr.begin(), &*addrStr.end(), addr, 16);
-    if (res.ec != std::errc{} || res.ptr != &*addrStr.end())
-    {
-        std::cerr << "Error finding addr for " << deviceName << "\n";
-        return false;
-    }
-
-    return true;
 }

@@ -70,9 +70,9 @@ bool findFiles(const std::filesystem::path& dirPath,
                std::string_view matchString,
                std::vector<std::filesystem::path>& foundPaths,
                int symlinkDepth = 1);
-bool isPowerOn(void);
-bool hasBiosPost(void);
-bool isChassisOn(void);
+bool isPowerOn();
+bool hasBiosPost();
+bool isChassisOn();
 void setupPowerMatchCallback(
     const std::shared_ptr<sdbusplus::asio::connection>& conn,
     std::function<void(PowerState type, bool state)>&& callback);
@@ -81,11 +81,6 @@ bool getSensorConfiguration(
     const std::string& type,
     const std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
     ManagedObjectType& resp, bool useCache);
-
-bool getSensorConfiguration(
-    const std::string& type,
-    const std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
-    ManagedObjectType& resp);
 
 void createAssociation(
     std::shared_ptr<sdbusplus::asio::dbus_interface>& association,
@@ -130,7 +125,7 @@ const static constexpr char* property = "CurrentHostState";
 
 namespace chassis
 {
-const static constexpr char* busname = "xyz.openbmc_project.State.Chassis";
+const static constexpr char* busname = "xyz.openbmc_project.State.Chassis0";
 const static constexpr char* interface = "xyz.openbmc_project.State.Chassis";
 const static constexpr char* path = "/xyz/openbmc_project/state/chassis0";
 const static constexpr char* property = "CurrentPowerState";
@@ -389,4 +384,32 @@ std::vector<std::unique_ptr<sdbusplus::bus::match_t>>
     setupPropertiesChangedMatches(
         sdbusplus::asio::connection& bus, std::span<const char* const> types,
         const std::function<void(sdbusplus::message_t&)>& handler);
-bool getDeviceBusAddr(const std::string& deviceName, size_t& bus, size_t& addr);
+
+template <typename T>
+bool getDeviceBusAddr(const std::string& deviceName, T& bus, T& addr)
+{
+    auto findHyphen = deviceName.find('-');
+    if (findHyphen == std::string::npos)
+    {
+        std::cerr << "found bad device " << deviceName << "\n";
+        return false;
+    }
+    std::string busStr = deviceName.substr(0, findHyphen);
+    std::string addrStr = deviceName.substr(findHyphen + 1);
+
+    std::from_chars_result res{};
+    res = std::from_chars(&*busStr.begin(), &*busStr.end(), bus);
+    if (res.ec != std::errc{} || res.ptr != &*busStr.end())
+    {
+        std::cerr << "Error finding bus for " << deviceName << "\n";
+        return false;
+    }
+    res = std::from_chars(&*addrStr.begin(), &*addrStr.end(), addr, 16);
+    if (res.ec != std::errc{} || res.ptr != &*addrStr.end())
+    {
+        std::cerr << "Error finding addr for " << deviceName << "\n";
+        return false;
+    }
+
+    return true;
+}

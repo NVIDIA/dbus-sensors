@@ -37,14 +37,9 @@ PSUCombineEvent::PSUCombineEvent(
     sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     boost::asio::io_context& io, const std::string& psuName,
-    const PowerState& powerState,
-    boost::container::flat_map<std::string, std::vector<std::string>>&
-        eventPathList,
-    boost::container::flat_map<
-        std::string,
-        boost::container::flat_map<std::string, std::vector<std::string>>>&
-        groupEventPathList,
-    const std::string& combineEventName, double pollRate) :
+    const PowerState& powerState, EventPathList& eventPathList,
+    GroupEventPathList& groupEventPathList, const std::string& combineEventName,
+    double pollRate) :
     objServer(objectServer)
 {
     std::string psuNameEscaped = sensor_paths::escapePathForDbus(psuName);
@@ -189,7 +184,7 @@ PSUSubEvent::~PSUSubEvent()
     inputDev.close();
 }
 
-void PSUSubEvent::setupRead(void)
+void PSUSubEvent::setupRead()
 {
     if (!readingStateGood(readState))
     {
@@ -258,7 +253,6 @@ void PSUSubEvent::handleResponse(const boost::system::error_code& err,
 
     if (!err)
     {
-        std::string response;
         try
         {
             int nvalue = std::stoi(bufferRef.data());

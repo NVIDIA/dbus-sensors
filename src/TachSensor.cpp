@@ -88,7 +88,7 @@ TachSensor::TachSensor(const std::string& path, const std::string& objectType,
         itemAssoc = objectServer.add_interface(
             "/xyz/openbmc_project/inventory/" + name, association::interface);
         itemAssoc->register_property(
-            "associations",
+            "Associations",
             std::vector<Association>{
                 {"sensors", "inventory",
                  "/xyz/openbmc_project/sensors/fan_tach/" + name}});
@@ -194,7 +194,7 @@ void TachSensor::handleResponse(const boost::system::error_code& err,
     restartRead(pollTime);
 }
 
-void TachSensor::checkThresholds(void)
+void TachSensor::checkThresholds()
 {
     bool status = thresholds::checkThresholds(this);
 
@@ -262,7 +262,7 @@ PresenceSensor::~PresenceSensor()
     gpioLine.release();
 }
 
-void PresenceSensor::monitorPresence(void)
+void PresenceSensor::monitorPresence()
 {
     gpioFd.async_wait(boost::asio::posix::stream_descriptor::wait_read,
                       [this](const boost::system::error_code& ec) {
@@ -283,7 +283,7 @@ void PresenceSensor::monitorPresence(void)
     });
 }
 
-void PresenceSensor::read(void)
+void PresenceSensor::read()
 {
     gpioLine.event_read();
     status = (gpioLine.get_value() != 0);
@@ -298,7 +298,7 @@ void PresenceSensor::read(void)
     }
 }
 
-bool PresenceSensor::getValue(void) const
+bool PresenceSensor::getValue() const
 {
     return status;
 }
