@@ -42,6 +42,7 @@ struct SatelliteSensor : public Sensor
     uint8_t busId;
     uint8_t addr;
     uint16_t offset;
+    std::string sensorType;
 
 
   private:
@@ -65,4 +66,34 @@ struct SatelliteSensor : public Sensor
     sdbusplus::asio::object_server& objectServer;
     boost::asio::steady_timer waitTimer;
     size_t pollRate;
+    static double reading2tempEp(const uint8_t* rawData)
+    {
+      // this automatic convert to int (two's complement integer)
+      int32_t intg =
+          (rawData[3] << 24 | rawData[2] << 16 | rawData[1] << 8 | rawData[0]);
+      uint8_t frac = uint8_t(intg & 0xFF);
+      intg >>= 8; // shift operation on a int keep the signal in two's complement
+
+      double temp = 0;
+      if (intg > 0)
+      {
+          temp = double(intg) + double(frac / 256.0);
+      }
+      else
+      {
+          temp = double(intg) - double(frac / 256.0);
+      }
+
+      return temp;
+    }
+    static double reading2power(const uint8_t* rawData)
+    {
+      double power = 0;
+      uint32_t val = (rawData[3] << 24) + (rawData[2] << 16) +
+                      (rawData[1] << 8) + rawData[0];
+
+      power = static_cast<double>(val) / 1000; // mWatts to Watts
+
+      return power;
+    }
 };
