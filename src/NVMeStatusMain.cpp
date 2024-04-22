@@ -18,8 +18,8 @@
 static constexpr unsigned int pollRateDefault = 1;
 
 static constexpr auto sensorTypes{
-    std::to_array<const char*>({"xyz.openbmc_project.Configuration.Nvmecpld",
-                                "xyz.openbmc_project.Configuration.Nvmem2"})};
+    std::to_array<const char*>({"Nvmecpld",
+                                "Nvmem2"})};
 
 void createSensors(
     boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
@@ -50,7 +50,7 @@ void createSensors(
                 // find base configuration
                 for (const char* type : sensorTypes)
                 {
-                    auto sensorBase = sensor.second.find(type);
+                    auto sensorBase = sensor.second.find(configInterfaceName(type));
                     if (sensorBase != sensor.second.end())
                     {
                         baseConfiguration = &(*sensorBase);
@@ -265,7 +265,8 @@ int main()
         auto match = std::make_unique<sdbusplus::bus::match::match>(
             static_cast<sdbusplus::bus::bus&>(*systemBus),
             "type='signal',member='PropertiesChanged',path_namespace='" +
-                std::string(inventoryPath) + "',arg0namespace='" + type + "'",
+                std::string(inventoryPath) + "',arg0namespace='" +
+                configInterfaceName(type) + "'",
             eventHandler);
         matches.emplace_back(std::move(match));
     }
