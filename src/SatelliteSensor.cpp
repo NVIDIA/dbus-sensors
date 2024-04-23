@@ -48,19 +48,20 @@ constexpr const char* configInterface =
     "xyz.openbmc_project.Configuration.Satellite";
 constexpr const char* sensorRootPath =
     "/xyz/openbmc_project/sensors/";
+constexpr const char* objectType = "Satellite";
 
 boost::container::flat_map<std::string, std::unique_ptr<SatelliteSensor>> sensors;
 
 SatelliteSensor::SatelliteSensor(
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     boost::asio::io_context& io, const std::string& sensorName,
-    const std::string& sensorConfiguration,
+    const std::string& sensorConfiguration, const std::string& objType,
     sdbusplus::asio::object_server& objectServer,
     std::vector<thresholds::Threshold>&& thresholdData, uint8_t busId,
-    uint8_t addr, uint16_t offset, std::string& sensorType, size_t pollTime,  double minVal, double maxVal) :
+    uint8_t addr, uint16_t offset, std::string& sensorType, size_t pollTime,
+    double minVal, double maxVal) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
-           sensorConfiguration, configInterface,
-           false, false, maxVal, minVal, conn),
+           sensorConfiguration, objType, false, false, maxVal, minVal, conn),
     busId(busId), addr(addr), offset(offset), sensorType(sensorType),
     objectServer(objectServer), waitTimer(io), pollRate(pollTime)
 {
@@ -83,7 +84,27 @@ SatelliteSensor::SatelliteSensor(
     }
     association =
         objectServer.add_interface(sensorPath + name, association::interface);
-
+    
+    if(sensorType == "temperature")
+    {
+        setInitialProperties(sensor_paths::unitDegreesC);
+    }
+    else if (sensorType == "power")
+    {
+        setInitialProperties(sensor_paths::unitWatts);
+    }
+    else if (sensorType == "energy")
+    {
+        setInitialProperties(sensor_paths::unitJoules);
+    }
+    else if (sensorType == "voltage")
+    {
+        setInitialProperties(sensor_paths::unitVolts);
+    }
+    else
+    {
+        lg2::error("no sensor type found");
+    }
 }
 
 SatelliteSensor::~SatelliteSensor()
@@ -99,7 +120,6 @@ SatelliteSensor::~SatelliteSensor()
 
 void SatelliteSensor::init(void)
 {
-    setInitialProperties(sensor_paths::unitDegreesC);
     read();
 }
 
@@ -383,10 +403,11 @@ void createSensors(
                     }
 
                     auto& sensor = sensors[name];
+                    sensor = nullptr;
 
                     sensor = std::make_unique<SatelliteSensor>(
-                        dbusConnection, io, name, pathPair.first, objectServer,
-                        std::move(sensorThresholds), busId, addr,
+                        dbusConnection, io, name, pathPair.first, objectType,
+                        objectServer, std::move(sensorThresholds), busId, addr,
                         off, sensorType, rate, minVal, maxVal);
 
                     sensor->init();
@@ -405,7 +426,9 @@ int main()
     objectServer.add_manager("/xyz/openbmc_project/sensors");
     systemBus->request_name("xyz.openbmc_project.Satellite");
 
-    boost::asio::post([&]() { createSensors(io, objectServer, sensors, systemBus); });
+    boost::asio::post(io, [&]() {
+         createSensors(io, objectServer, sensors, systemBus); 
+         });
 
     boost::asio::steady_timer configTimer(io);
 
