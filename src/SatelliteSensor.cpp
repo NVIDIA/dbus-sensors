@@ -61,8 +61,8 @@ SatelliteSensor::SatelliteSensor(
     Sensor(escapeName(sensorName), std::move(thresholdData),
            sensorConfiguration, configInterface,
            false, false, maxVal, minVal, conn),
-    busId(busId), addr(addr), offset(offset), objectServer(objectServer),
-    waitTimer(io), pollRate(pollTime)
+    busId(busId), addr(addr), offset(offset), sensorType(sensorType),
+    objectServer(objectServer), waitTimer(io), pollRate(pollTime)
 {
     // make the string to lowercase for Dbus sensor type
     for (auto & c: sensorType)
@@ -214,8 +214,24 @@ int SatelliteSensor::readEepromData(size_t off, uint8_t length,
             std::cout << "offset: " << off << std::hex
                       << " reading: " << reading << "\n";
         }
-        // skip the floating number
-        *data = reading >> 8; 
+        if (sensorType == "Temperature")
+        {
+            //NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+            *data = reading2tempEp(reinterpret_cast<uint8_t*>(&reading));
+        }
+        else if (sensorType == "Power")
+        {
+            //NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+            *data = reading2power(reinterpret_cast<uint8_t*>(&reading));
+        }
+        else if (sensorType == "Energy")
+        {
+            *data = reading / 1000.0; // mJ to J (double)
+        }
+        else
+        {
+            *data = reading;
+        }
         return 0;
     }
     return ret;
