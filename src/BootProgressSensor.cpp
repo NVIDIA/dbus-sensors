@@ -3,7 +3,8 @@
 #include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
-constexpr const char* objectPath = "/xyz/openbmc_project/state/boot_progress/boot_progress_sensor";
+constexpr const char* objectPath =
+    "/xyz/openbmc_project/state/boot_progress/boot_progress_sensor";
 
 int main()
 {
@@ -15,7 +16,8 @@ int main()
     objectServer.add_manager(objectPath);
 
     std::shared_ptr<sdbusplus::asio::dbus_interface> iface =
-        objectServer.add_interface(objectPath, "xyz.openbmc_project.State.Boot.Progress");
+        objectServer.add_interface(objectPath,
+                                   "xyz.openbmc_project.State.Boot.Progress");
 
     std::string bootProgress;
     iface->register_property("BootProgress", bootProgress);

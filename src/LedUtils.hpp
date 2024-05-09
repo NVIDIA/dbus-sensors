@@ -107,8 +107,8 @@ void setLedReg(const uint8_t reg, const uint8_t offset, bool thresholdStatus)
         // false if a critical threshold has been crossed, true otherwise
         if (!thresholdStatus)
         {
-            status =
-                i2cWrite(fpgaMidI2cBus, fpgaI2cAddress, reg, (1 << offset));
+            status = i2cWrite(fpgaMidI2cBus, fpgaI2cAddress, reg,
+                              (1 << offset));
             if (status < 0)
             {
                 std::cerr << " Failed to set FAN Led to FPGA \n";

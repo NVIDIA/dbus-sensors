@@ -21,9 +21,10 @@
 #include <boost/asio/read_until.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <tal.hpp>
 
 #include <charconv>
-#include <tal.hpp>
+#include <chrono>
 #include <iostream>
 #include <istream>
 #include <limits>
@@ -31,7 +32,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include <chrono>
 
 // Temperatures are read in milli degrees Celsius, we need degrees Celsius.
 // Pressures are read in kilopascal, we need Pascals.  On D-Bus for Open BMC
@@ -76,11 +76,14 @@ HwmonTempSensor::HwmonTempSensor(
         std::string areaIfaceName =
             "xyz.openbmc_project.Inventory.Decorator.Area";
         std::string physicalContextVal =
-            "xyz.openbmc_project.Inventory.Decorator.Area.PhysicalContextType." + physicalContext;
+            "xyz.openbmc_project.Inventory.Decorator.Area.PhysicalContextType." +
+            physicalContext;
 
         // Register Area interface/property
-        areaIface = objectServer.add_interface("/xyz/openbmc_project/sensors/" +
-                        thisSensorParameters.typeName + "/" + name,  areaIfaceName);
+        areaIface = objectServer.add_interface(
+            "/xyz/openbmc_project/sensors/" + thisSensorParameters.typeName +
+                "/" + name,
+            areaIfaceName);
         areaIface->register_property("PhysicalContext", physicalContextVal);
         areaIface->initialize(true);
     }
@@ -213,10 +216,10 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err,
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now().time_since_epoch())
                     .count();
-		    std::vector<uint8_t> rawPropValue = {};
-	    	tal::TelemetryAggregator::updateTelemetry(
-				objPath, ifaceName, propertyName, rawPropValue, timestamp, retCode, propValue, inventoryChassis);
-
+            std::vector<uint8_t> rawPropValue = {};
+            tal::TelemetryAggregator::updateTelemetry(
+                objPath, ifaceName, propertyName, rawPropValue, timestamp,
+                retCode, propValue, inventoryChassis);
         }
     }
     else

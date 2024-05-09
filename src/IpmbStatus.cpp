@@ -1,6 +1,8 @@
 #include "IpmbStatus.hpp"
+
 #include "Utils.hpp"
 #include "VariantVisitors.hpp"
+
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/container/flat_map.hpp>
 #include <sdbusplus/asio/connection.hpp>
@@ -35,8 +37,7 @@ IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                        sdbusplus::asio::object_server& objectServer,
                        uint8_t deviceAddress, uint8_t channelAddress,
                        const float pollRate) :
-    deviceAddress(deviceAddress),
-    channelAddress(channelAddress),
+    deviceAddress(deviceAddress), channelAddress(channelAddress),
     sensorPollMs(static_cast<int>(pollRate * 1000)), dbusConnection(conn),
     objectServer(objectServer), waitTimer(io)
 {
@@ -89,8 +90,7 @@ void IpmbSensor::runInitCmd()
                 std::cerr << "Error setting init command for device: "
                           << "\n";
             }
-        },
-            "xyz.openbmc_project.Ipmi.Channel.Ipmb",
+        }, "xyz.openbmc_project.Ipmi.Channel.Ipmb",
             "/xyz/openbmc_project/Ipmi/Channel/Ipmb", "org.openbmc.Ipmb",
             "sendRequest", commandAddress, netfn, lun, *initCommand, initData);
     }
@@ -131,7 +131,6 @@ bool isValid(const std::vector<uint8_t>& data)
 bool IpmbSensor::processReading(const std::vector<uint8_t>& data,
                                 double& resp) const
 {
-
     if (command == ipmi::sensor::getSensorReading && !isValid(data))
     {
         return false;
@@ -152,77 +151,88 @@ void IpmbSensor::read()
         conn->async_method_call(
             [this](boost::system::error_code ec,
                    const IpmbMethodType& response) {
-                const int& status = std::get<0>(response);
-                if (ec || (status != 0))
-                {
-                    read();
-                    return;
-                }
-                const std::vector<uint8_t>& data = std::get<5>(response);
-                if constexpr (debug)
-                {
-                    for (size_t d : data)
-                    {
-                        std::cout << d << " ";
-                    }
-                    std::cout << "\n";
-                }
-                if (data.empty())
-                {
-                    read();
-                    return;
-                }
-
-                double value = 0;
-
-                if (!processReading(data, value))
-                {
-                    read();
-                    return;
-                }
-                // Per IPMI 'Get Sensor Reading' specification , 3th byte
-                // discrete reading sensor
-                sensorInterface->set_property(
-                    "CableStatus",  static_cast<bool>(data[2] & (1 << cableStatusBit)));
-                sensorInterface->set_property(
-                    "ConfigurationError",
-                     static_cast<bool>(data[2] & (1 << configurationErrorBit)));
-                if (sensorMaskEnable){
-                   bool cableMsgSent = false;
-                   bool cableStatusMsg= false;
-                    if (static_cast<bool>(data[2] & (1 << cableStatusBit)) && sensorReport){
-                        std::cerr << "Sensor " << statusSensorName << " is enabled"<< "\n";
-                        sensorReport = false;
-                        cableStatusMsg = true;
-                        cableMsgSent = true;
-                    }
-                    if (static_cast<bool>(data[2] & (1 << configurationErrorBit)) && !sensorReport){
-                        std::cerr << "Sensor " << statusSensorName << " is in error"<< "\n";
-                        sensorReport = true;
-                        cableMsgSent = true;
-                    }
-                    if (cableMsgSent){
-                        try
-                            {
-                                sdbusplus::message::message msg =
-                                   sensorInterface->new_signal("CableStatus");
-                                msg.append(statusSensorName, sensorInterface->get_interface_name(),cableMsgSent,cableStatusMsg);
-                                msg.signal_send();
-                            }
-                            catch (const sdbusplus::exception::exception& e)
-                            {
-                                std::cerr
-                                    << "Failed to send thresholdAsserted signal with assertValue\n";
-                            }
-                    }
-                }
-                
-                if constexpr (debug)
-                {
-                    std::cout << value;
-                }
+            const int& status = std::get<0>(response);
+            if (ec || (status != 0))
+            {
                 read();
-            },
+                return;
+            }
+            const std::vector<uint8_t>& data = std::get<5>(response);
+            if constexpr (debug)
+            {
+                for (size_t d : data)
+                {
+                    std::cout << d << " ";
+                }
+                std::cout << "\n";
+            }
+            if (data.empty())
+            {
+                read();
+                return;
+            }
+
+            double value = 0;
+
+            if (!processReading(data, value))
+            {
+                read();
+                return;
+            }
+            // Per IPMI 'Get Sensor Reading' specification , 3th byte
+            // discrete reading sensor
+            sensorInterface->set_property(
+                "CableStatus",
+                static_cast<bool>(data[2] & (1 << cableStatusBit)));
+            sensorInterface->set_property(
+                "ConfigurationError",
+                static_cast<bool>(data[2] & (1 << configurationErrorBit)));
+            if (sensorMaskEnable)
+            {
+                bool cableMsgSent = false;
+                bool cableStatusMsg = false;
+                if (static_cast<bool>(data[2] & (1 << cableStatusBit)) &&
+                    sensorReport)
+                {
+                    std::cerr << "Sensor " << statusSensorName << " is enabled"
+                              << "\n";
+                    sensorReport = false;
+                    cableStatusMsg = true;
+                    cableMsgSent = true;
+                }
+                if (static_cast<bool>(data[2] & (1 << configurationErrorBit)) &&
+                    !sensorReport)
+                {
+                    std::cerr << "Sensor " << statusSensorName << " is in error"
+                              << "\n";
+                    sensorReport = true;
+                    cableMsgSent = true;
+                }
+                if (cableMsgSent)
+                {
+                    try
+                    {
+                        sdbusplus::message::message msg =
+                            sensorInterface->new_signal("CableStatus");
+                        msg.append(statusSensorName,
+                                   sensorInterface->get_interface_name(),
+                                   cableMsgSent, cableStatusMsg);
+                        msg.signal_send();
+                    }
+                    catch (const sdbusplus::exception::exception& e)
+                    {
+                        std::cerr
+                            << "Failed to send thresholdAsserted signal with assertValue\n";
+                    }
+                }
+            }
+
+            if constexpr (debug)
+            {
+                std::cout << value;
+            }
+            read();
+        },
             "xyz.openbmc_project.Ipmi.Channel.Ipmb",
             "/xyz/openbmc_project/Ipmi/Channel/Ipmb", "org.openbmc.Ipmb",
             "sendRequest", commandAddress, netfn, lun, command, commandData);
@@ -241,83 +251,82 @@ void createSensors(
     }
     dbusConnection->async_method_call(
         [&](boost::system::error_code ec, const ManagedObjectType& resp) {
-            if (ec)
+        if (ec)
+        {
+            std::cerr << "Error contacting entity manager\n";
+            return;
+        }
+        for (const auto& pathPair : resp)
+        {
+            for (const auto& entry : pathPair.second)
             {
-                std::cerr << "Error contacting entity manager\n";
-                return;
-            }
-            for (const auto& pathPair : resp)
-            {
-                for (const auto& entry : pathPair.second)
+                if (entry.first != configInterface)
                 {
-                    if (entry.first != configInterface)
-                    {
-                        continue;
-                    }
-                    std::string name =
-                        loadVariant<std::string>(entry.second, "Name");
-
-                    uint8_t deviceAddress =
-                        loadVariant<uint8_t>(entry.second, "Address");
-
-                    std::string sensorClass =
-                        loadVariant<std::string>(entry.second, "Class");
-
-                    uint8_t channelAddress = meAddressDefault;
-                    auto findmType = entry.second.find("ChannelAddress");
-                    if (findmType != entry.second.end())
-                    {
-                        channelAddress = std::visit(
-                            VariantToUnsignedIntVisitor(), findmType->second);
-                    }
-
-                    float pollRate = pollRateDefault;
-                    auto findPollRate = entry.second.find("PollRate");
-                    if (findPollRate != entry.second.end())
-                    {
-                        pollRate = std::visit(VariantToFloatVisitor(),
-                                              findPollRate->second);
-                        if (pollRate <= 0.0F)
-                        {
-                            pollRate = pollRateDefault;
-                        }
-                    }
-
-                    auto& sensor = sensors[name];
-                    sensor = nullptr;
-                    sensor = std:: 
-                        make_shared<IpmbSensor>(dbusConnection, io, name,
-                                                pathPair.first, objectServer,
-                                                deviceAddress, channelAddress,
-                                                pollRate);
-
-                    if (sensorClass == "METemp" || sensorClass == "MESensor" ||
-                        sensorClass == "MECable")
-                    {
-                        sensor->type = IpmbType::meSensor;
-                    }
-                    else
-                    {
-                        std::cerr << "Invalid class " << sensorClass << "\n";
-                        continue;
-                    }
-                                    
-				    auto findmMask = entry.second.find("MaskEnable");
-                    if (findmMask != entry.second.end())
-                    {
-                        std::string maskEnableStatus= loadVariant<std::string>(entry.second, "MaskEnable");
-                        if (maskEnableStatus == "True"){
-                            sensor->sensorMaskEnable = true;
-                        }
-                    }
-                    
-                    sensor->statusSensorName = name;
-
-                    sensor->init();
+                    continue;
                 }
+                std::string name = loadVariant<std::string>(entry.second,
+                                                            "Name");
+
+                uint8_t deviceAddress = loadVariant<uint8_t>(entry.second,
+                                                             "Address");
+
+                std::string sensorClass = loadVariant<std::string>(entry.second,
+                                                                   "Class");
+
+                uint8_t channelAddress = meAddressDefault;
+                auto findmType = entry.second.find("ChannelAddress");
+                if (findmType != entry.second.end())
+                {
+                    channelAddress = std::visit(VariantToUnsignedIntVisitor(),
+                                                findmType->second);
+                }
+
+                float pollRate = pollRateDefault;
+                auto findPollRate = entry.second.find("PollRate");
+                if (findPollRate != entry.second.end())
+                {
+                    pollRate = std::visit(VariantToFloatVisitor(),
+                                          findPollRate->second);
+                    if (pollRate <= 0.0F)
+                    {
+                        pollRate = pollRateDefault;
+                    }
+                }
+
+                auto& sensor = sensors[name];
+                sensor = nullptr;
+                sensor = std::make_shared<IpmbSensor>(
+                    dbusConnection, io, name, pathPair.first, objectServer,
+                    deviceAddress, channelAddress, pollRate);
+
+                if (sensorClass == "METemp" || sensorClass == "MESensor" ||
+                    sensorClass == "MECable")
+                {
+                    sensor->type = IpmbType::meSensor;
+                }
+                else
+                {
+                    std::cerr << "Invalid class " << sensorClass << "\n";
+                    continue;
+                }
+
+                auto findmMask = entry.second.find("MaskEnable");
+                if (findmMask != entry.second.end())
+                {
+                    std::string maskEnableStatus =
+                        loadVariant<std::string>(entry.second, "MaskEnable");
+                    if (maskEnableStatus == "True")
+                    {
+                        sensor->sensorMaskEnable = true;
+                    }
+                }
+
+                sensor->statusSensorName = name;
+
+                sensor->init();
             }
-        },
-        entityManagerName, "/xyz/openbmc_project/inventory",
+        }
+    }, entityManagerName, "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 }
 

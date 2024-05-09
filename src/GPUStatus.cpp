@@ -1,8 +1,8 @@
+#include "GPUStatus.hpp"
+
 #include <unistd.h>
 
-#include "GPUStatus.hpp"
 #include <boost/asio/read_until.hpp>
-
 
 #include <fstream>
 #include <iostream>
@@ -65,10 +65,10 @@ GPUStatus::GPUStatus(sdbusplus::asio::object_server& objectServer,
         "GPUResetReq", gpuStatus,
         [&](const std::map<std::string, bool>& newStatus,
             std::map<std::string, bool>& oldStatus) {
-            oldStatus = newStatus;
-            gpuStatus = newStatus;
-            return 1;
-        });
+        oldStatus = newStatus;
+        gpuStatus = newStatus;
+        return 1;
+    });
 
     if (!sensorInterface->initialize())
     {

@@ -906,8 +906,8 @@ static void createSensorsCallback(
             {
                 // Sensor name not customized, do prefix/suffix composition,
                 // preserving default behavior by using psuNameFromIndex.
-                sensorName =
-                    psuProperty->labelTypeName + " " + psuNameFromIndex;
+                sensorName = psuProperty->labelTypeName + " " +
+                             psuNameFromIndex;
             }
 
             if constexpr (debug)

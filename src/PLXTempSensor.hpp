@@ -1,15 +1,15 @@
 #pragma once
 
+#include "sensor.hpp"
+
 #include <unistd.h>
 
 #include <boost/asio/streambuf.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <iostream>
 #include <string>
 #include <vector>
-#include <iostream>
-#include "sensor.hpp"
-
 
 /**
  * @class PLXTempSensor

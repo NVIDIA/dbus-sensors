@@ -1,14 +1,15 @@
+#include "PLXTempSensor.hpp"
+
+#include "sensor.hpp"
+
 #include <fcntl.h>
 #include <linux/i2c-dev.h>
 #include <linux/i2c.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-#include "sensor.hpp"
 
-#include "PLXTempSensor.hpp"
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/read_until.hpp>
-
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
@@ -116,7 +117,6 @@ void PLXTempSensor::restartRead()
 
 bool PLXTempSensor::updateReading()
 {
-
     std::string i2cBus = "/dev/i2c-" + std::to_string(deviceBus);
     uint8_t slaveAddr = deviceAddress;
     int16_t rawValue = 0;
@@ -301,7 +301,6 @@ void PLXTempSensor::checkThresholds()
 
 void PLXTempSensor::hwInit()
 {
-
     std::string i2cBus = "/dev/i2c-" + std::to_string(deviceBus);
     uint8_t slaveAddr = deviceAddress;
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)

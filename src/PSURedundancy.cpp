@@ -1,8 +1,8 @@
+#include "PSURedundancy.hpp"
+
 #include <unistd.h>
 
-#include "PSURedundancy.hpp"
 #include <boost/asio/read_until.hpp>
-
 
 #include <fstream>
 #include <iostream>
@@ -30,18 +30,18 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
     sensorInterface->register_property(
         "Status", status,
         [&](const std::string& newStatus, std::string& oldStatus) {
-            oldStatus = newStatus;
-            status = newStatus;
-            return 1;
-        });
+        oldStatus = newStatus;
+        status = newStatus;
+        return 1;
+    });
 
     sensorInterface->register_property(
         "RedundancyLost", redundancyLost,
         [&](const bool& newStatus, bool& oldStatus) {
-            oldStatus = newStatus;
-            redundancyLost = newStatus;
-            return 1;
-        });
+        oldStatus = newStatus;
+        redundancyLost = newStatus;
+        return 1;
+    });
 
     fs::path p(sensorConfiguration);
     AssociationList assocs = {};
@@ -135,7 +135,6 @@ PSURedundancy::~PSURedundancy()
 
 void PSURedundancy::setStatus()
 {
-
     if (workablePSU > previousWorkablePSU)
     {
         if (workablePSU >= redundantPSU)

@@ -1,6 +1,6 @@
-#include <unistd.h>
-
 #include "ProcessorStatus.hpp"
+
+#include <unistd.h>
 
 #include <exception>
 #include <fstream>
@@ -44,7 +44,8 @@ ProcessorStatus::~ProcessorStatus()
     objServer.remove_interface(sensorInterface);
 }
 
-bool ProcessorStatus::setupEvent(const std::string& procGpioName, gpiod::line& gpioLine,
+bool ProcessorStatus::setupEvent(
+    const std::string& procGpioName, gpiod::line& gpioLine,
     boost::asio::posix::stream_descriptor& gpioEventDescriptor)
 {
     // Find the GPIO line
@@ -87,19 +88,17 @@ bool ProcessorStatus::setupEvent(const std::string& procGpioName, gpiod::line& g
 void ProcessorStatus::monitor(boost::asio::posix::stream_descriptor& event,
                               gpiod::line& line)
 {
-
-    event.async_wait(
-        boost::asio::posix::stream_descriptor::wait_read,
-        [this, &event, &line](const boost::system::error_code ec) {
-            if (ec)
-            {
-                std::cerr << " fd handler error: " << ec.message() << "\n";
-                return;
-            }
-            gpiod::line_event lineEvent = line.event_read();
-            sdbusplus::xyz::openbmc_project::Inventory::server::Item::present(
-                lineEvent.event_type == gpiod::line_event::FALLING_EDGE);
-            // Start monitoring for next event
-            monitor(event, line);
-        });
+    event.async_wait(boost::asio::posix::stream_descriptor::wait_read,
+                     [this, &event, &line](const boost::system::error_code ec) {
+        if (ec)
+        {
+            std::cerr << " fd handler error: " << ec.message() << "\n";
+            return;
+        }
+        gpiod::line_event lineEvent = line.event_read();
+        sdbusplus::xyz::openbmc_project::Inventory::server::Item::present(
+            lineEvent.event_type == gpiod::line_event::FALLING_EDGE);
+        // Start monitoring for next event
+        monitor(event, line);
+    });
 }

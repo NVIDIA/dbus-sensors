@@ -1,8 +1,8 @@
+#include "SELSensor.hpp"
+
 #include <unistd.h>
 
-#include "SELSensor.hpp"
 #include <boost/asio/read_until.hpp>
-
 
 #include <fstream>
 #include <iostream>
@@ -28,10 +28,10 @@ SELSensor::SELSensor(sdbusplus::asio::object_server& objectServer,
     sensorInterface->register_property(
         "Status", status,
         [&](const std::string& newStatus, std::string& oldStatus) {
-            oldStatus = newStatus;
-            status = newStatus;
-            return 1;
-        });
+        oldStatus = newStatus;
+        status = newStatus;
+        return 1;
+    });
 
     fs::path p(sensorConfiguration);
     AssociationList assocs = {};

@@ -1,8 +1,8 @@
+#include "NVMeStatus.hpp"
+
 #include <unistd.h>
 
-#include "NVMeStatus.hpp"
 #include <boost/asio/read_until.hpp>
-
 
 #include <cerrno>
 #include <fstream>
