@@ -5,6 +5,7 @@
 
 #include <endian.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <FileHandle.hpp>

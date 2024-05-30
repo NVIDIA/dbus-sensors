@@ -1,12 +1,23 @@
-#include <unistd.h>
-
 #include "ProcessorStatus.hpp"
 
+#include "../src/Utils.hpp"
+
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/posix/stream_descriptor.hpp>
+#include <gpiod.hpp>
+#include <sdbusplus/asio/connection.hpp>
+#include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus.hpp>
+#include <sdbusplus/server/object.hpp>
+#include <xyz/openbmc_project/Association/Definitions/server.hpp>
+#include <xyz/openbmc_project/Inventory/Item/server.hpp>
+
 #include <exception>
-#include <fstream>
+#include <filesystem>
 #include <iostream>
-#include <optional>
+#include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 ProcessorStatus::ProcessorStatus(

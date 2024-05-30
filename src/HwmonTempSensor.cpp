@@ -20,6 +20,7 @@
 #include "Thresholds.hpp"
 #include "Utils.hpp"
 #include "sensor.hpp"
+#include "sharedMemUtils.hpp"
 
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/asio/buffer.hpp>
@@ -33,6 +34,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <memory>
