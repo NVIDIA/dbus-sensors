@@ -16,25 +16,38 @@
 
 #include "DeviceMgmt.hpp"
 #include "HwmonTempSensor.hpp"
+#include "SensorPaths.hpp"
+#include "Thresholds.hpp"
 #include "Utils.hpp"
 
-#include <boost/algorithm/string/replace.hpp>
+#include <boost/asio/error.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus.hpp>
 #include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/message.hpp>
+#include <sdbusplus/message/native_types.hpp>
 #include <tal.hpp>
 
+#include <algorithm>
 #include <array>
-#include <charconv>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <functional>
+#include <ios>
+#include <iostream>
 #include <memory>
+#include <optional>
 #include <regex>
-#include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -192,7 +205,7 @@ static struct SensorParams
         // Relative Humidity are read in milli-percent, we need percent.
         tmpSensorParameters.scaleValue *= 0.001;
         tmpSensorParameters.typeName = "humidity";
-        tmpSensorParameters.units = "PercentRH";
+        tmpSensorParameters.units = sensor_paths::unitPercentRH;
     }
     else
     {

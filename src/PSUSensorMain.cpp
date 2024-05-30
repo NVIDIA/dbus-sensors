@@ -17,23 +17,43 @@
 #include "DeviceMgmt.hpp"
 #include "PSUEvent.hpp"
 #include "PSUSensor.hpp"
+#include "PwmSensor.hpp"
+#include "SensorPaths.hpp"
+#include "Thresholds.hpp"
 #include "Utils.hpp"
+#include "VariantVisitors.hpp"
 
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/replace.hpp>
+#include <boost/asio/error.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus.hpp>
 #include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/exception.hpp>
+#include <sdbusplus/message.hpp>
+#include <sdbusplus/message/native_types.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
+#include <chrono>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <regex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -138,7 +158,6 @@ static EventPathList eventMatch;
 static GroupEventPathList groupEventMatch;
 static EventPathList limitEventMatch;
 
-static std::vector<PSUProperty> psuProperties;
 static boost::container::flat_map<size_t, bool> cpuPresence;
 static boost::container::flat_map<DevTypes, DevParams> devParamMap;
 
@@ -668,8 +687,7 @@ static void createSensorsCallback(
             // by making a copy and modifying that instead.
             // Avoid bleedthrough of one device's customizations to
             // the next device, as each should be independently customizable.
-            psuProperties.push_back(findProperty->second);
-            auto psuProperty = psuProperties.rbegin();
+            PSUProperty psuProperty = findProperty->second;
 
             // Use label head as prefix for reading from config file,
             // example if temp1: temp1_Name, temp1_Scale, temp1_Min, ...
@@ -686,7 +704,7 @@ static void createSensorsCallback(
             {
                 try
                 {
-                    psuProperty->labelTypeName = std::visit(
+                    psuProperty.labelTypeName = std::visit(
                         VariantToStringVisitor(), findCustomName->second);
                 }
                 catch (const std::invalid_argument&)
@@ -705,7 +723,7 @@ static void createSensorsCallback(
             {
                 try
                 {
-                    psuProperty->sensorScaleFactor = std::visit(
+                    psuProperty.sensorScaleFactor = std::visit(
                         VariantToUnsignedIntVisitor(), findCustomScale->second);
                 }
                 catch (const std::invalid_argument&)
@@ -715,7 +733,7 @@ static void createSensorsCallback(
                 }
 
                 // Avoid later division by zero
-                if (psuProperty->sensorScaleFactor > 0)
+                if (psuProperty.sensorScaleFactor > 0)
                 {
                     customizedScale = true;
                 }
@@ -731,7 +749,7 @@ static void createSensorsCallback(
             {
                 try
                 {
-                    psuProperty->minReading = std::visit(
+                    psuProperty.minReading = std::visit(
                         VariantToDoubleVisitor(), findCustomMin->second);
                 }
                 catch (const std::invalid_argument&)
@@ -746,7 +764,7 @@ static void createSensorsCallback(
             {
                 try
                 {
-                    psuProperty->maxReading = std::visit(
+                    psuProperty.maxReading = std::visit(
                         VariantToDoubleVisitor(), findCustomMax->second);
                 }
                 catch (const std::invalid_argument&)
@@ -761,7 +779,7 @@ static void createSensorsCallback(
             {
                 try
                 {
-                    psuProperty->sensorOffset = std::visit(
+                    psuProperty.sensorOffset = std::visit(
                         VariantToDoubleVisitor(), findCustomOffset->second);
                 }
                 catch (const std::invalid_argument&)
@@ -779,7 +797,7 @@ static void createSensorsCallback(
                                                     findPowerState->second);
                 setReadState(powerState, readState);
             }
-            if (!(psuProperty->minReading < psuProperty->maxReading))
+            if (!(psuProperty.minReading < psuProperty.maxReading))
             {
                 std::cerr << "Min must be less than Max\n";
                 continue;
@@ -837,7 +855,7 @@ static void createSensorsCallback(
             // Similarly, if sensor scaling factor is being customized,
             // then the below power-of-10 constraint becomes unnecessary,
             // as config should be able to specify an arbitrary divisor.
-            unsigned int factor = psuProperty->sensorScaleFactor;
+            unsigned int factor = psuProperty.sensorScaleFactor;
             if (!customizedScale)
             {
                 // Preserve existing usage of hardcoded labelMatch table below
@@ -884,14 +902,14 @@ static void createSensorsCallback(
             if constexpr (debug)
             {
                 std::cerr << "Sensor properties: Name \""
-                          << psuProperty->labelTypeName << "\" Scale "
-                          << psuProperty->sensorScaleFactor << " Min "
-                          << psuProperty->minReading << " Max "
-                          << psuProperty->maxReading << " Offset "
-                          << psuProperty->sensorOffset << "\n";
+                          << psuProperty.labelTypeName << "\" Scale "
+                          << psuProperty.sensorScaleFactor << " Min "
+                          << psuProperty.minReading << " Max "
+                          << psuProperty.maxReading << " Offset "
+                          << psuProperty.sensorOffset << "\n";
             }
 
-            std::string sensorName = psuProperty->labelTypeName;
+            std::string sensorName = psuProperty.labelTypeName;
             if (customizedName)
             {
                 if (sensorName.empty())
@@ -906,8 +924,7 @@ static void createSensorsCallback(
             {
                 // Sensor name not customized, do prefix/suffix composition,
                 // preserving default behavior by using psuNameFromIndex.
-                sensorName =
-                    psuProperty->labelTypeName + " " + psuNameFromIndex;
+                sensorName = psuProperty.labelTypeName + " " + psuNameFromIndex;
             }
 
             if constexpr (debug)
@@ -934,8 +951,8 @@ static void createSensorsCallback(
                     sensorPathStr, sensorType, objectServer, dbusConnection, io,
                     sensorName, std::move(sensorThresholds), *interfacePath,
                     readState, findSensorUnit->second, factor,
-                    psuProperty->maxReading, psuProperty->minReading,
-                    psuProperty->sensorOffset, labelHead, thresholdConfSize,
+                    psuProperty.maxReading, psuProperty.minReading,
+                    psuProperty.sensorOffset, labelHead, thresholdConfSize,
                     pollRate, i2cDev);
                 sensors[sensorName]->setupRead();
                 ++numCreated;

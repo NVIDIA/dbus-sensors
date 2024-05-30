@@ -117,7 +117,7 @@ constexpr const char* set = "Set";
 
 namespace power
 {
-const static constexpr char* busname = "xyz.openbmc_project.State.Host";
+const static constexpr char* busname = "xyz.openbmc_project.State.Host0";
 const static constexpr char* interface = "xyz.openbmc_project.State.Host";
 const static constexpr char* path = "/xyz/openbmc_project/state/host0";
 const static constexpr char* property = "CurrentHostState";
@@ -134,11 +134,10 @@ const static constexpr char* sOn = ".On";
 
 namespace post
 {
-const static constexpr char* busname =
-    "xyz.openbmc_project.State.OperatingSystem";
+const static constexpr char* busname = "xyz.openbmc_project.State.Host0";
 const static constexpr char* interface =
     "xyz.openbmc_project.State.OperatingSystem.Status";
-const static constexpr char* path = "/xyz/openbmc_project/state/os";
+const static constexpr char* path = "/xyz/openbmc_project/state/host0";
 const static constexpr char* property = "OperatingSystemState";
 } // namespace post
 
