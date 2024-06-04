@@ -97,20 +97,24 @@ static const I2CDeviceTypeMap sensorTypes{
     {"TMP75", I2CDeviceType{"tmp75", true}},
     {"ADT7461", I2CDeviceType{"adt7461", true}},
     {"TMP451", I2CDeviceType{"tpm451", true}},
-    {"TMP432", I2CDeviceType{"tpm432", true}},                                
+    {"TMP432", I2CDeviceType{"tpm432", true}},
     {"W83773G", I2CDeviceType{"w83773g", true}},
 };
 
-std::string getPlatform() {
+std::string getPlatform()
+{
     std::ifstream osRelease("/etc/os-release");
-    if (!osRelease) {
+    if (!osRelease)
+    {
         std::cerr << "Failed to open /etc/os-release" << std::endl;
         return "";
     }
 
     std::string line;
-    while (getline(osRelease, line)) {
-        if (line.compare(0, 22, "OPENBMC_TARGET_MACHINE") == 0) {
+    while (getline(osRelease, line))
+    {
+        if (line.compare(0, 22, "OPENBMC_TARGET_MACHINE") == 0)
+        {
             size_t equalsPos = line.find('=');
             std::string targetPlatform = line.substr(equalsPos + 1);
             return targetPlatform;
@@ -126,28 +130,30 @@ static struct SensorParams
 {
     // offset is to default to 0 and scale to 1, see lore
     // https://lore.kernel.org/linux-iio/5c79425f-6e88-36b6-cdfe-4080738d039f@metafoo.de/
-    struct SensorParams tmpSensorParameters = {.minValue = minValueTemperature,
-                                               .maxValue = maxValueTemperature,
-                                               .offsetValue = 0.0,
-                                               .scaleValue = 1.0,
-                                               .units =
-                                                   sensor_paths::unitDegreesC,
-                                               .typeName = "temperature",
-                                               .platform = getPlatform(),
-                                               .inventoryChassis = ""};
+    struct SensorParams tmpSensorParameters = {
+        .minValue = minValueTemperature,
+        .maxValue = maxValueTemperature,
+        .offsetValue = 0.0,
+        .scaleValue = 1.0,
+        .units = sensor_paths::unitDegreesC,
+        .typeName = "temperature",
+        .platform = getPlatform(),
+        .inventoryChassis = ""};
 
     if (tmpSensorParameters.platform == "\"hgx\"")
     {
         // HGX HMC Temperature Sensor's Inventory Chassis
-        tmpSensorParameters.inventoryChassis = "/xyz/openbmc_project/inventory/system/chassis/HGX_BMC_0";
+        tmpSensorParameters.inventoryChassis =
+            "/xyz/openbmc_project/inventory/system/chassis/HGX_BMC_0";
     }
-    // Check to log error only once during init, if inventoryChassis is empty. inventoryChassis endpoint requried for shared memory update
-    if(tmpSensorParameters.inventoryChassis.empty())
+    // Check to log error only once during init, if inventoryChassis is empty.
+    // inventoryChassis endpoint requried for shared memory update
+    if (tmpSensorParameters.inventoryChassis.empty())
     {
-        std::cerr << "found empty chassis endpoint for HwmonTemp sensor on platform"
-                  << tmpSensorParameters.platform << "\n";
+        std::cerr
+            << "found empty chassis endpoint for HwmonTemp sensor on platform"
+            << tmpSensorParameters.platform << "\n";
     }
-
 
     // For IIO RAW sensors we get a raw_value, an offset, and scale
     // to compute the value = (raw_value + offset) * scale
@@ -708,7 +714,9 @@ int main()
 
     matches.emplace_back(std::move(ifaceRemovedMatch));
 
-    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,"hwmontemp")){
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "hwmontemp"))
+    {
         std::cout << "Successfully registerd TAL namespaceInit for hwmontemp\n";
     }
     io.run();

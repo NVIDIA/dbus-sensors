@@ -283,7 +283,7 @@ void IpmbSensor::loadDefaults()
     if (subType == IpmbSubType::util)
     {
         // Utilization need to be scaled to percent
-       
+
         maxValue = 100;
         minValue = 0;
     }
@@ -690,8 +690,7 @@ void createSensors(
                 sensor->init();
             }
         }
-    },
-        entityManagerName, "/xyz/openbmc_project/inventory",
+    }, entityManagerName, "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 }
 

@@ -39,111 +39,108 @@ void createSensors(
         dbusConnection,
         [&io, &objectServer, &sensors, &dbusConnection,
          sensorsChanged](const ManagedObjectType& sensorConfigurations) {
-            bool firstScan = sensorsChanged == nullptr;
-            const SensorData* sensorData = nullptr;
-            const std::string* interfacePath = nullptr;
-            const std::pair<std::string, boost::container::flat_map<
-                                             std::string, BasicVariantType>>*
-                baseConfiguration = nullptr;
-            for (const std::pair<sdbusplus::message::object_path, SensorData>&
-                     sensor : sensorConfigurations)
-            {
-                // clear it out each loop
-                baseConfiguration = nullptr;
+        bool firstScan = sensorsChanged == nullptr;
+        const SensorData* sensorData = nullptr;
+        const std::string* interfacePath = nullptr;
+        const std::pair<std::string, boost::container::flat_map<
+                                         std::string, BasicVariantType>>*
+            baseConfiguration = nullptr;
+        for (const std::pair<sdbusplus::message::object_path, SensorData>&
+                 sensor : sensorConfigurations)
+        {
+            // clear it out each loop
+            baseConfiguration = nullptr;
 
-                // find base configuration
-                for (const char* type : sensorTypes)
+            // find base configuration
+            for (const char* type : sensorTypes)
+            {
+                auto sensorBase = sensor.second.find(type);
+                if (sensorBase != sensor.second.end())
                 {
-                    auto sensorBase = sensor.second.find(type);
-                    if (sensorBase != sensor.second.end())
+                    baseConfiguration = &(*sensorBase);
+                    break;
+                }
+            }
+            if (baseConfiguration == nullptr)
+            {
+                continue;
+            }
+            sensorData = &(sensor.second);
+            interfacePath = &(sensor.first.str);
+
+            if (sensorData == nullptr)
+            {
+                std::cerr << "failed to find sensor type"
+                          << "\n";
+                continue;
+            }
+
+            if (baseConfiguration == nullptr)
+            {
+                std::cerr << "error finding base configuration for sensor types"
+                          << "\n";
+                continue;
+            }
+
+            auto findSensorName = baseConfiguration->second.find("Name");
+            if (findSensorName == baseConfiguration->second.end())
+            {
+                std::cerr << "could not determine configuration name"
+                          << "\n";
+                continue;
+            }
+            std::string sensorName =
+                std::get<std::string>(findSensorName->second);
+
+            auto findGpioName = baseConfiguration->second.find("GpioName");
+            if (findGpioName == baseConfiguration->second.end())
+            {
+                std::cerr << "could not determine gpio name"
+                          << "\n";
+                continue;
+            }
+            std::string gpioName = std::get<std::string>(findGpioName->second);
+
+            // on rescans, only update sensors we were signaled by
+            auto findSensor = sensors.find(sensorName);
+            if (!firstScan && findSensor != sensors.end())
+            {
+                bool found = false;
+                for (auto it = sensorsChanged->begin();
+                     it != sensorsChanged->end(); it++)
+                {
+                    if (findSensor->second &&
+                        boost::ends_with(*it, findSensor->second->name))
                     {
-                        baseConfiguration = &(*sensorBase);
+                        sensorsChanged->erase(it);
+                        findSensor->second = nullptr;
+                        found = true;
                         break;
                     }
                 }
-                if (baseConfiguration == nullptr)
+                if (!found)
                 {
                     continue;
                 }
-                sensorData = &(sensor.second);
-                interfacePath = &(sensor.first.str);
-
-                if (sensorData == nullptr)
-                {
-                    std::cerr << "failed to find sensor type"
-                              << "\n";
-                    continue;
-                }
-
-                if (baseConfiguration == nullptr)
-                {
-                    std::cerr
-                        << "error finding base configuration for sensor types"
-                        << "\n";
-                    continue;
-                }
-
-                auto findSensorName = baseConfiguration->second.find("Name");
-                if (findSensorName == baseConfiguration->second.end())
-                {
-                    std::cerr << "could not determine configuration name"
-                              << "\n";
-                    continue;
-                }
-                std::string sensorName =
-                    std::get<std::string>(findSensorName->second);
-
-		auto findGpioName = baseConfiguration->second.find("GpioName");
-                if (findGpioName == baseConfiguration->second.end())
-                {
-                    std::cerr << "could not determine gpio name"
-                              << "\n";
-                    continue;
-                }
-                std::string gpioName =
-                    std::get<std::string>(findGpioName->second);
-
-                // on rescans, only update sensors we were signaled by
-                auto findSensor = sensors.find(sensorName);
-                if (!firstScan && findSensor != sensors.end())
-                {
-                    bool found = false;
-                    for (auto it = sensorsChanged->begin();
-                         it != sensorsChanged->end(); it++)
-                    {
-                        if (findSensor->second &&
-                            boost::ends_with(*it, findSensor->second->name))
-                        {
-                            sensorsChanged->erase(it);
-                            findSensor->second = nullptr;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found)
-                    {
-                        continue;
-                    }
-                }
-
-                auto findPolarity = baseConfiguration->second.find("Polarity");
-                if (findPolarity == baseConfiguration->second.end())
-                {
-                    std::cerr << "could not determine configuration polarity"
-                              << "\n";
-                    continue;
-                }
-                std::string polarity =
-                    std::get<std::string>(findPolarity->second);
-
-                auto& sensorConstruct = sensors[sensorName];
-                sensorConstruct = nullptr;
-
-		sensorConstruct = std::make_shared<ProcessorStatus>(
-                    objectServer, dbusConnection, io, sensorName, gpioName,
-                    *interfacePath);
             }
-        });
+
+            auto findPolarity = baseConfiguration->second.find("Polarity");
+            if (findPolarity == baseConfiguration->second.end())
+            {
+                std::cerr << "could not determine configuration polarity"
+                          << "\n";
+                continue;
+            }
+            std::string polarity = std::get<std::string>(findPolarity->second);
+
+            auto& sensorConstruct = sensors[sensorName];
+            sensorConstruct = nullptr;
+
+            sensorConstruct = std::make_shared<ProcessorStatus>(
+                objectServer, dbusConnection, io, sensorName, gpioName,
+                *interfacePath);
+        }
+    });
 
     getter->getConfiguration(
         std::vector<std::string>{sensorTypes.begin(), sensorTypes.end()});
@@ -169,30 +166,29 @@ int main()
     boost::asio::steady_timer filterTimer(io);
     std::function<void(sdbusplus::message::message&)> eventHandler =
         [&](sdbusplus::message::message& message) {
-            if (message.is_method_error())
+        if (message.is_method_error())
+        {
+            std::cerr << "callback method error\n";
+            return;
+        }
+        sensorsChanged->insert(message.get_path());
+        // this implicitly cancels the timer
+        filterTimer.expires_after(std::chrono::seconds(1));
+
+        filterTimer.async_wait([&](const boost::system::error_code& ec) {
+            if (ec == boost::asio::error::operation_aborted)
             {
-                std::cerr << "callback method error\n";
+                /* we were canceled*/
                 return;
             }
-            sensorsChanged->insert(message.get_path());
-            // this implicitly cancels the timer
-            filterTimer.expires_after(std::chrono::seconds(1));
-
-            filterTimer.async_wait([&](const boost::system::error_code& ec) {
-                if (ec == boost::asio::error::operation_aborted)
-                {
-                    /* we were canceled*/
-                    return;
-                }
-                if (ec)
-                {
-                    std::cerr << "timer error\n";
-                    return;
-                }
-                createSensors(io, objectServer, sensors, systemBus,
-                              sensorsChanged);
-            });
-        };
+            if (ec)
+            {
+                std::cerr << "timer error\n";
+                return;
+            }
+            createSensors(io, objectServer, sensors, systemBus, sensorsChanged);
+        });
+    };
 
     for (const char* type : sensorTypes)
     {

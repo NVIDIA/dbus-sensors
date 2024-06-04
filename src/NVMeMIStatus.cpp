@@ -183,7 +183,7 @@ void NVMeMIStatus::monitor()
         }
         else
         {
-	    //reset states to default, if drive not present
+            // reset states to default, if drive not present
             sdbusplus::xyz::openbmc_project::Inventory::server::Item::present(
                 false);
             sdbusplus::xyz::openbmc_project::State::Decorator::server::
@@ -192,7 +192,6 @@ void NVMeMIStatus::monitor()
                         OperationalStatus::StateType::None);
             sdbusplus::xyz::openbmc_project::State::Decorator::server::
                 OperationalStatus::functional(true);
-
         }
         // Start read for next status
         monitor();

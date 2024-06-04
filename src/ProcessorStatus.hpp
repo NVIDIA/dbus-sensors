@@ -49,8 +49,7 @@ class ProcessorStatus :
     // GPIO Lines and Event Descriptors
     gpiod::line procPresentLine;
     boost::asio::posix::stream_descriptor procPresentEvent;
-    bool setupEvent(const std::string& gpioName,
-                    gpiod::line& gpioLine,
+    bool setupEvent(const std::string& gpioName, gpiod::line& gpioLine,
                     boost::asio::posix::stream_descriptor& gpioEventDescriptor);
     void monitor(boost::asio::posix::stream_descriptor& event,
                  gpiod::line& line);

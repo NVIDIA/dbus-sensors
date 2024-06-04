@@ -1,7 +1,8 @@
 #pragma once
+#include "sensor.hpp"
+
 #include <boost/asio/steady_timer.hpp>
 #include <boost/container/flat_map.hpp>
-#include "sensor.hpp"
 
 #include <chrono>
 #include <limits>
@@ -52,7 +53,7 @@ struct IpmbSensor
     std::optional<uint8_t> initCommand;
     std::vector<uint8_t> initData;
     int sensorPollMs;
-    bool sensorReport = false; 
+    bool sensorReport = false;
     bool sensorMaskEnable = false;
     std::string statusSensorName;
 

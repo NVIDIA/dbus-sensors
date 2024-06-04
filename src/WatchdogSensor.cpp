@@ -1,8 +1,8 @@
+#include "WatchdogSensor.hpp"
+
 #include <unistd.h>
 
-#include "WatchdogSensor.hpp"
 #include <boost/asio/read_until.hpp>
-
 
 #include <fstream>
 #include <iostream>
@@ -29,10 +29,10 @@ WatchdogSensor::WatchdogSensor(
     sensorInterface->register_property(
         "Status", status,
         [&](const std::string& newStatus, std::string& oldStatus) {
-            oldStatus = newStatus;
-            status = newStatus;
-            return 1;
-        });
+        oldStatus = newStatus;
+        status = newStatus;
+        return 1;
+    });
 
     fs::path p(sensorConfiguration);
     AssociationList assocs = {};
@@ -45,8 +45,8 @@ WatchdogSensor::WatchdogSensor(
         std::cerr << "error initializing value interface\n";
     }
 
-    auto watchdogEventMatcherCallback = [this, conn](
-                                            sdbusplus::message::message& msg) {
+    auto watchdogEventMatcherCallback =
+        [this, conn](sdbusplus::message::message& msg) {
         std::optional<std::string_view> expireAction;
 
         sdbusplus::message::message getWatchdogStatus =

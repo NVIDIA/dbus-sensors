@@ -475,8 +475,8 @@ void createSensors(
             auto findLedReg = baseConfiguration->second.find("LedRegister");
             if (findLedReg != baseConfiguration->second.end())
             {
-                 ledReg = std::visit(VariantToUnsignedIntVisitor(),
-                                     findLedReg->second);
+                ledReg = std::visit(VariantToUnsignedIntVisitor(),
+                                    findLedReg->second);
             }
             auto findLedOffset = baseConfiguration->second.find("Offset");
             if (findLedOffset != baseConfiguration->second.end())
@@ -484,7 +484,6 @@ void createSensors(
                 offset = std::visit(VariantToUnsignedIntVisitor(),
                                     findLedOffset->second);
             }
-
 
             auto connector =
                 sensorData->find(cfgIntf + std::string(".Connector"));

@@ -28,7 +28,7 @@ using I2CDeviceTypeMap =
 struct I2CDeviceParams
 {
     I2CDeviceParams(const I2CDeviceType& type, uint64_t bus, uint64_t address) :
-        type(&type), bus(bus), address(address){};
+        type(&type), bus(bus), address(address) {};
 
     const I2CDeviceType* type;
     uint64_t bus;
