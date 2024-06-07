@@ -411,3 +411,8 @@ bool getDeviceBusAddr(const std::string& deviceName, T& bus, T& addr)
 
     return true;
 }
+
+void addEventLog(
+    const std::string& messageId,
+    const std::string& severity,
+    std::map<std::string, std::string>& addData);
