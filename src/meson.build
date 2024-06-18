@@ -166,6 +166,22 @@ if get_option('hwmon-temp').allowed()
     )
 endif
 
+if get_option('leakage').allowed()
+    executable(
+        'leakagesensor',
+        'LeakageSensorMain.cpp',
+        'LeakageSensor.cpp',
+        dependencies: [
+            default_deps,
+            i2c,
+            thresholds_dep,
+            utils_dep,            
+        ],
+        include_directories: '../include',        
+        install: true,
+    )
+endif
+
 if get_option('plx-temp').allowed()
     executable(
         'plxtempsensor',
@@ -290,7 +306,7 @@ if get_option('nvmeu2').allowed()
     executable(
         'nvmestatus',
         'NVMeStatus.cpp',
-	'NVMeMIStatus.cpp',
+        'NVMeMIStatus.cpp',
         'NVMeStatusMain.cpp',
         dependencies: [
             default_deps,
