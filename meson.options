@@ -21,4 +21,4 @@ option('validate-unsecure-feature', type : 'feature', value : 'disabled', descri
 option('insecure-sensor-override', type : 'feature', value : 'disabled', description : 'Enables Sensor override feature without any check.',)
 option('boot-progress', type: 'feature', value: 'disabled', description: 'Enable boot progress sensor.',)
 option('satellite', type: 'feature', value: 'disabled', description: 'Enable Satellite sensor.',)
-option('leak-detect', type: 'feature', value: 'enabled', description: 'Enable Leak Detect sensor.',)
+option('leak-detect', type: 'feature', value: 'disabled', description: 'Enable Leak Detect sensor.',)
