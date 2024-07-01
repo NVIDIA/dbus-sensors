@@ -61,7 +61,7 @@ static std::string deviceDirName(uint64_t bus, uint64_t address)
     return name.str();
 }
 
-bool I2CDeviceParams::devicePresent() const
+fs::path I2CDeviceParams::devicePath() const
 {
     fs::path path = i2cBusPath(bus) / deviceDirName(bus, address);
 
@@ -69,6 +69,13 @@ bool I2CDeviceParams::devicePresent() const
     {
         path /= "hwmon";
     }
+
+    return path;
+}
+
+bool I2CDeviceParams::devicePresent() const
+{
+    fs::path path = devicePath();
 
     // Ignore errors; anything but a clean 'true' is fine as 'false'
     std::error_code ec;

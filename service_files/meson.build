@@ -25,6 +25,7 @@ unit_files = [
     ['psuredundancy', 'xyz.openbmc_project.psuredundancy.service'],
     ['boot-progress', 'xyz.openbmc_project.bootprogress.service'],
     ['satellite', 'xyz.openbmc_project.satellitesensor.service'],
+    ['leak-detect', 'xyz.openbmc_project.leakdetectsensor.service'],
 ]
 
 fs = import('fs')

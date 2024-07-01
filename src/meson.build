@@ -381,3 +381,18 @@ if get_option('satellite').enabled()
     )
 endif
 
+if get_option('leak-detect').allowed()
+    executable(
+        'leakdetectsensor',
+        'LeakDetectSensor.cpp',
+        'LeakDetectSensorMain.cpp',
+        dependencies: [
+            default_deps,
+            gpiodcxx,
+            thresholds_dep,
+            utils_dep,
+            devicemgmt_dep
+        ],
+        install: true,
+    )
+endif

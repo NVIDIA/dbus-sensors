@@ -36,6 +36,7 @@ struct I2CDeviceParams
 
     bool devicePresent() const;
     bool deviceStatic() const;
+    std::filesystem::path devicePath() const;
 };
 
 std::optional<I2CDeviceParams>

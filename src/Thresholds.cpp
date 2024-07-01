@@ -449,7 +449,6 @@ void assertThresholds(Sensor* sensor, double assertValue,
 
     if (!interface)
     {
-        std::cout << "trying to set uninitialized interface\n";
         return;
     }
 
