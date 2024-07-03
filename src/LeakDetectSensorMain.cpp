@@ -75,17 +75,20 @@ static std::string getReadPath(const SensorBaseConfigMap& cfg,
 
     std::string devicePath = params.devicePath();
 
-    std::string readPath = devicePath + "/iio:device0/" + sensorFile;
-    std::cout << "Got sensor readPath " << readPath << "\n";
-
-    // If the expected readPath does not exist, return empty string to indicate
-    // invalid read path
-    std::error_code ec;
-    if (!std::filesystem::exists(readPath, ec))
+    // Find the expected readPath by searching in the device path based on
+    // device info in params.  We expect to only find one valid path since
+    // the bus, address and channel are provided.
+    std::vector<std::filesystem::path> readPaths;
+    findFiles(std::filesystem::path(devicePath), sensorFile, readPaths);
+    if (readPaths.size() != 1)
     {
-        std::cerr << "Read Path " << readPath << " does not exist.\n";
+        std::cerr << "Unexpected number (" << readPaths.size()
+            << ") of readPaths found, can not determine correct read path.\n";
         return "";
     }
+
+    std::string readPath = readPaths.front();
+    std::cout << "Got sensor readPath " << readPath << "\n";
 
     return readPath;
 }
