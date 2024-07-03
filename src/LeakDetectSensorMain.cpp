@@ -213,6 +213,11 @@ static void handleSensorConfigurations(
 
         std::shared_ptr<I2CDeviceParams> params =
             getI2CParams(baseConfiguration->second);
+        if (params == nullptr)
+        {
+            // Malformed or missing I2C device info, cannot proceed
+            continue;
+        }
 
         // Create an I2C device based on the params parsed above, such as
         // bus and address.  This will also instantiate the device with
