@@ -166,22 +166,6 @@ if get_option('hwmon-temp').allowed()
     )
 endif
 
-if get_option('leakage').allowed()
-    executable(
-        'leakagesensor',
-        'LeakageSensorMain.cpp',
-        'LeakageSensor.cpp',
-        dependencies: [
-            default_deps,
-            i2c,
-            thresholds_dep,
-            utils_dep,            
-        ],
-        include_directories: '../include',        
-        install: true,
-    )
-endif
-
 if get_option('plx-temp').allowed()
     executable(
         'plxtempsensor',
@@ -408,6 +392,20 @@ if get_option('leak-detect').allowed()
             utils_dep,
             devicemgmt_dep
         ],
+        install: true,
+    )
+endif
+
+if get_option('discrete-leak-detect').allowed()
+    executable(
+        'discreteleakdetectsensor',
+        'DiscreteLeakDetectSensor.cpp',
+        'DiscreteLeakDetectSensorMain.cpp',
+        dependencies: [
+            default_deps,
+            utils_dep,            
+        ],
+        include_directories: '../include',        
         install: true,
     )
 endif

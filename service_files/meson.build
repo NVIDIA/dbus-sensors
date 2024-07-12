@@ -10,7 +10,6 @@ unit_files = [
     ['exit-air', 'xyz.openbmc_project.exitairsensor.service'],
     ['fan', 'xyz.openbmc_project.fansensor.service'],
     ['hwmon-temp', 'xyz.openbmc_project.hwmontempsensor.service'],
-    ['leakage', 'xyz.openbmc_project.leakagesensor.service'],
     ['plx-temp', 'xyz.openbmc_project.plxtempsensor.service'],
     ['ipmb', 'xyz.openbmc_project.ipmbsensor.service'],
     ['intrusion', 'xyz.openbmc_project.intrusionsensor.service'],
@@ -27,6 +26,7 @@ unit_files = [
     ['boot-progress', 'xyz.openbmc_project.bootprogress.service'],
     ['satellite', 'xyz.openbmc_project.satellitesensor.service'],
     ['leak-detect', 'xyz.openbmc_project.leakdetectsensor.service'],
+    ['discrete-leak-detect', 'xyz.openbmc_project.discreteleakdetectsensor.service'],
 ]
 
 fs = import('fs')
