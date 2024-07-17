@@ -15,7 +15,7 @@
 0 - leakage event (leakage detected)
 */
 
-const std::string compName{"Leakage Sensor"};
+
 const std::string messageError{"The resource property Leakage Sensor has detected errors of type 'Leakage'."};
 const std::string resolution{"Inspect for water leakage and consider power down switch tray."};
 const std::string resourceErrorDetected{"ResourceEvent.1.0.ResourceErrorsDetected"};
