@@ -31,7 +31,8 @@
 static constexpr float pollRateDefault = 0.25;
 
 static const I2CDeviceTypeMap i2CDeviceTypes{
-    {"MAX1363", I2CDeviceType{"max1363", false}}
+    {"MAX1363", I2CDeviceType{"max1363", false}},
+    {"ADS7142", I2CDeviceType{"ads7142", false}}
 };
 
 static std::shared_ptr<I2CDeviceParams> getI2CParams(
@@ -187,6 +188,50 @@ static std::shared_ptr<I2CDevice> getI2CDevice(
     return i2cDevice;
 }
 
+// Attempts to instantiate the device assocated with the sensor.  Returns
+// nullptr if device does not exist or instantiation unsuccessful
+static std::shared_ptr<I2CDevice> instantiateI2CDevice(
+        const SensorData& sensorData, std::string& readPath)
+{
+    for (const auto& [intf, cfg] : sensorData)
+    {
+        if (intf.find("Device") == std::string::npos)
+        {
+            continue;
+        }
+
+        // Creates the param objects with contains device info such as bus and
+        // address.  Used to create I2C device object.
+        std::shared_ptr<I2CDeviceParams> params = getI2CParams(cfg);
+        if (params == nullptr)
+        {
+            continue;
+        }
+
+        // Create an I2C device based on the params parsed above, such as
+        // bus and address.  This will also instantiate the device with
+        // available driver based on the device type
+        std::shared_ptr<I2CDevice> i2cDevice = getI2CDevice(*params);
+        if (i2cDevice == nullptr)
+        {
+            continue;
+        }
+
+        // The read path is the sysfs file path that the sensor value can be
+        // retrieved from
+        readPath = getReadPath(cfg, *params);
+        if (readPath.empty())
+        {
+            continue;
+        }
+
+        // Device found and successfully instantiated
+        return i2cDevice;
+    }
+
+    return nullptr;
+}
+
 static void handleSensorConfigurations(
     boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
@@ -249,31 +294,15 @@ static void handleSensorConfigurations(
             }
         }
 
-        std::shared_ptr<I2CDeviceParams> params =
-            getI2CParams(baseConfiguration->second);
-        if (params == nullptr)
-        {
-            // Malformed or missing I2C device info, cannot proceed
-            continue;
-        }
-
-        // Create an I2C device based on the params parsed above, such as
-        // bus and address.  This will also instantiate the device with
-        // available driver based on the device type
-        std::shared_ptr<I2CDevice> i2cDev = getI2CDevice(*params);
+        std::string readPath;
+        std::shared_ptr<I2CDevice> i2cDev = instantiateI2CDevice(
+                configData, readPath);
         if (i2cDev == nullptr)
         {
-            std::cout << "Unable to create I2C device for " << sensorName
-                << "\n";
-            continue;
-        }
-
-        // The read path is the sysfs file path that the sensor value can be
-        // retrieved from
-        std::string readPath = getReadPath(baseConfiguration->second, *params);
-        if (readPath.empty())
-        {
-            std::cout << "Unable to get Read Path for " << sensorName << "\n";
+            std::cerr << "No valid i2c device found for " << sensorName << "\n";
+            // TODO: Add handling here for cases where no leak detectors are
+            // found at the expected device address. Need to indicate device
+            // malfunction either through event or a system shutdown.
             continue;
         }
 
