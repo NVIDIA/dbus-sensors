@@ -1,30 +1,5 @@
-#include "Utils.hpp"
-#include <memory>
-#include <optional>
-#include <regex>
-#include <string>
-#include <variant>
-#include <vector>
-#include <chrono>
-#include <cmath>
-#include <functional>
-#include <iostream>
-#include <limits>
-#include <numeric>
-
-#include <boost/algorithm/string/case_conv.hpp>
-#include <boost/algorithm/string/predicate.hpp>
-#include <boost/algorithm/string/replace.hpp>
-#include <boost/container/flat_set.hpp>
-
-#include <sdbusplus/bus/match.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/container/flat_map.hpp>
-#include <sdbusplus/asio/connection.hpp>
-#include <sdbusplus/asio/object_server.hpp>
-#include <sdbusplus/bus/match.hpp>
 #include "DiscreteLeakDetectSensor.hpp"
-#include "VariantVisitors.hpp"
+
 
 namespace fs = std::filesystem;
 static constexpr float pollRateDefault = 0.5;
@@ -32,13 +7,13 @@ constexpr const bool debug = true;
 constexpr const char* sensorType = "leakage";
 using sysfsAttributesVec = std::vector<std::pair<std::string, std::string>>;
 
-void findMatchingSysfsAttributes(sysfsAttributesVec& matching_paths, const std::string& base_path, const std::string& dir_pattern, const std::string& file_pattern)
+static void findMatchingSysfsAttributes(sysfsAttributesVec& matchingPaths, const std::string& basePath, const std::string& dirPattern, const std::string& filePattern)
 {
-    for (const auto& entry : fs::recursive_directory_iterator(base_path)) {
-        if (entry.is_directory() && entry.path().filename().string().find(dir_pattern) != std::string::npos) {
-            for (const auto& sub_entry : fs::directory_iterator(entry.path())) {
-                if (sub_entry.path().filename().string().find(file_pattern) == 0) {
-                    matching_paths.emplace_back(entry.path().string(), sub_entry.path().filename().string());
+    for (const auto& entry : fs::recursive_directory_iterator(basePath)) {
+        if (entry.is_directory() && entry.path().filename().string().find(dirPattern) != std::string::npos) {
+            for (const auto& subEntry : fs::directory_iterator(entry.path())) {
+                if (subEntry.path().filename().string().find(filePattern) == 0) {
+                    matchingPaths.emplace_back(entry.path().string(), subEntry.path().filename().string());
                 }
             }
         }
@@ -76,7 +51,6 @@ void createSensors(
                     continue;
                 }
 
-                const std::string* interfacePath = nullptr;
                 float pollRate = getPollRate(cfg, pollRateDefault);
                 uint8_t busId = loadVariant<uint8_t>(cfg, "Bus");
                 uint8_t address = loadVariant<uint8_t>(cfg, "Address");
@@ -96,22 +70,22 @@ void createSensors(
                 }
 
                 sdbusplus::server::manager::manager objManager(bus, "/");
-                sysfsAttributesVec matching_paths;
+                sysfsAttributesVec matchingPaths;
 
-                std::string base_path = "/sys/bus/i2c/devices/i2c-" + std::to_string(busId) + "/" +
+                std::string basePath = "/sys/bus/i2c/devices/i2c-" + std::to_string(busId) + "/" +
                             std::to_string(busId) + "-00" + std::to_string(address) + "/" +
                             driver + "/hwmon";
-                std::string dir_pattern = "hwmon";
-                std::string file_pattern = "leakage";
+                std::string dirPattern = "hwmon";
+                std::string filePattern = "leakage";
 
-                findMatchingSysfsAttributes(matching_paths,
-                                base_path,
-                                dir_pattern,
-                                file_pattern);
+                findMatchingSysfsAttributes(matchingPaths,
+                                basePath,
+                                dirPattern,
+                                filePattern);
 
-                if (!matching_paths.empty()) {
+                if (!matchingPaths.empty()) {
                     std::cout << "Found matching sysfs paths:" << std::endl;
-                    for (const auto& [dir, file] : matching_paths) {
+                    for (const auto& [dir, file] : matchingPaths) {
                         std::cout << "Directory: " << dir << ", File: " << file << std::endl;
                         auto& sensor = sensors[file];
                         sensor = std::make_unique<DiscreteLeakDetectSensor>(bus,
@@ -121,7 +95,6 @@ void createSensors(
                                         detectorType,
                                         dir,
                                         file,
-                                        *interfacePath,
                                         pollRate,
                                         busId,
                                         address,

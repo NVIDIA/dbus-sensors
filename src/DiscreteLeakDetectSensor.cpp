@@ -15,7 +15,6 @@
 0 - leakage event (leakage detected)
 */
 
-
 const std::string messageError{"The resource property Leakage Sensor has detected errors of type 'Leakage'."};
 const std::string resolution{"Inspect for water leakage and consider power down switch tray."};
 const std::string resourceErrorDetected{"ResourceEvent.1.0.ResourceErrorsDetected"};
@@ -27,7 +26,6 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(sdbusplus::bus::bus& bus,
                            const std::string& sensorType,
                            const std::string& sensorSysfsPath,
                            const std::string& sensorName,
-                           [[maybe_unused]]const std::string& sensorConfiguration,
                            float pollRate, uint8_t busId,uint8_t address,
                            const std::string& driver):
     sensorType(sensorType),
@@ -52,7 +50,7 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(sdbusplus::bus::bus& bus,
         std::cerr << e.what() << std::endl;
     }
 
-    if(!sensorType.compare("FloatSwitch"))
+    if(sensorType == "FloatSwitch")
     {
         leakDetectIntf->leakDetectorType(sdbusplus::xyz::openbmc_project::
                                         State::server::LeakDetectorState::
@@ -79,7 +77,6 @@ int DiscreteLeakDetectSensor::readLeakValue(const std::string& filePath) {
     int value = 1;
     if (file.is_open()) {
         file >> value;
-        file.close();
     }
     return value;
 }
@@ -89,7 +86,7 @@ int DiscreteLeakDetectSensor::getLeakInfo()
     std::vector<std::pair<std::string,int>> leakVec;
     auto leakVal = readLeakValue(sysfsPath + "/" + name);
 
-    if(leakVal)
+    if(leakVal == 1)
     {
         leakDetectIntf->detectorState(sdbusplus::xyz::openbmc_project::
                                         State::server::LeakDetectorState::
@@ -110,7 +107,7 @@ int DiscreteLeakDetectSensor::getLeakInfo()
     return 0;
 }
 
-void DiscreteLeakDetectSensor::monitor(void)
+void DiscreteLeakDetectSensor::monitor()
 {
     waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait([this](const boost::system::error_code& ec) {
@@ -141,7 +138,7 @@ void DiscreteLeakDetectSensor::monitor(void)
 inline void DiscreteLeakDetectSensor::createLeakageLogEntry(const std::string& messageID,
                            const std::string& arg0, const std::string& arg1,
                            const std::string& resolution,
-                           const std::string logNamespace)
+                           const std::string& logNamespace)
 {
     using namespace sdbusplus::xyz::openbmc_project::Logging::server;
     using Level =
@@ -188,5 +185,4 @@ inline void DiscreteLeakDetectSensor::createLeakageLogEntry(const std::string& m
         "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
         "xyz.openbmc_project.Logging.Create", "Create", messageID, severity,
         addData);
-    return;
 }

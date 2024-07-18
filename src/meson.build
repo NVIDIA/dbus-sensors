@@ -290,7 +290,7 @@ if get_option('nvmeu2').allowed()
     executable(
         'nvmestatus',
         'NVMeStatus.cpp',
-        'NVMeMIStatus.cpp',
+'NVMeMIStatus.cpp',
         'NVMeStatusMain.cpp',
         dependencies: [
             default_deps,
