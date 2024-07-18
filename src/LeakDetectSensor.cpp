@@ -37,13 +37,6 @@
 // Enable debug logging
 static constexpr bool debug = false;
 
-// Enable leak detector voltage values to be exposed on Dbus interfaces
-static constexpr bool leakValueIntf = false;
-
-// TODO: Revisit the max setting to consider IPMI implications.
-static constexpr double maxVoltageReading = 2.048;
-static constexpr double minVoltageReading = 0.0;
-
 // Scales to Volts
 static constexpr double sensorScaleFactor = 0.0005;
 
@@ -53,23 +46,20 @@ static constexpr double roundFactor = 10000;
 LeakDetectSensor::LeakDetectSensor(
                         const std::string& readPath,
                         sdbusplus::asio::object_server& objectServer,
-                        std::shared_ptr<sdbusplus::asio::connection>& conn,
                         boost::asio::io_context& io,
                         const std::string& sensorName,
-                        std::vector<thresholds::Threshold>&& thresholdsIn,
                         const std::shared_ptr<I2CDevice>& i2cDevice,
                         const float pollRate,
-                        PowerState readState,
+                        const double leakThreshold,
                         const std::string& configurationPath) :
-    Sensor(escapeName(sensorName), std::move(thresholdsIn), configurationPath,
-           "LeakDetect", false, false, maxVoltageReading, minVoltageReading,
-           conn, readState),
     i2cDevice(i2cDevice),
     objServer(objectServer),
     inputDev(io, readPath, boost::asio::random_access_file::read_only),
     waitTimer(io),
+    name(sensorName),
     readPath(readPath),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
+    leakThreshold(leakThreshold),
     leakLevel(LeakLevel::NORMAL)
 {
     if constexpr (leakValueIntf)
@@ -78,18 +68,20 @@ LeakDetectSensor::LeakDetectSensor(
             "/xyz/openbmc_project/sensors/voltage/" + name,
             "xyz.openbmc_project.Sensor.Value");
 
-        for (const auto& threshold : thresholds)
+        sensorInterface->register_property("Value", detectorValue);
+        sensorInterface->register_property("Unit", sensor_paths::unitVolts);
+
+        if (!sensorInterface->initialize())
         {
-            std::string interface = thresholds::getInterface(threshold.level);
-            thresholdInterfaces[static_cast<size_t>(threshold.level)] =
-                objectServer.add_interface(
-                    "/xyz/openbmc_project/sensors/voltage/" + name, interface);
+            std::cerr << "Error initializing sensor value interface for " <<
+                name << "\n";
         }
+
         association = objectServer.add_interface(
             "/xyz/openbmc_project/sensors/voltage/" + name,
             association::interface);
 
-        setInitialProperties(sensor_paths::unitVolts);
+        createAssociation(association, configurationPath);
     }
 }
 
@@ -98,12 +90,16 @@ LeakDetectSensor::~LeakDetectSensor()
     inputDev.close();
     waitTimer.cancel();
 
-    for (const auto& iface : thresholdInterfaces)
+    if constexpr (leakValueIntf)
     {
-        objServer.remove_interface(iface);
+        objServer.remove_interface(sensorInterface);
+        objServer.remove_interface(association);
     }
-    objServer.remove_interface(sensorInterface);
-    objServer.remove_interface(association);
+}
+
+std::string LeakDetectSensor::getSensorName()
+{
+    return name;
 }
 
 // Kicks off a read operation for the underlying value of the sensor based on
@@ -123,14 +119,12 @@ void LeakDetectSensor::setupRead()
     });
 }
 
-// Overrides the base class checkThresholds to include additiona logic for
-// determining current leaking levels.
-void LeakDetectSensor::checkThresholds()
+// Based on the detector value, determine the leak level
+void LeakDetectSensor::determineLeakLevel(double detectorValue)
 {
-    // The checkThresholds method will return false if the Critical threshold
-    // is crossed.  Logic here will need to be expanded to include more leakage
+    // Logic here may need to be expanded to include more leakage
     // levels in the future.
-    if (!thresholds::checkThresholds(this))
+    if (detectorValue < leakThreshold)
     {
         // Once the sensor is in "leakage" state, it will not be able to revert
         // back to a "normal" state, as we consider this to be a critical issue
@@ -162,8 +156,6 @@ void LeakDetectSensor::restartRead()
 
 // Handles the output of a read operation. If the read yielded no errors, will
 // translate the raw value and update the value stored on this sensor object.
-// updateValue will also check for threshold crossings and take appropriate
-// actions.
 void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
                                       size_t bytesRead)
 {
@@ -176,12 +168,13 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
 
     if (!err)
     {
+        double rawValue = 0.0;
         const char* bufEnd = readBuf.data() + bytesRead;
         std::from_chars_result ret = std::from_chars(readBuf.data(), bufEnd,
                                                      rawValue);
         if (ret.ec != std::errc())
         {
-            incrementError();
+            std::cerr << "Unable to get value.\n";
         }
         else
         {
@@ -189,15 +182,21 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
             newValue = std::round(newValue * roundFactor) / roundFactor;
             if constexpr (debug)
             {
-                std::cout << "Updating " << name << " to " << newValue << "\n";
+                std::cout << name << " detector value: " << newValue << "\n";
             }
-            updateValue(newValue);
+
+            if (sensorInterface && (detectorValue != newValue))
+            {
+                sensorInterface->set_property("Value", newValue);
+            }
+
+            detectorValue = newValue;
+            determineLeakLevel(newValue);
         }
     }
     else
     {
-        std::cerr << "Error in response\n";
-        incrementError();
+        std::cerr << "Error in response.\n";
     }
 
     restartRead();

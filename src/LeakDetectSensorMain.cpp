@@ -158,7 +158,6 @@ static std::shared_ptr<I2CDevice> getI2CDevice(
 
 static void handleSensorConfigurations(
     boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
-    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
     const std::shared_ptr<boost::container::flat_set<std::string>>&
         sensorsChanged,
     boost::container::flat_map<std::string, std::shared_ptr<LeakDetectSensor>>&
@@ -204,7 +203,7 @@ static void handleSensorConfigurations(
                     it != sensorsChanged->end(); it++)
             {
                 if (findSensor->second &&
-                    it->ends_with(findSensor->second->name))
+                    it->ends_with(findSensor->second->getSensorName()))
                 {
                     sensorsChanged->erase(it);
                     findSensor->second = nullptr;
@@ -249,19 +248,28 @@ static void handleSensorConfigurations(
         float pollRate =
             getPollRate(baseConfiguration->second, pollRateDefault);
 
-        std::vector<thresholds::Threshold> sensorThresholds;
-        if (!parseThresholdsFromConfig(configData, sensorThresholds))
+        auto findLeakThreshold =
+            baseConfiguration->second.find("LeakThresholdVolts");
+        if (findLeakThreshold == baseConfiguration->second.end())
         {
-            std::cerr << "Error populating thresholds for " << sensorName
-                << "\n";
+            std::cerr << "Could not determine leak threshold for "
+                    << sensorName << "\n";
+            continue;
+        }
+        double leakThreshold =
+            std::visit(VariantToDoubleVisitor(), findLeakThreshold->second);
+        if (!std::isfinite(leakThreshold))
+        {
+            std::cerr << "Invalid leak threshold config for "
+                    << sensorName << "\n";
+            continue;
         }
 
         // Create a new sensor object based on configurations deteremined above
         auto& sensor = sensors[sensorName];
         sensor = std::make_shared<LeakDetectSensor>(
-            readPath, objectServer, dbusConnection, io, sensorName,
-            std::move(sensorThresholds), i2cDev, pollRate, PowerState::always,
-            *interfacePath);
+            readPath, objectServer, io, sensorName, i2cDev, pollRate,
+            leakThreshold, *interfacePath);
 
         sensor->setupRead();
     }
@@ -277,10 +285,10 @@ void createSensors(
         sensors)
 {
     auto getter = std::make_shared<GetSensorConfiguration>(dbusConnection,
-        [&io, &objectServer, &dbusConnection, &sensorsChanged, &sensors]
+        [&io, &objectServer, &sensorsChanged, &sensors]
         (const ManagedObjectType& sensorConfigurations){
-            handleSensorConfigurations(io, objectServer, dbusConnection,
-                sensorsChanged, sensors, sensorConfigurations);
+            handleSensorConfigurations(io, objectServer, sensorsChanged,
+                sensors, sensorConfigurations);
         });
 
     getter->getConfiguration(
@@ -298,7 +306,12 @@ int main()
     // Setup object Server
     sdbusplus::asio::object_server objectServer(systemBus, true);
     systemBus->request_name("xyz.openbmc_project.LeakDetectSensor");
-    objectServer.add_manager("/xyz/openbmc_project/sensors");
+
+    // Only add if we want voltage values to be exposed on Dbus interfaces
+    if (leakValueIntf)
+    {
+        objectServer.add_manager("/xyz/openbmc_project/sensors");
+    }
 
     // Creates flatmaps of all the LeakDetectSensors detected
     boost::container::flat_map<std::string, std::shared_ptr<LeakDetectSensor>>
