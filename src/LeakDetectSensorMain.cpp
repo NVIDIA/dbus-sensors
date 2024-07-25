@@ -305,10 +305,12 @@ int main()
 
     // Setup object Server
     sdbusplus::asio::object_server objectServer(systemBus, true);
-    systemBus->request_name("xyz.openbmc_project.LeakDetectSensor");
 
     // Adding object server managers
     objectServer.add_manager("/xyz/openbmc_project/sensors");
+
+    objectServer.add_manager("/xyz/openbmc_project/state");
+    objectServer.add_manager("/xyz/openbmc_project/inventory");
 
     // Creates flatmaps of all the LeakDetectSensors detected
     boost::container::flat_map<std::string, std::shared_ptr<LeakDetectSensor>>
@@ -362,6 +364,8 @@ int main()
         setupPropertiesChangedMatches(*systemBus,
             std::to_array<const char*>({LeakDetectSensor::entityMgrConfigType}),
             eventHandler);
+
+    systemBus->request_name("xyz.openbmc_project.LeakDetector");
 
     io.run();
 }

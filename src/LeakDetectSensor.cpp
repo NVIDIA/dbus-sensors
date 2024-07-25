@@ -101,6 +101,72 @@ LeakDetectSensor::LeakDetectSensor(
     sensorAssociation = objectServer.add_interface(sensorObjPath,
         association::interface);
     createAssociation(sensorAssociation, configurationPath);
+
+    sdbusplus::message::object_path inventoryObjPath(
+        "/xyz/openbmc_project/inventory/leakdetectors/");
+    inventoryObjPath /= name;
+
+    // Expose inventory related leak detector interfaces and properties
+    inventoryInterface = objectServer.add_interface(inventoryObjPath,
+        "xyz.openbmc_project.Inventory.Item.LeakDetector");
+    inventoryInterface->register_property("LeakDetectorType",
+        std::string("Moisture"));
+    if (!inventoryInterface->initialize())
+    {
+        std::cerr << "Error initializing leakage inventory interface for " <<
+            name << "\n";
+        return;
+    }
+
+    // Add association of the inventory object to the chassis.  This is required
+    // for other applications such as bmcweb to determine which chassis this
+    // particular Leak Detector belongs to.
+    inventoryAssociation = objectServer.add_interface(inventoryObjPath,
+        association::interface);
+    std::vector<Association> inventoryAssociations;
+    inventoryAssociations.emplace_back("chassis", "contained_by",
+        sdbusplus::message::object_path(configurationPath).parent_path());
+    inventoryAssociation->register_property("Associations",
+        inventoryAssociations);
+    if (!inventoryAssociation->initialize())
+    {
+        std::cerr << "Error initializing association interface for " <<
+            name << "\n";
+        return;
+    }
+
+    sdbusplus::message::object_path stateObjPath(
+        "/xyz/openbmc_project/state/leakdetectors/");
+    stateObjPath /= name;
+
+    // Expose leak detector state interfaces and properties
+    stateInterface = objectServer.add_interface(stateObjPath,
+        "xyz.openbmc_project.State.LeakDetector");
+    stateInterface->register_property("DetectorState",
+        getLeakLevelStatusName(leakLevel));
+    if (!stateInterface->initialize())
+    {
+        std::cerr << "Error initializing leakage state interface for " <<
+            name << "\n";
+        return;
+    }
+
+    // Add association of the state object to the invetory object that describes
+    // the leak detector.  Other application such as bmcweb may use this to
+    // determine which leak detector the state is describing.
+    stateAssociation = objectServer.add_interface(stateObjPath,
+        association::interface);
+    std::vector<Association> stateAssociations;
+    stateAssociations.emplace_back("inventory", "leak_detecting",
+        inventoryObjPath);
+    stateAssociation->register_property("Associations",
+        stateAssociations);
+    if (!stateAssociation->initialize())
+    {
+        std::cerr << "Error initializing association interface for " <<
+            name << "\n";
+        return;
+    }
 }
 
 LeakDetectSensor::~LeakDetectSensor()
@@ -110,6 +176,10 @@ LeakDetectSensor::~LeakDetectSensor()
 
     objServer.remove_interface(sensorInterface);
     objServer.remove_interface(sensorAssociation);
+    objServer.remove_interface(inventoryInterface);
+    objServer.remove_interface(inventoryAssociation);
+    objServer.remove_interface(stateInterface);
+    objServer.remove_interface(stateAssociation);
 }
 
 std::string LeakDetectSensor::getSensorName()
@@ -228,6 +298,10 @@ void LeakDetectSensor::setLeakLevel(LeakLevel newLeakLevel)
     if (leakLevel != newLeakLevel)
     {
         leakLevel = newLeakLevel;
+
+        stateInterface->set_property("DetectorState",
+            getLeakLevelStatusName(leakLevel));
+
         logEvent(leakLevel);
     }
 }
@@ -260,7 +334,7 @@ std::string LeakDetectSensor::getLeakLevelStatusName(LeakLevel leaklevel)
     switch(leaklevel)
     {
         case LeakLevel::NORMAL:
-            return "Normal";
+            return "OK";
         break;
         case LeakLevel::LEAKAGE:
         default:

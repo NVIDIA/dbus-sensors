@@ -73,6 +73,10 @@ class LeakDetectSensor :
     bool internalValueSet;
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorAssociation;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryInterface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryAssociation;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> stateInterface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> stateAssociation;
     double detectorValue = std::numeric_limits<double>::quiet_NaN();
 
     void handleResponse(const boost::system::error_code& err, size_t bytesRead);
