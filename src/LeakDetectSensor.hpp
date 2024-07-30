@@ -1,12 +1,20 @@
-/**
- * Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * NVIDIA CORPORATION and its licensors retain all intellectual property
- * and proprietary rights in and to this software, related documentation
- * and any modifications thereto.  Any use, reproduction, disclosure or
- * distribution of this software and related documentation without an express
- * license agreement from NVIDIA CORPORATION is strictly prohibited.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
+
 #pragma once
 
 #include "DeviceMgmt.hpp"
@@ -23,6 +31,9 @@
 #include <string>
 #include <vector>
 
+// Enable leak detector voltage values to be exposed on Dbus interfaces
+static constexpr bool leakValueIntf = false;
+
 // TODO: Expand to include other leakage states, such as sensor faults,
 //       small leak and large leaks
 enum class LeakLevel
@@ -32,25 +43,23 @@ enum class LeakLevel
 };
 
 class LeakDetectSensor :
-    public Sensor,
     public std::enable_shared_from_this<LeakDetectSensor>
 {
   public:
-    static constexpr const char* entityMgrConfigType = "LeakDetector";
+    static constexpr const char* entityMgrConfigType = "VoltageLeakDetector";
 
     LeakDetectSensor(const std::string& readPath,
                      sdbusplus::asio::object_server& objectServer,
-                     std::shared_ptr<sdbusplus::asio::connection>& conn,
                      boost::asio::io_context& io,
                      const std::string& sensorName,
-                     std::vector<thresholds::Threshold>&& thresholds,
                      const std::shared_ptr<I2CDevice>& i2cDevice,
                      const float pollRate,
-                     PowerState readState,
+                     const double leakThreshold,
                      const std::string& configurationPath);
-    ~LeakDetectSensor() override;
+    ~LeakDetectSensor();
+    std::string getSensorName();
     void setupRead();
-    void checkThresholds() override;
+
 
   private:
     std::array<char, 128> readBuf{};
@@ -58,11 +67,18 @@ class LeakDetectSensor :
     sdbusplus::asio::object_server& objServer;
     boost::asio::random_access_file inputDev;
     boost::asio::steady_timer waitTimer;
+    std::string name;
     std::string readPath;
     unsigned int sensorPollMs;
+    double leakThreshold;
     LeakLevel leakLevel;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> association;
+    double detectorValue = std::numeric_limits<double>::quiet_NaN();
+
     void handleResponse(const boost::system::error_code& err, size_t bytesRead);
     void restartRead();
+    void determineLeakLevel(double detectorValue);
     void setLeakLevel(LeakLevel leakLevel);
     void logEvent(LeakLevel leakLevel);
     static std::string getLeakLevelStatusName(LeakLevel leaklevel);

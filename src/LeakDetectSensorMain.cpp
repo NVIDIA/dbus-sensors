@@ -1,11 +1,18 @@
-/**
- * Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * NVIDIA CORPORATION and its licensors retain all intellectual property
- * and proprietary rights in and to this software, related documentation
- * and any modifications thereto.  Any use, reproduction, disclosure or
- * distribution of this software and related documentation without an express
- * license agreement from NVIDIA CORPORATION is strictly prohibited.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #include "LeakDetectSensor.hpp"
@@ -75,17 +82,20 @@ static std::string getReadPath(const SensorBaseConfigMap& cfg,
 
     std::string devicePath = params.devicePath();
 
-    std::string readPath = devicePath + "/iio:device0/" + sensorFile;
-    std::cout << "Got sensor readPath " << readPath << "\n";
-
-    // If the expected readPath does not exist, return empty string to indicate
-    // invalid read path
-    std::error_code ec;
-    if (!std::filesystem::exists(readPath, ec))
+    // Find the expected readPath by searching in the device path based on
+    // device info in params.  We expect to only find one valid path since
+    // the bus, address and channel are provided.
+    std::vector<std::filesystem::path> readPaths;
+    findFiles(std::filesystem::path(devicePath), sensorFile, readPaths);
+    if (readPaths.size() != 1)
     {
-        std::cerr << "Read Path " << readPath << " does not exist.\n";
+        std::cerr << "Unexpected number (" << readPaths.size()
+            << ") of readPaths found, can not determine correct read path.\n";
         return "";
     }
+
+    std::string readPath = readPaths.front();
+    std::cout << "Got sensor readPath " << readPath << "\n";
 
     return readPath;
 }
@@ -148,7 +158,6 @@ static std::shared_ptr<I2CDevice> getI2CDevice(
 
 static void handleSensorConfigurations(
     boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
-    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
     const std::shared_ptr<boost::container::flat_set<std::string>>&
         sensorsChanged,
     boost::container::flat_map<std::string, std::shared_ptr<LeakDetectSensor>>&
@@ -194,7 +203,7 @@ static void handleSensorConfigurations(
                     it != sensorsChanged->end(); it++)
             {
                 if (findSensor->second &&
-                    it->ends_with(findSensor->second->name))
+                    it->ends_with(findSensor->second->getSensorName()))
                 {
                     sensorsChanged->erase(it);
                     findSensor->second = nullptr;
@@ -210,6 +219,11 @@ static void handleSensorConfigurations(
 
         std::shared_ptr<I2CDeviceParams> params =
             getI2CParams(baseConfiguration->second);
+        if (params == nullptr)
+        {
+            // Malformed or missing I2C device info, cannot proceed
+            continue;
+        }
 
         // Create an I2C device based on the params parsed above, such as
         // bus and address.  This will also instantiate the device with
@@ -234,19 +248,28 @@ static void handleSensorConfigurations(
         float pollRate =
             getPollRate(baseConfiguration->second, pollRateDefault);
 
-        std::vector<thresholds::Threshold> sensorThresholds;
-        if (!parseThresholdsFromConfig(configData, sensorThresholds))
+        auto findLeakThreshold =
+            baseConfiguration->second.find("LeakThresholdVolts");
+        if (findLeakThreshold == baseConfiguration->second.end())
         {
-            std::cerr << "Error populating thresholds for " << sensorName
-                << "\n";
+            std::cerr << "Could not determine leak threshold for "
+                    << sensorName << "\n";
+            continue;
+        }
+        double leakThreshold =
+            std::visit(VariantToDoubleVisitor(), findLeakThreshold->second);
+        if (!std::isfinite(leakThreshold))
+        {
+            std::cerr << "Invalid leak threshold config for "
+                    << sensorName << "\n";
+            continue;
         }
 
         // Create a new sensor object based on configurations deteremined above
         auto& sensor = sensors[sensorName];
         sensor = std::make_shared<LeakDetectSensor>(
-            readPath, objectServer, dbusConnection, io, sensorName,
-            std::move(sensorThresholds), i2cDev, pollRate, PowerState::always,
-            *interfacePath);
+            readPath, objectServer, io, sensorName, i2cDev, pollRate,
+            leakThreshold, *interfacePath);
 
         sensor->setupRead();
     }
@@ -262,10 +285,10 @@ void createSensors(
         sensors)
 {
     auto getter = std::make_shared<GetSensorConfiguration>(dbusConnection,
-        [&io, &objectServer, &dbusConnection, &sensorsChanged, &sensors]
+        [&io, &objectServer, &sensorsChanged, &sensors]
         (const ManagedObjectType& sensorConfigurations){
-            handleSensorConfigurations(io, objectServer, dbusConnection,
-                sensorsChanged, sensors, sensorConfigurations);
+            handleSensorConfigurations(io, objectServer, sensorsChanged,
+                sensors, sensorConfigurations);
         });
 
     getter->getConfiguration(
@@ -283,7 +306,12 @@ int main()
     // Setup object Server
     sdbusplus::asio::object_server objectServer(systemBus, true);
     systemBus->request_name("xyz.openbmc_project.LeakDetectSensor");
-    objectServer.add_manager("/xyz/openbmc_project/sensors");
+
+    // Only add if we want voltage values to be exposed on Dbus interfaces
+    if (leakValueIntf)
+    {
+        objectServer.add_manager("/xyz/openbmc_project/sensors");
+    }
 
     // Creates flatmaps of all the LeakDetectSensors detected
     boost::container::flat_map<std::string, std::shared_ptr<LeakDetectSensor>>

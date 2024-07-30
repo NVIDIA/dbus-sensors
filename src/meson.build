@@ -291,7 +291,7 @@ if get_option('nvmeu2').allowed()
     executable(
         'nvmestatus',
         'NVMeStatus.cpp',
-	'NVMeMIStatus.cpp',
+'NVMeMIStatus.cpp',
         'NVMeStatusMain.cpp',
         dependencies: [
             default_deps,
@@ -393,6 +393,20 @@ if get_option('leak-detect').allowed()
             utils_dep,
             devicemgmt_dep
         ],
+        install: true,
+    )
+endif
+
+if get_option('discrete-leak-detect').allowed()
+    executable(
+        'discreteleakdetectsensor',
+        'DiscreteLeakDetectSensor.cpp',
+        'DiscreteLeakDetectSensorMain.cpp',
+        dependencies: [
+            default_deps,
+            utils_dep,            
+        ],
+        include_directories: '../include',        
         install: true,
     )
 endif
