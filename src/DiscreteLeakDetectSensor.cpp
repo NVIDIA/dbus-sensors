@@ -60,7 +60,10 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(sdbusplus::bus::bus& bus,
 
     try
     {
-        leakDetectIntf = std::make_unique<LeakDetectIntf>(bus, path.c_str());
+        leakDetectStateIntf =
+            std::make_unique<LeakDetectStateIntf>(bus, path.c_str());
+        leakDetectItemIntf =
+            std::make_unique<LeakDetectItemIntf>(bus, path.c_str());
     }
     catch (const std::exception& e)
     {
@@ -69,15 +72,17 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(sdbusplus::bus::bus& bus,
 
     if(sensorType == "FloatSwitch")
     {
-        leakDetectIntf->leakDetectorType(sdbusplus::xyz::openbmc_project::
-                                        State::server::LeakDetectorState::
-                                        LeakDetectorTypeEnum::FloatSwitch);
+        leakDetectItemIntf->leakDetectorType(sdbusplus::xyz::openbmc_project::
+                                             Inventory::Item::server::
+                                             LeakDetector::
+                                             LeakDetectorTypeEnum::FloatSwitch);
     }
     else
     {
-        leakDetectIntf->leakDetectorType(sdbusplus::xyz::openbmc_project::
-                                        State::server::LeakDetectorState::
-                                        LeakDetectorTypeEnum::Moisture);
+        leakDetectItemIntf->leakDetectorType(sdbusplus::xyz::openbmc_project::
+                                             Inventory::Item::server::
+                                             LeakDetector::
+                                             LeakDetectorTypeEnum::Moisture);
     }
 
     monitor();
@@ -105,15 +110,15 @@ int DiscreteLeakDetectSensor::getLeakInfo()
 
     if(leakVal == 1)
     {
-        leakDetectIntf->detectorState(sdbusplus::xyz::openbmc_project::
-                                        State::server::LeakDetectorState::
-                                        DetectorStateEnum::OK);
+        leakDetectStateIntf->detectorState(sdbusplus::xyz::openbmc_project::
+                                           State::server::LeakDetector::
+                                           DetectorStateEnum::OK);
     }
     else
     {
-        leakDetectIntf->detectorState(sdbusplus::xyz::openbmc_project::
-                                        State::server::LeakDetectorState::
-                                        DetectorStateEnum::Critical);
+        leakDetectStateIntf->detectorState(sdbusplus::xyz::openbmc_project::
+                                           State::server::LeakDetector::
+                                           DetectorStateEnum::Critical);
 
         createLeakageLogEntry(resourceErrorDetected,
                               name,

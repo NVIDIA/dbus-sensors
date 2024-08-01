@@ -19,10 +19,14 @@
 #include "Utils.hpp"
 #include <phosphor-logging/lg2.hpp>
 #include <xyz/openbmc_project/Logging/Entry/server.hpp>
-#include <xyz/openbmc_project/State/LeakDetectorState/server.hpp>
+#include <xyz/openbmc_project/State/LeakDetector/server.hpp>
+#include <xyz/openbmc_project/Inventory/Item/LeakDetector/server.hpp>
 
-using LeakDetectIntf = sdbusplus::server::object_t<
-    sdbusplus::xyz::openbmc_project::State::server::LeakDetectorState>;
+using LeakDetectStateIntf = sdbusplus::server::object_t<
+    sdbusplus::xyz::openbmc_project::State::server::LeakDetector>;
+
+using LeakDetectItemIntf = sdbusplus::server::object_t<
+    sdbusplus::xyz::openbmc_project::Inventory::Item::server::LeakDetector>;
 
 class DiscreteLeakDetectSensor :
     public std::enable_shared_from_this<DiscreteLeakDetectSensor>
@@ -63,5 +67,6 @@ class DiscreteLeakDetectSensor :
     sdbusplus::asio::object_server& objServer;
     boost::asio::steady_timer waitTimer;
     std::shared_ptr<sdbusplus::asio::connection> dbusConnection;
-    std::unique_ptr<LeakDetectIntf> leakDetectIntf = nullptr;
+    std::unique_ptr<LeakDetectStateIntf> leakDetectStateIntf = nullptr;
+    std::unique_ptr<LeakDetectItemIntf> leakDetectItemIntf = nullptr;
 };
