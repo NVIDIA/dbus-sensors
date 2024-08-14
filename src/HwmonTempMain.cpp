@@ -126,7 +126,7 @@ static struct SensorParams
         .platform = getPlatform(),
         .inventoryChassis = ""};
 
-    if (tmpSensorParameters.platform == "\"hgx\"")
+    if (tmpSensorParameters.platform == "\"hgx\"" || tmpSensorParameters.platform == "\"hgxb\"")
     {
         // HGX HMC Temperature Sensor's Inventory Chassis
         tmpSensorParameters.inventoryChassis =
