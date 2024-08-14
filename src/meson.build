@@ -133,6 +133,19 @@ if get_option('exit-air').allowed()
     )
 endif
 
+if get_option('synth').allowed()
+    executable(
+        'synthesizedsensor',
+        'SynthesizedSensor.cpp',
+        dependencies: [
+            default_deps,
+            thresholds_dep,
+            utils_dep,
+        ],
+        install: true,
+    )
+endif
+
 if get_option('fan').allowed()
     executable(
         'fansensor',

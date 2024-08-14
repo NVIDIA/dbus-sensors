@@ -168,6 +168,10 @@ inline T loadVariant(const SensorBaseConfigMap& data, const std::string& key)
     {
         return std::visit(VariantToStringVisitor(), it->second);
     }
+    else if constexpr (std::is_same_v<T, std::vector<std::string>>)
+    {
+        return std::visit(VariantToVecVisitor(), it->second);
+    }
     else
     {
         static_assert(!std::is_same_v<T, T>, "Type Not Implemented");
