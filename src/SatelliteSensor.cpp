@@ -59,12 +59,14 @@ SatelliteSensor::SatelliteSensor(
     const std::string& sensorConfiguration, const std::string& objType,
     sdbusplus::asio::object_server& objectServer,
     std::vector<thresholds::Threshold>&& thresholdData, uint8_t busId,
-    uint8_t addr, uint16_t offset, std::string& sensorType, size_t pollTime,
-    double minVal, double maxVal) :
+    uint8_t addr, uint16_t offset, std::string& sensorType, 
+    std::string& valueType, size_t pollTime, double minVal, 
+    double maxVal) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
            sensorConfiguration, objType, false, false, maxVal, minVal, conn),
-    busId(busId), addr(addr), offset(offset), sensorType(sensorType),
-    objectServer(objectServer), waitTimer(io), pollRate(pollTime)
+    name(escapeName(sensorName)), busId(busId), addr(addr), offset(offset), 
+    sensorType(sensorType), valueType(valueType), objectServer(objectServer), 
+    waitTimer(io), pollRate(pollTime)
 {
     // make the string to lowercase for Dbus sensor type
     for (auto& c : sensorType)
@@ -221,7 +223,7 @@ int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, int length)
     return 0;
 }
 
-int SatelliteSensor::readEepromData(size_t off, uint8_t length,
+int SatelliteSensor::readRawEepromData(size_t off, uint8_t length,
                                     double* data) const
 {
     uint64_t reading = 0;
@@ -256,7 +258,7 @@ int SatelliteSensor::readEepromData(size_t off, uint8_t length,
     return ret;
 }
 
-int SatelliteSensor::getPLDMSensorReading(size_t off, uint8_t length,
+int SatelliteSensor::readPLDMEepromData(size_t off, uint8_t length,
                                           double* data) const
 {
     double reading = 0;
@@ -294,14 +296,20 @@ void SatelliteSensor::read()
         }
 
         int ret = 0;
-        // there are newly added PLDM sensors if the offset > 255.
-        if (offset <= 255)
+        // Sensor reading value types are sensor-specific. So, read 
+        // and interpret sensor data based on it's value type.
+        if (valueType == "Raw")
         {
-            ret = readEepromData(offset, len, &temp);
+            ret = readRawEepromData(offset, len, &temp);
+        }
+        else if (valueType == "PLDM")
+        {
+            ret = readPLDMEepromData(offset, len, &temp);
         }
         else
         {
-            ret = getPLDMSensorReading(offset, len, &temp);
+            lg2::error("Invalid ValueType for sensor: {NAME}", "NAME", name);
+            return;
         }
 
         if (ret >= 0)
@@ -370,6 +378,9 @@ void createSensors(
                 std::string sensorType = loadVariant<std::string>(entry.second,
                                                                   "SensorType");
 
+                std::string valueType = loadVariant<std::string>(entry.second,
+                                                                  "ValueType");
+
                 size_t rate = loadVariant<uint8_t>(entry.second, "PollRate");
 
                 double minVal = loadVariant<double>(entry.second, "MinValue");
@@ -383,14 +394,16 @@ void createSensors(
                               "\tAddress:{ADDR}\n"
                               "\tOffset: {OFF}\n"
                               "\tType : {TYPE}\n"
+                              "\tValue Type : {VALUETYPE}\n"
                               "\tPollrate: {RATE}\n"
                               "\tMinValue: {MIN}\n"
                               "\tMaxValue: {MAX}\n",
                               "CONF", entry.first, "NAME", name, "BUS",
                               static_cast<int>(busId), "ADDR",
                               static_cast<int>(addr), "OFF",
-                              static_cast<int>(off), "TYPE", sensorType, "RATE",
-                              rate, "MIN", static_cast<double>(minVal), "MAX",
+                              static_cast<int>(off), "TYPE", sensorType, 
+                              "VALUETYPE", valueType, "RATE", rate, 
+                              "MIN", static_cast<double>(minVal), "MAX",
                               static_cast<double>(maxVal));
                 }
 
@@ -400,7 +413,7 @@ void createSensors(
                 sensor = std::make_unique<SatelliteSensor>(
                     dbusConnection, io, name, pathPair.first, objectType,
                     objectServer, std::move(sensorThresholds), busId, addr, off,
-                    sensorType, rate, minVal, maxVal);
+                    sensorType, valueType, rate, minVal, maxVal);
 
                 sensor->init();
             }

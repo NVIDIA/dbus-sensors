@@ -45,7 +45,8 @@ struct SatelliteSensor : public Sensor
                     sdbusplus::asio::object_server& objectServer,
                     std::vector<thresholds::Threshold>&& thresholdData,
                     uint8_t busId, uint8_t addr, uint16_t offset,
-                    std::string& sensorType, size_t pollTime, double minVal,
+                    std::string& sensorType, std::string& valueType, 
+                    size_t pollTime, double minVal,
                     double maxVal);
     ~SatelliteSensor() override;
 
@@ -57,14 +58,16 @@ struct SatelliteSensor : public Sensor
     void read();
     void init();
 
+    std::string name;
     uint8_t busId;
     uint8_t addr;
     uint16_t offset;
     std::string sensorType;
+    std::string valueType;
 
   private:
-    int readEepromData(size_t off, uint8_t length, double* data) const;
-    int getPLDMSensorReading(size_t off, uint8_t length, double* data) const;
+    int readRawEepromData(size_t off, uint8_t length, double* data) const;
+    int readPLDMEepromData(size_t off, uint8_t length, double* data) const;
     static uint8_t getLength(uint16_t offset)
     {
 #ifdef AUTO_GEN_SENSOR_HEADER
