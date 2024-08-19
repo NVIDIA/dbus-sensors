@@ -18,7 +18,24 @@
 #include "GPIOPresenceSensor.hpp"
 #include "Utils.hpp"
 
+#include <boost/asio/error.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <sdbusplus/asio/connection.hpp>
+#include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus.hpp>
+#include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/message.hpp>
+#include <sdbusplus/message/native_types.hpp>
+
+#include <chrono>
+#include <exception>
+#include <functional>
 #include <iostream>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 
 namespace gpio_presence_sensing
 {
@@ -39,6 +56,7 @@ Config getConfig(const SensorBaseConfigMap& properties)
     return {name, gpioLine, /*present*/ false};
 }
 
+// NOLINTBEGIN(cppcoreguidelines-rvalue-reference-param-not-moved)
 void setupInterfaceAdded(sdbusplus::asio::connection* conn,
                          OnInterfaceAddedCallback&& cb)
 {
@@ -102,7 +120,9 @@ void setupInterfaceAdded(sdbusplus::asio::connection* conn,
                 "xyz.openbmc_project.EntityManager"),
         handler);
 }
+// NOLINTEND(cppcoreguidelines-rvalue-reference-param-not-moved)
 
+// NOLINTBEGIN(cppcoreguidelines-rvalue-reference-param-not-moved)
 void setupInterfaceRemoved(sdbusplus::asio::connection* conn,
                            OnInterfaceRemovedCallback&& cb)
 {
@@ -124,6 +144,7 @@ void setupInterfaceRemoved(sdbusplus::asio::connection* conn,
                 "xyz.openbmc_project.EntityManager"),
         handler);
 }
+// NOLINTEND(cppcoreguidelines-rvalue-reference-param-not-moved)
 
 void addInventoryObject(
     const std::shared_ptr<gpio_presence_sensing::GPIOPresence>& controller,

@@ -17,7 +17,19 @@
 
 #include "GPIOPresenceSensor.hpp"
 
-#include <cerrno>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/posix/stream_descriptor.hpp>
+#include <gpiod.hpp>
+#include <sdbusplus/asio/object_server.hpp>
+
+#include <exception>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <ostream>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
 namespace gpio_presence_sensing
 {
