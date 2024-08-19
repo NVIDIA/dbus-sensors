@@ -410,3 +410,19 @@ if get_option('discrete-leak-detect').allowed()
         install: true,
     )
 endif
+
+if get_option('presence-detect').enabled()
+    executable(
+        'presence-detect',
+        'GPIOPresenceSensor.cpp',
+        'GPIOPresenceSensorMain.cpp',
+        dependencies: [
+            sdbusplus,
+            gpiodcxx,
+            uring,
+        ],
+        implicit_include_directories: false,
+        include_directories: '../include',
+        install: true
+    )
+endif

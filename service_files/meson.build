@@ -9,6 +9,7 @@ unit_files = [
     ['intel-cpu', 'xyz.openbmc_project.intelcpusensor.service'],
     ['exit-air', 'xyz.openbmc_project.exitairsensor.service'],
     ['fan', 'xyz.openbmc_project.fansensor.service'],
+    ['presence-detect', 'xyz.openbmc_project.presence-detect.service'],
     ['hwmon-temp', 'xyz.openbmc_project.hwmontempsensor.service'],
     ['plx-temp', 'xyz.openbmc_project.plxtempsensor.service'],
     ['ipmb', 'xyz.openbmc_project.ipmbsensor.service'],
