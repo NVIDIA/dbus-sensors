@@ -36,6 +36,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace gpio_presence_sensing
 {
@@ -63,12 +64,12 @@ Config getConfig(const SensorBaseConfigMap& properties)
     return {name, gpioLine, activeLow};
 }
 
-// NOLINTBEGIN(cppcoreguidelines-rvalue-reference-param-not-moved)
 void setupInterfaceAdded(sdbusplus::asio::connection* conn,
                          OnInterfaceAddedCallback&& cb)
 {
+    auto callback = std::move(cb);
     std::function<void(sdbusplus::message::message & msg)> handler =
-        [callback = cb](sdbusplus::message::message& msg) {
+        [callback](sdbusplus::message::message& msg) {
         sdbusplus::message::object_path objPath;
         SensorData ifcAndProperties;
         msg.read(objPath, ifcAndProperties);
@@ -91,7 +92,7 @@ void setupInterfaceAdded(sdbusplus::asio::connection* conn,
 
     // call the user callback for all the device that is already available
     conn->async_method_call(
-        [cb](const boost::system::error_code ec,
+        [callback](const boost::system::error_code ec,
              const ManagedObjectType& managedObjs) {
         if (ec)
         {
@@ -107,7 +108,7 @@ void setupInterfaceAdded(sdbusplus::asio::connection* conn,
                 try
                 {
                     config = getConfig(found->second);
-                    cb(obj.first.str, found->first, config);
+                    callback(obj.first.str, found->first, config);
                 }
                 catch (std::exception& e)
                 {
@@ -127,9 +128,7 @@ void setupInterfaceAdded(sdbusplus::asio::connection* conn,
                 "xyz.openbmc_project.EntityManager"),
         handler);
 }
-// NOLINTEND(cppcoreguidelines-rvalue-reference-param-not-moved)
 
-// NOLINTBEGIN(cppcoreguidelines-rvalue-reference-param-not-moved)
 void setupInterfaceRemoved(sdbusplus::asio::connection* conn,
                            OnInterfaceRemovedCallback&& cb)
 {
@@ -139,7 +138,7 @@ void setupInterfaceRemoved(sdbusplus::asio::connection* conn,
     }
     // Listen to the interface removed event.
     std::function<void(sdbusplus::message::message & msg)> handler =
-        [callback = cb](sdbusplus::message::message msg) {
+        [callback = std::move(cb)](sdbusplus::message::message msg) {
         sdbusplus::message::object_path objPath;
         msg.read(objPath);
         callback(objPath.str);
@@ -151,7 +150,6 @@ void setupInterfaceRemoved(sdbusplus::asio::connection* conn,
                 "xyz.openbmc_project.EntityManager"),
         handler);
 }
-// NOLINTEND(cppcoreguidelines-rvalue-reference-param-not-moved)
 
 void addInventoryObject(
     const std::shared_ptr<gpio_presence_sensing::GPIOPresence>& controller,
