@@ -53,7 +53,14 @@ Config getConfig(const SensorBaseConfigMap& properties)
     auto name = loadVariant<std::string>(properties, properties::propertyName);
     auto gpioLine = loadVariant<std::string>(properties,
                                              properties::propertyGpioLine);
-    return {name, gpioLine, /*present*/ false};
+    auto gpioPolarity = loadVariant<std::string>(properties,
+                                                 properties::propertyPolarity);
+    bool activeLow = false;
+    if (gpioPolarity == "active_low")
+    {
+        activeLow = true;
+    }
+    return {name, gpioLine, activeLow};
 }
 
 // NOLINTBEGIN(cppcoreguidelines-rvalue-reference-param-not-moved)
