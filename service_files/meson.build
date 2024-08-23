@@ -29,6 +29,7 @@ unit_files = [
     ['satellite', 'xyz.openbmc_project.satellitesensor.service'],
     ['leak-detect', 'xyz.openbmc_project.leakdetectsensor.service'],
     ['discrete-leak-detect', 'xyz.openbmc_project.discreteleakdetectsensor.service'],
+    ['write-protect', 'xyz.openbmc_project.writeprotectsensor.service'],
 ]
 
 fs = import('fs')

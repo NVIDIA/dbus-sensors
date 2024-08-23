@@ -1,0 +1,12 @@
+[Unit]
+Description=Write Protect Sensor
+Requires=xyz.openbmc_project.EntityManager.service
+After=xyz.openbmc_project.EntityManager.service
+
+[Service]
+Restart=always
+RestartSec=5
+ExecStart=/usr/bin/writeprotectsensor
+
+[Install]
+WantedBy=multi-user.target

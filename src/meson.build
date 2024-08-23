@@ -439,3 +439,19 @@ if get_option('presence-detect').enabled()
         install: true
     )
 endif
+
+if get_option('write-protect').enabled()
+    executable(
+        'writeprotectsensor',
+        'WriteProtectSensor.cpp',
+        'WriteProtectSensorMain.cpp',
+        dependencies: [
+            sdbusplus,
+            gpiodcxx,
+            uring,
+        ],
+        implicit_include_directories: false,
+        include_directories: '../include',
+        install: true
+    )
+endif
