@@ -158,6 +158,7 @@ static std::shared_ptr<I2CDevice> getI2CDevice(
 
 static void handleSensorConfigurations(
     boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
+    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
     const std::shared_ptr<boost::container::flat_set<std::string>>&
         sensorsChanged,
     boost::container::flat_map<std::string, std::shared_ptr<LeakDetectSensor>>&
@@ -265,11 +266,20 @@ static void handleSensorConfigurations(
             continue;
         }
 
+        auto findShutdown = baseConfiguration->second.find("ShutdownOnLeak");
+        if (findShutdown == baseConfiguration->second.end())
+        {
+            std::cerr << "Undefined shutdown behavior for "
+                    << *interfacePath << "\n";
+            continue;
+        }
+        bool shutdownOnLeak = std::get<bool>(findShutdown->second);
+
         // Create a new sensor object based on configurations deteremined above
         auto& sensor = sensors[sensorName];
         sensor = std::make_shared<LeakDetectSensor>(
-            readPath, objectServer, io, sensorName, i2cDev, pollRate,
-            leakThreshold, *interfacePath);
+            readPath, objectServer, io, dbusConnection, sensorName, i2cDev,
+            pollRate, leakThreshold, *interfacePath, shutdownOnLeak);
 
         sensor->setupRead();
     }
@@ -285,10 +295,10 @@ void createSensors(
         sensors)
 {
     auto getter = std::make_shared<GetSensorConfiguration>(dbusConnection,
-        [&io, &objectServer, &sensorsChanged, &sensors]
+        [&io, &objectServer, &dbusConnection, &sensorsChanged, &sensors]
         (const ManagedObjectType& sensorConfigurations){
-            handleSensorConfigurations(io, objectServer, sensorsChanged,
-                sensors, sensorConfigurations);
+            handleSensorConfigurations(io, objectServer, dbusConnection,
+                sensorsChanged, sensors, sensorConfigurations);
         });
 
     getter->getConfiguration(

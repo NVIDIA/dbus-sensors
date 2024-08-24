@@ -48,11 +48,13 @@ class LeakDetectSensor :
     LeakDetectSensor(const std::string& readPath,
                      sdbusplus::asio::object_server& objectServer,
                      boost::asio::io_context& io,
+                     std::shared_ptr<sdbusplus::asio::connection>& conn,
                      const std::string& sensorName,
                      const std::shared_ptr<I2CDevice>& i2cDevice,
                      const float pollRate,
                      const double leakThreshold,
-                     const std::string& configurationPath);
+                     const std::string& configurationPath,
+                     bool shutdownOnLeak);
     ~LeakDetectSensor();
     std::string getSensorName();
     void setupRead();
@@ -62,6 +64,7 @@ class LeakDetectSensor :
     std::array<char, 128> readBuf{};
     std::shared_ptr<I2CDevice> i2cDevice;
     sdbusplus::asio::object_server& objServer;
+    std::shared_ptr<sdbusplus::asio::connection> dbusConnection;
     boost::asio::random_access_file inputDev;
     boost::asio::steady_timer waitTimer;
     std::string name;
@@ -71,6 +74,7 @@ class LeakDetectSensor :
     LeakLevel leakLevel;
     bool sensorOverride;
     bool internalValueSet;
+    bool shutdownOnLeak;
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorAssociation;
     std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryInterface;
@@ -84,5 +88,6 @@ class LeakDetectSensor :
     void determineLeakLevel(double detectorValue);
     void setLeakLevel(LeakLevel leakLevel);
     void logEvent(LeakLevel leakLevel);
+    void executeShutdown();
     static std::string getLeakLevelStatusName(LeakLevel leaklevel);
 };

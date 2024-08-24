@@ -47,13 +47,16 @@ LeakDetectSensor::LeakDetectSensor(
                         const std::string& readPath,
                         sdbusplus::asio::object_server& objectServer,
                         boost::asio::io_context& io,
+                        std::shared_ptr<sdbusplus::asio::connection>& conn,
                         const std::string& sensorName,
                         const std::shared_ptr<I2CDevice>& i2cDevice,
                         const float pollRate,
                         const double leakThreshold,
-                        const std::string& configurationPath) :
+                        const std::string& configurationPath,
+                        bool shutdownOnLeak) :
     i2cDevice(i2cDevice),
     objServer(objectServer),
+    dbusConnection(conn),
     inputDev(io, readPath, boost::asio::random_access_file::read_only),
     waitTimer(io),
     name(sensorName),
@@ -62,7 +65,8 @@ LeakDetectSensor::LeakDetectSensor(
     leakThreshold(leakThreshold),
     leakLevel(LeakLevel::NORMAL),
     sensorOverride(false),
-    internalValueSet(false)
+    internalValueSet(false),
+    shutdownOnLeak(shutdownOnLeak)
 {
     sdbusplus::message::object_path sensorObjPath(
         "/xyz/openbmc_project/sensors/voltage/");
@@ -291,7 +295,6 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
 
 // Updates the sensor object's current leak level state, and take all
 // appropriate actions related to a state transition.
-// TODO: Shutdown logic may be added here based on the new leakage level
 void LeakDetectSensor::setLeakLevel(LeakLevel newLeakLevel)
 {
     // Only log event if the leak state has transitioned
@@ -303,6 +306,11 @@ void LeakDetectSensor::setLeakLevel(LeakLevel newLeakLevel)
             getLeakLevelStatusName(leakLevel));
 
         logEvent(leakLevel);
+        if (leakLevel == LeakLevel::LEAKAGE && shutdownOnLeak)
+        {
+            std::cerr << "Executing shutdown due to " << name << "\n";
+            executeShutdown();
+        }
     }
 }
 
@@ -327,6 +335,26 @@ void LeakDetectSensor::logEvent(LeakLevel leakLevel)
     addData["xyz.openbmc_project.Logging.Entry.Resolution"] = resolution;
 
     addEventLog(messageId, severity, addData);
+}
+
+void LeakDetectSensor::executeShutdown()
+{
+    std::variant<std::string> transitionHostOff =
+        "xyz.openbmc_project.State.Host.Transition.Off";
+
+    dbusConnection->async_method_call(
+        [](const boost::system::error_code& ec) {
+            if (ec)
+            {
+                std::cerr << "Failed to execute shutdown due to "
+                    << ec.message() << "\n";
+                return;
+            }
+        },
+        "xyz.openbmc_project.State.Host", "/xyz/openbmc_project/state/host0",
+        "org.freedesktop.DBus.Properties", "Set",
+        "xyz.openbmc_project.State.Host", "RequestedHostTransition",
+        transitionHostOff);
 }
 
 std::string LeakDetectSensor::getLeakLevelStatusName(LeakLevel leaklevel)
