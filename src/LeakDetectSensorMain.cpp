@@ -307,11 +307,8 @@ int main()
     sdbusplus::asio::object_server objectServer(systemBus, true);
     systemBus->request_name("xyz.openbmc_project.LeakDetectSensor");
 
-    // Only add if we want voltage values to be exposed on Dbus interfaces
-    if (leakValueIntf)
-    {
-        objectServer.add_manager("/xyz/openbmc_project/sensors");
-    }
+    // Adding object server managers
+    objectServer.add_manager("/xyz/openbmc_project/sensors");
 
     // Creates flatmaps of all the LeakDetectSensors detected
     boost::container::flat_map<std::string, std::shared_ptr<LeakDetectSensor>>

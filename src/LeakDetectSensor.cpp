@@ -60,29 +60,47 @@ LeakDetectSensor::LeakDetectSensor(
     readPath(readPath),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
     leakThreshold(leakThreshold),
-    leakLevel(LeakLevel::NORMAL)
+    leakLevel(LeakLevel::NORMAL),
+    sensorOverride(false),
+    internalValueSet(false)
 {
-    if constexpr (leakValueIntf)
+    sdbusplus::message::object_path sensorObjPath(
+        "/xyz/openbmc_project/sensors/voltage/");
+    sensorObjPath /= name;
+
+    sensorInterface = objectServer.add_interface(
+        sensorObjPath, "xyz.openbmc_project.Sensor.Value");
+
+    // Defines a custom SET property method to handle overrides. Any external
+    // calls to set the Value property will trigger the override mode. Real ADC
+    // values read by the daemon will be ignored once override mode is active.
+    sensorInterface->register_property("Value", detectorValue,
+        [this](const double& newValue, double& oldValue) {
+            if (!internalValueSet)
+            {
+                detectorValue = newValue;
+                sensorOverride = true;
+            }
+            else if (!sensorOverride)
+            {
+                detectorValue = newValue;
+            }
+
+            determineLeakLevel(detectorValue);
+            oldValue = detectorValue;
+            return true;
+    });
+    sensorInterface->register_property("Unit", sensor_paths::unitVolts);
+
+    if (!sensorInterface->initialize())
     {
-        sensorInterface = objectServer.add_interface(
-            "/xyz/openbmc_project/sensors/voltage/" + name,
-            "xyz.openbmc_project.Sensor.Value");
-
-        sensorInterface->register_property("Value", detectorValue);
-        sensorInterface->register_property("Unit", sensor_paths::unitVolts);
-
-        if (!sensorInterface->initialize())
-        {
-            std::cerr << "Error initializing sensor value interface for " <<
-                name << "\n";
-        }
-
-        association = objectServer.add_interface(
-            "/xyz/openbmc_project/sensors/voltage/" + name,
-            association::interface);
-
-        createAssociation(association, configurationPath);
+        std::cerr << "Error initializing sensor value interface for " <<
+            name << "\n";
     }
+
+    sensorAssociation = objectServer.add_interface(sensorObjPath,
+        association::interface);
+    createAssociation(sensorAssociation, configurationPath);
 }
 
 LeakDetectSensor::~LeakDetectSensor()
@@ -90,11 +108,8 @@ LeakDetectSensor::~LeakDetectSensor()
     inputDev.close();
     waitTimer.cancel();
 
-    if constexpr (leakValueIntf)
-    {
-        objServer.remove_interface(sensorInterface);
-        objServer.remove_interface(association);
-    }
+    objServer.remove_interface(sensorInterface);
+    objServer.remove_interface(sensorAssociation);
 }
 
 std::string LeakDetectSensor::getSensorName()
@@ -187,11 +202,13 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
 
             if (sensorInterface && (detectorValue != newValue))
             {
+                // Set the flag to indicate this set property was called
+                // internally.  If sensorOverride is active, this new value
+                // will be ignored.
+                internalValueSet = true;
                 sensorInterface->set_property("Value", newValue);
+                internalValueSet = false;
             }
-
-            detectorValue = newValue;
-            determineLeakLevel(newValue);
         }
     }
     else

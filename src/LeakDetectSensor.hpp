@@ -31,9 +31,6 @@
 #include <string>
 #include <vector>
 
-// Enable leak detector voltage values to be exposed on Dbus interfaces
-static constexpr bool leakValueIntf = false;
-
 // TODO: Expand to include other leakage states, such as sensor faults,
 //       small leak and large leaks
 enum class LeakLevel
@@ -72,8 +69,10 @@ class LeakDetectSensor :
     unsigned int sensorPollMs;
     double leakThreshold;
     LeakLevel leakLevel;
+    bool sensorOverride;
+    bool internalValueSet;
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> association;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> sensorAssociation;
     double detectorValue = std::numeric_limits<double>::quiet_NaN();
 
     void handleResponse(const boost::system::error_code& err, size_t bytesRead);
