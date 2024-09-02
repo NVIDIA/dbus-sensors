@@ -37,8 +37,9 @@
 // Enable debug logging
 static constexpr bool debug = false;
 
-// Scales to Volts
-static constexpr double sensorScaleFactor = 0.0005;
+// Scale factor calculated based on Vref of 3.3V for 12-bit ADCs:
+// 3.3V / 4096 = 0.000806
+static constexpr double sensorScaleFactor = 0.000806;
 
 // Round value to 3 decimal places
 static constexpr double roundFactor = 10000;

@@ -24,6 +24,7 @@
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -148,6 +149,36 @@ static std::shared_ptr<I2CDevice> getI2CDevice(
                     << " at address " << params.address << " on bus "
                     << params.bus << "\n";
         return nullptr;
+    }
+
+    // If the ADC supports multiple voltage references, update it here.  Not all
+    // ADCs will have this setting, so it will not fail out if no paths are
+    // found
+    std::string voltageRefFile = "voltage_reference";
+    std::vector<std::filesystem::path> voltageRefPaths;
+    findFiles(std::filesystem::path(devicePath),
+        R"(voltage_reference$)", voltageRefPaths);
+
+    // Attempt to set voltage reference only if path is found
+    if (!voltageRefPaths.empty())
+    {
+        std::string voltageRefPath = voltageRefPaths.front();
+        std::ofstream voltageRef(voltageRefPath);
+        if (!voltageRef.good())
+        {
+            std::cerr << "Failed to open " << voltageRefPath << "\n";
+            return nullptr;
+        }
+
+        voltageRef << "Vdd\n";
+        voltageRef.flush();
+        if (!voltageRef.good())
+        {
+            std::cerr << "Failed to write to " << voltageRefPath << "\n";
+            return nullptr;
+        }
+
+        std::cout << "Updating voltage reference at " << voltageRefPath << "\n";
     }
 
     // Add the new I2C device to the list of instantiated devices
