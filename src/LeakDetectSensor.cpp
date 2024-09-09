@@ -1,6 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION &
+ * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@
 #include <unistd.h>
 
 #include <boost/asio/read_until.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <phosphor-logging/lg2.hpp>
 
 #include <cmath>
 #include <filesystem>
@@ -45,28 +45,19 @@ static constexpr double sensorScaleFactor = 0.000806;
 static constexpr double roundFactor = 10000;
 
 LeakDetectSensor::LeakDetectSensor(
-                        const std::string& readPath,
-                        sdbusplus::asio::object_server& objectServer,
-                        boost::asio::io_context& io,
-                        std::shared_ptr<sdbusplus::asio::connection>& conn,
-                        const std::string& sensorName,
-                        const std::shared_ptr<I2CDevice>& i2cDevice,
-                        const float pollRate,
-                        const double leakThreshold,
-                        const std::string& configurationPath,
-                        bool shutdownOnLeak) :
+    const std::string& readPath, sdbusplus::asio::object_server& objectServer,
+    boost::asio::io_context& io,
+    std::shared_ptr<sdbusplus::asio::connection>& conn,
+    const std::string& sensorName, const std::shared_ptr<I2CDevice>& i2cDevice,
+    const float pollRate, const double leakThreshold,
+    const std::string& configurationPath, bool shutdownOnLeak) :
     i2cDevice(i2cDevice),
-    objServer(objectServer),
-    dbusConnection(conn),
+    objServer(objectServer), dbusConnection(conn),
     inputDev(io, readPath, boost::asio::random_access_file::read_only),
-    waitTimer(io),
-    name(sensorName),
-    readPath(readPath),
+    waitTimer(io), name(sensorName), readPath(readPath),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
-    leakThreshold(leakThreshold),
-    leakLevel(LeakLevel::NORMAL),
-    sensorOverride(false),
-    internalValueSet(false),
+    leakThreshold(leakThreshold), leakLevel(LeakLevel::NORMAL),
+    sensorOverride(false), internalValueSet(false),
     shutdownOnLeak(shutdownOnLeak)
 {
     sdbusplus::message::object_path sensorObjPath(
@@ -79,32 +70,33 @@ LeakDetectSensor::LeakDetectSensor(
     // Defines a custom SET property method to handle overrides. Any external
     // calls to set the Value property will trigger the override mode. Real ADC
     // values read by the daemon will be ignored once override mode is active.
-    sensorInterface->register_property("Value", detectorValue,
+    sensorInterface->register_property(
+        "Value", detectorValue,
         [this](const double& newValue, double& oldValue) {
-            if (!internalValueSet)
-            {
-                detectorValue = newValue;
-                sensorOverride = true;
-            }
-            else if (!sensorOverride)
-            {
-                detectorValue = newValue;
-            }
+        if (!internalValueSet)
+        {
+            detectorValue = newValue;
+            sensorOverride = true;
+        }
+        else if (!sensorOverride)
+        {
+            detectorValue = newValue;
+        }
 
-            determineLeakLevel(detectorValue);
-            oldValue = detectorValue;
-            return true;
+        determineLeakLevel(detectorValue);
+        oldValue = detectorValue;
+        return true;
     });
     sensorInterface->register_property("Unit", sensor_paths::unitVolts);
 
     if (!sensorInterface->initialize())
     {
-        std::cerr << "Error initializing sensor value interface for " <<
-            name << "\n";
+        std::cerr << "Error initializing sensor value interface for " << name
+                  << "\n";
     }
 
     sensorAssociation = objectServer.add_interface(sensorObjPath,
-        association::interface);
+                                                   association::interface);
     createAssociation(sensorAssociation, configurationPath);
 
     sdbusplus::message::object_path inventoryObjPath(
@@ -112,14 +104,14 @@ LeakDetectSensor::LeakDetectSensor(
     inventoryObjPath /= name;
 
     // Expose inventory related leak detector interfaces and properties
-    inventoryInterface = objectServer.add_interface(inventoryObjPath,
-        "xyz.openbmc_project.Inventory.Item.LeakDetector");
+    inventoryInterface = objectServer.add_interface(
+        inventoryObjPath, "xyz.openbmc_project.Inventory.Item.LeakDetector");
     inventoryInterface->register_property("LeakDetectorType",
-        std::string("Moisture"));
+                                          std::string("Moisture"));
     if (!inventoryInterface->initialize())
     {
-        std::cerr << "Error initializing leakage inventory interface for " <<
-            name << "\n";
+        std::cerr << "Error initializing leakage inventory interface for "
+                  << name << "\n";
         return;
     }
 
@@ -127,16 +119,17 @@ LeakDetectSensor::LeakDetectSensor(
     // for other applications such as bmcweb to determine which chassis this
     // particular Leak Detector belongs to.
     inventoryAssociation = objectServer.add_interface(inventoryObjPath,
-        association::interface);
+                                                      association::interface);
     std::vector<Association> inventoryAssociations;
-    inventoryAssociations.emplace_back("chassis", "contained_by",
+    inventoryAssociations.emplace_back(
+        "chassis", "contained_by",
         sdbusplus::message::object_path(configurationPath).parent_path());
     inventoryAssociation->register_property("Associations",
-        inventoryAssociations);
+                                            inventoryAssociations);
     if (!inventoryAssociation->initialize())
     {
-        std::cerr << "Error initializing association interface for " <<
-            name << "\n";
+        std::cerr << "Error initializing association interface for " << name
+                  << "\n";
         return;
     }
 
@@ -145,14 +138,14 @@ LeakDetectSensor::LeakDetectSensor(
     stateObjPath /= name;
 
     // Expose leak detector state interfaces and properties
-    stateInterface = objectServer.add_interface(stateObjPath,
-        "xyz.openbmc_project.State.LeakDetector");
+    stateInterface = objectServer.add_interface(
+        stateObjPath, "xyz.openbmc_project.State.LeakDetector");
     stateInterface->register_property("DetectorState",
-        getLeakLevelStatusName(leakLevel));
+                                      getLeakLevelStatusName(leakLevel));
     if (!stateInterface->initialize())
     {
-        std::cerr << "Error initializing leakage state interface for " <<
-            name << "\n";
+        std::cerr << "Error initializing leakage state interface for " << name
+                  << "\n";
         return;
     }
 
@@ -160,16 +153,15 @@ LeakDetectSensor::LeakDetectSensor(
     // the leak detector.  Other application such as bmcweb may use this to
     // determine which leak detector the state is describing.
     stateAssociation = objectServer.add_interface(stateObjPath,
-        association::interface);
+                                                  association::interface);
     std::vector<Association> stateAssociations;
     stateAssociations.emplace_back("inventory", "leak_detecting",
-        inventoryObjPath);
-    stateAssociation->register_property("Associations",
-        stateAssociations);
+                                   inventoryObjPath);
+    stateAssociation->register_property("Associations", stateAssociations);
     if (!stateAssociation->initialize())
     {
-        std::cerr << "Error initializing association interface for " <<
-            name << "\n";
+        std::cerr << "Error initializing association interface for " << name
+                  << "\n";
         return;
     }
 }
@@ -304,7 +296,7 @@ void LeakDetectSensor::setLeakLevel(LeakLevel newLeakLevel)
         leakLevel = newLeakLevel;
 
         stateInterface->set_property("DetectorState",
-            getLeakLevelStatusName(leakLevel));
+                                     getLeakLevelStatusName(leakLevel));
 
         logEvent(leakLevel);
         if (leakLevel == LeakLevel::LEAKAGE && shutdownOnLeak)
@@ -326,7 +318,7 @@ void LeakDetectSensor::logEvent(LeakLevel leakLevel)
 
     std::string messageId = "ResourceEvent.1.0.ResourceStatusChangedCritical";
     std::string resolution =
-            "Power down server immediately and inspect for water leakage.";
+        "Power down server immediately and inspect for water leakage.";
     std::string severity = "xyz.openbmc_project.Logging.Entry.Level.Error";
     std::string status = getLeakLevelStatusName(leakLevel);
 
@@ -345,13 +337,13 @@ void LeakDetectSensor::executeShutdown()
 
     dbusConnection->async_method_call(
         [](const boost::system::error_code& ec) {
-            if (ec)
-            {
-                std::cerr << "Failed to execute shutdown due to "
-                    << ec.message() << "\n";
-                return;
-            }
-        },
+        if (ec)
+        {
+            std::cerr << "Failed to execute shutdown due to " << ec.message()
+                      << "\n";
+            return;
+        }
+    },
         "xyz.openbmc_project.State.Host", "/xyz/openbmc_project/state/host0",
         "org.freedesktop.DBus.Properties", "Set",
         "xyz.openbmc_project.State.Host", "RequestedHostTransition",
@@ -360,14 +352,14 @@ void LeakDetectSensor::executeShutdown()
 
 std::string LeakDetectSensor::getLeakLevelStatusName(LeakLevel leaklevel)
 {
-    switch(leaklevel)
+    switch (leaklevel)
     {
         case LeakLevel::NORMAL:
             return "OK";
-        break;
+            break;
         case LeakLevel::LEAKAGE:
         default:
             return "Critical";
-        break;
+            break;
     }
 }

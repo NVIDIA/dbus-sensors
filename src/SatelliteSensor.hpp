@@ -1,6 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION &
+ * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,9 +45,8 @@ struct SatelliteSensor : public Sensor
                     sdbusplus::asio::object_server& objectServer,
                     std::vector<thresholds::Threshold>&& thresholdData,
                     uint8_t busId, uint8_t addr, uint16_t offset,
-                    std::string& sensorType, std::string& valueType, 
-                    size_t pollTime, double minVal,
-                    double maxVal);
+                    std::string& sensorType, std::string& valueType,
+                    size_t pollTime, double minVal, double maxVal);
     ~SatelliteSensor() override;
 
     void checkThresholds() override;

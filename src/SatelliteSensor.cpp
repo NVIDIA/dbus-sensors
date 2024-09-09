@@ -1,6 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION &
+ * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,13 +59,12 @@ SatelliteSensor::SatelliteSensor(
     const std::string& sensorConfiguration, const std::string& objType,
     sdbusplus::asio::object_server& objectServer,
     std::vector<thresholds::Threshold>&& thresholdData, uint8_t busId,
-    uint8_t addr, uint16_t offset, std::string& sensorType, 
-    std::string& valueType, size_t pollTime, double minVal, 
-    double maxVal) :
+    uint8_t addr, uint16_t offset, std::string& sensorType,
+    std::string& valueType, size_t pollTime, double minVal, double maxVal) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
            sensorConfiguration, objType, false, false, maxVal, minVal, conn),
-    name(escapeName(sensorName)), busId(busId), addr(addr), offset(offset), 
-    sensorType(sensorType), valueType(valueType), objectServer(objectServer), 
+    name(escapeName(sensorName)), busId(busId), addr(addr), offset(offset),
+    sensorType(sensorType), valueType(valueType), objectServer(objectServer),
     waitTimer(io), pollRate(pollTime)
 {
     // make the string to lowercase for Dbus sensor type
@@ -224,7 +223,7 @@ int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, int length)
 }
 
 int SatelliteSensor::readRawEepromData(size_t off, uint8_t length,
-                                    double* data) const
+                                       double* data) const
 {
     uint64_t reading = 0;
     int ret = i2cCmd<uint64_t>(busId, addr, off, &reading, length);
@@ -259,7 +258,7 @@ int SatelliteSensor::readRawEepromData(size_t off, uint8_t length,
 }
 
 int SatelliteSensor::readPLDMEepromData(size_t off, uint8_t length,
-                                          double* data) const
+                                        double* data) const
 {
     double reading = 0;
     int ret = i2cCmd<double>(busId, addr, off, &reading, length);
@@ -296,7 +295,7 @@ void SatelliteSensor::read()
         }
 
         int ret = 0;
-        // Sensor reading value types are sensor-specific. So, read 
+        // Sensor reading value types are sensor-specific. So, read
         // and interpret sensor data based on it's value type.
         if (valueType == "Raw")
         {
@@ -379,7 +378,7 @@ void createSensors(
                                                                   "SensorType");
 
                 std::string valueType = loadVariant<std::string>(entry.second,
-                                                                  "ValueType");
+                                                                 "ValueType");
 
                 size_t rate = loadVariant<uint8_t>(entry.second, "PollRate");
 
@@ -401,9 +400,9 @@ void createSensors(
                               "CONF", entry.first, "NAME", name, "BUS",
                               static_cast<int>(busId), "ADDR",
                               static_cast<int>(addr), "OFF",
-                              static_cast<int>(off), "TYPE", sensorType, 
-                              "VALUETYPE", valueType, "RATE", rate, 
-                              "MIN", static_cast<double>(minVal), "MAX",
+                              static_cast<int>(off), "TYPE", sensorType,
+                              "VALUETYPE", valueType, "RATE", rate, "MIN",
+                              static_cast<double>(minVal), "MAX",
                               static_cast<double>(maxVal));
                 }
 

@@ -93,7 +93,7 @@ void setupInterfaceAdded(sdbusplus::asio::connection* conn,
     // call the user callback for all the device that is already available
     conn->async_method_call(
         [callback](const boost::system::error_code ec,
-             const ManagedObjectType& managedObjs) {
+                   const ManagedObjectType& managedObjs) {
         if (ec)
         {
             return;

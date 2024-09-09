@@ -69,8 +69,9 @@ class PSUProperty
   public:
     PSUProperty(std::string name, double max, double min, unsigned int factor,
                 double offset) :
-        labelTypeName(std::move(name)), maxReading(max), minReading(min),
-        sensorScaleFactor(factor), sensorOffset(offset)
+        labelTypeName(std::move(name)),
+        maxReading(max), minReading(min), sensorScaleFactor(factor),
+        sensorOffset(offset)
     {}
     ~PSUProperty() = default;
 

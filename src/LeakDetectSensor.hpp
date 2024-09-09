@@ -1,6 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION &
+ * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@
 #include "Thresholds.hpp"
 #include "sensor.hpp"
 
-#include <gpiod.hpp>
 #include <boost/asio/random_access_file.hpp>
+#include <gpiod.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <memory>
@@ -39,8 +39,7 @@ enum class LeakLevel
     LEAKAGE
 };
 
-class LeakDetectSensor :
-    public std::enable_shared_from_this<LeakDetectSensor>
+class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
 {
   public:
     static constexpr const char* entityMgrConfigType = "VoltageLeakDetector";
@@ -51,14 +50,11 @@ class LeakDetectSensor :
                      std::shared_ptr<sdbusplus::asio::connection>& conn,
                      const std::string& sensorName,
                      const std::shared_ptr<I2CDevice>& i2cDevice,
-                     const float pollRate,
-                     const double leakThreshold,
-                     const std::string& configurationPath,
-                     bool shutdownOnLeak);
+                     const float pollRate, const double leakThreshold,
+                     const std::string& configurationPath, bool shutdownOnLeak);
     ~LeakDetectSensor();
     std::string getSensorName();
     void setupRead();
-
 
   private:
     std::array<char, 128> readBuf{};

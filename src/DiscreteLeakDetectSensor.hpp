@@ -1,6 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-FileCopyrightText: Copyright (c) 2022-2024 NVIDIA CORPORATION &
+ * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,11 @@
 #pragma once
 
 #include "Utils.hpp"
+
 #include <phosphor-logging/lg2.hpp>
+#include <xyz/openbmc_project/Inventory/Item/LeakDetector/server.hpp>
 #include <xyz/openbmc_project/Logging/Entry/server.hpp>
 #include <xyz/openbmc_project/State/LeakDetector/server.hpp>
-#include <xyz/openbmc_project/Inventory/Item/LeakDetector/server.hpp>
 
 using LeakDetectStateIntf = sdbusplus::server::object_t<
     sdbusplus::xyz::openbmc_project::State::server::LeakDetector>;
@@ -33,15 +34,14 @@ class DiscreteLeakDetectSensor :
 {
   public:
     DiscreteLeakDetectSensor(sdbusplus::bus::bus& bus,
-                sdbusplus::asio::object_server& objectServer,
-                std::shared_ptr<sdbusplus::asio::connection>& conn,
-                boost::asio::io_context& io,
-                const std::string& sensorType,
-                const std::string& sensorSysfsPath,
-                const std::string& sensorName,
-                const float pollRate,
-                const uint8_t busId, const uint8_t address,
-                const std::string& driver);
+                             sdbusplus::asio::object_server& objectServer,
+                             std::shared_ptr<sdbusplus::asio::connection>& conn,
+                             boost::asio::io_context& io,
+                             const std::string& sensorType,
+                             const std::string& sensorSysfsPath,
+                             const std::string& sensorName,
+                             const float pollRate, const uint8_t busId,
+                             const uint8_t address, const std::string& driver);
     ~DiscreteLeakDetectSensor();
 
     void monitor(void);
@@ -57,9 +57,9 @@ class DiscreteLeakDetectSensor :
   private:
     int getLeakInfo();
     static int readLeakValue(const std::string& filePath);
-    void createLeakageLogEntry(const std::string& messageID,
-        const std::string& arg0, const std::string& arg1,
-        const std::string& resolution,
+    void createLeakageLogEntry(
+        const std::string& messageID, const std::string& arg0,
+        const std::string& arg1, const std::string& resolution,
         const std::string& logNamespace = "DiscreteLeakDetectSensor");
     void setLeakageLabels();
 

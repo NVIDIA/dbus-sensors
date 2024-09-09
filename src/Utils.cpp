@@ -865,17 +865,13 @@ std::vector<std::unique_ptr<sdbusplus::bus::match_t>>
     return setupPropertiesChangedMatches(bus, {types}, handler);
 }
 
-void addEventLog(
-    const std::string& messageId,
-    const std::string& severity,
-    std::map<std::string, std::string>& addData)
+void addEventLog(const std::string& messageId, const std::string& severity,
+                 std::map<std::string, std::string>& addData)
 {
     auto bus = sdbusplus::bus::new_default();
     auto method = bus.new_method_call(
-        "xyz.openbmc_project.Logging",
-        "/xyz/openbmc_project/logging",
-        "xyz.openbmc_project.Logging.Create",
-        "Create");
+        "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
+        "xyz.openbmc_project.Logging.Create", "Create");
 
     method.append(messageId);
     method.append(severity);
