@@ -1,6 +1,6 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
- * SPDX-License-Identifier: Apache-2.0
+ * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
+ * All rights reserved. SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,37 +16,37 @@
  */
 
 #include "SynthesizedSensor.hpp"
+
+#include "SensorPaths.hpp"
 #include "Thresholds.hpp"
 #include "Utils.hpp"
 #include "VariantVisitors.hpp"
 #include "sensor.hpp"
-#include "SensorPaths.hpp"
 
-#include <boost/container/flat_map.hpp>
-#include <boost/asio/post.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/container/flat_map.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/bus.hpp>
+#include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
 
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <string>
 #include <utility>
 #include <variant>
 #include <vector>
-#include <string>
-
 
 constexpr const char* synthesizedsensorType = "SummationSensor";
 static constexpr bool debug = false;
@@ -98,13 +98,13 @@ SynthesizedSensor::SynthesizedSensor(
     sdbusplus::asio::object_server& objectServer,
     std::vector<thresholds::Threshold>&& thresholdData) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
-           sensorConfiguration, synthesizedsensorType, false, false, totalHscMaxReading,
-           totalHscMinReading, conn),
+           sensorConfiguration, synthesizedsensorType, false, false,
+           totalHscMaxReading, totalHscMinReading, conn),
     objServer(objectServer)
 {
-    sensorInterface = objectServer.add_interface(
-        "/xyz/openbmc_project/sensors/power/" + name,
-        "xyz.openbmc_project.Sensor.Value");
+    sensorInterface =
+        objectServer.add_interface("/xyz/openbmc_project/sensors/power/" + name,
+                                   "xyz.openbmc_project.Sensor.Value");
 
     for (const auto& threshold : thresholds)
     {
@@ -114,8 +114,7 @@ SynthesizedSensor::SynthesizedSensor(
                 "/xyz/openbmc_project/sensors/power/" + name, interface);
     }
     association = objectServer.add_interface(
-        "/xyz/openbmc_project/sensors/power/" + name,
-        association::interface);
+        "/xyz/openbmc_project/sensors/power/" + name, association::interface);
     setInitialProperties(sensor_paths::unitWatts);
 }
 
@@ -131,8 +130,7 @@ SynthesizedSensor::~SynthesizedSensor()
 
 void SynthesizedSensor::setupMatches()
 {
-    constexpr const auto matchTypes{
-        std::to_array<const char*>({"power"})};
+    constexpr const auto matchTypes{std::to_array<const char*>({"power"})};
 
     std::weak_ptr<SynthesizedSensor> weakRef = weak_from_this();
     for (const std::string type : matchTypes)
@@ -148,7 +146,8 @@ void SynthesizedSensor::setupMatches()
             if (type == "power")
             {
                 std::string path = message.get_path();
-                for (std::string &sensName : self->sensorOperands){
+                for (std::string& sensName : self->sensorOperands)
+                {
                     if (path.ends_with(sensName))
                     {
                         self->powerReadings[message.get_path()] = value;
@@ -179,19 +178,20 @@ void SynthesizedSensor::setupMatches()
                 continue;
             }
             std::string sensorName = path.substr(lastSlash + 1);
-            for (std::string &sensName : self->sensorOperands){
-                if (sensorName == sensName)     
+            for (std::string& sensName : self->sensorOperands)
+            {
+                if (sensorName == sensName)
                 {
-                    // lambda capture requires a proper variable (not a structured
-                    // binding)
+                    // lambda capture requires a proper variable (not a
+                    // structured binding)
                     const std::string& cbPath = path;
                     self->dbusConnection->async_method_call(
                         [weakRef, cbPath](boost::system::error_code ec,
-                                        const std::variant<double>& value) {
+                                          const std::variant<double>& value) {
                         if (ec)
                         {
                             std::cerr << "Error getting value from " << cbPath
-                                    << "\n";
+                                      << "\n";
                         }
                         auto self = weakRef.lock();
                         if (!self)
@@ -202,7 +202,8 @@ void SynthesizedSensor::setupMatches()
                                                     value);
                         if constexpr (debug)
                         {
-                            std::cerr << cbPath << "Reading " << reading << "\n";
+                            std::cerr << cbPath << "Reading " << reading
+                                      << "\n";
                         }
                         self->powerReadings[cbPath] = reading;
                     },
@@ -211,7 +212,8 @@ void SynthesizedSensor::setupMatches()
                 }
             }
         }
-    }, mapper::busName, mapper::path, mapper::interface, mapper::subtree,
+    },
+        mapper::busName, mapper::path, mapper::interface, mapper::subtree,
         "/xyz/openbmc_project/sensors/power", 0,
         std::array<const char*, 1>{sensorValueInterface});
 }
@@ -255,8 +257,6 @@ bool SynthesizedSensor::calculate(double& val)
         return false;
     }
 
-    
-
     val = totalPower;
     return true;
 }
@@ -279,16 +279,16 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
         dbusConnection, [&objectServer, &dbusConnection,
                          &summationSensor](const ManagedObjectType& resp) {
         synthSensors.clear();
-        
+
         for (const auto& [path, interfaces] : resp)
         {
             summationSensor = nullptr;
-        
+
             for (const auto& [intf, cfg] : interfaces)
             {
-                //Get Summation sensor related info
-                if (intf == configInterfaceName(synthesizedsensorType)){
-
+                // Get Summation sensor related info
+                if (intf == configInterfaceName(synthesizedsensorType))
+                {
                     // parseThresholdsFromConfig traverses all
                     // interfaces for this path, looking
                     // for thresholds.
@@ -300,20 +300,19 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
                         dbusConnection, name, path.str, objectServer,
                         std::move(sensorThresholds));
                     summationSensor->sensorOperands.clear();
-                    
-                    summationSensor->sensorOperands = loadVariant<std::vector<std::string>>(cfg, "SensorsToSum");
+
+                    summationSensor->sensorOperands =
+                        loadVariant<std::vector<std::string>>(cfg,
+                                                              "SensorsToSum");
                 }
-                
             }
-            if (summationSensor){
-                
+            if (summationSensor)
+            {
                 synthSensors.push_back(summationSensor);
 
                 summationSensor->setupMatches();
                 summationSensor->updateReading();
-                
             }
-
         }
     });
     getter->getConfiguration(

@@ -80,6 +80,7 @@ struct VariantToVecVisitor
         }
         throw std::invalid_argument(
             "Cannot translate type " +
-            boost::typeindex::type_id<T>().pretty_name() + " to vector<string>");
+            boost::typeindex::type_id<T>().pretty_name() +
+            " to vector<string>");
     }
 };
