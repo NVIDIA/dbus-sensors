@@ -142,7 +142,8 @@ static struct SensorParams
         .inventoryChassis = ""};
 
     if (tmpSensorParameters.platform == "\"hgx\"" ||
-        tmpSensorParameters.platform == "\"hgxb\"")
+        tmpSensorParameters.platform == "\"hgxb\"" ||
+        tmpSensorParameters.platform == "\"hoppercb\"")
     {
         // HGX HMC Temperature Sensor's Inventory Chassis
         tmpSensorParameters.inventoryChassis =
