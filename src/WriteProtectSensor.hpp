@@ -117,7 +117,7 @@ class WriteProtect : public std::enable_shared_from_this<WriteProtect>
     void createWriteProtectIf(const std::string& parentChassisId,
                               const boost::system::error_code& e);
 
-    void addLine(const std::string& lineLabel);
+    void addLine(const std::string& lineLabel, bool value);
 
     void setLine(const std::string& lineLabel, bool value);
 

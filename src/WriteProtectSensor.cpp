@@ -54,12 +54,12 @@ bool WriteProtect::objEmpty()
     return objIfaces.empty();
 }
 
-void WriteProtect::addLine(const std::string& lineLabel)
+void WriteProtect::addLine(const std::string& lineLabel, bool value)
 {
     if (gpioLines.find(lineLabel) == gpioLines.end())
     {
         ::gpiod::line line = ::gpiod::find_line(lineLabel);
-        line.request({service, ::gpiod::line_request::DIRECTION_OUTPUT, 0});
+        line.request({service, ::gpiod::line_request::DIRECTION_OUTPUT, value});
         gpioLines[lineLabel] = line;
     }
 }
@@ -68,17 +68,17 @@ void WriteProtect::setLine(const std::string& lineLabel, bool value)
 {
     if (gpioLines.find(lineLabel) == gpioLines.end())
     {
-        addLine(lineLabel);
+        addLine(lineLabel, value);
     }
-    gpioLines[lineLabel].set_config(::gpiod::line_request::DIRECTION_OUTPUT, 0);
-    gpioLines[lineLabel].set_value(static_cast<int>(value));
+    gpioLines[lineLabel].set_config(::gpiod::line_request::DIRECTION_OUTPUT,
+                                    value);
 }
 
 int WriteProtect::readLine(const std::string& lineLabel)
 {
     if (gpioLines.find(lineLabel) == gpioLines.end())
     {
-        addLine(lineLabel);
+        addLine(lineLabel, std::filesystem::exists(writeProtectFile));
     }
     gpioLines[lineLabel].set_config(::gpiod::line_request::DIRECTION_AS_IS, 0);
     return gpioLines[lineLabel].get_value();
