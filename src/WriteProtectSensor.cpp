@@ -74,11 +74,13 @@ void WriteProtect::setLine(const std::string& lineLabel, bool value)
                                     value);
 }
 
-int WriteProtect::readLine(const std::string& lineLabel)
+int WriteProtect::readLine(const std::string& lineLabel, bool activeLow)
 {
     if (gpioLines.find(lineLabel) == gpioLines.end())
     {
-        addLine(lineLabel, std::filesystem::exists(writeProtectFile));
+        bool globalWriteProtected = std::filesystem::exists(writeProtectFile);
+        addLine(lineLabel,
+                activeLow ? !globalWriteProtected : globalWriteProtected);
     }
     gpioLines[lineLabel].set_config(::gpiod::line_request::DIRECTION_AS_IS, 0);
     return gpioLines[lineLabel].get_value();
@@ -134,7 +136,7 @@ bool WriteProtect::readWriteProtect()
         int lineValue = 0;
         try
         {
-            lineValue = readLine(config.gpioLine);
+            lineValue = readLine(config.gpioLine, config.activeLow);
         }
         catch (std::exception& e)
         {
