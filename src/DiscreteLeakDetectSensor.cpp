@@ -34,51 +34,86 @@
 0 - leakage event (leakage detected)
 */
 
-const std::string messageError{
-    "The resource property Leakage Sensor has detected errors of type 'Leakage'."};
-const std::string resolution{
-    "Inspect for water leakage and consider power down switch tray."};
-const std::string resourceErrorDetected{
-    "ResourceEvent.1.0.ResourceErrorsDetected"};
+// Enable debug logging
+static constexpr bool debug = false;
 
 DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
-    sdbusplus::bus::bus& bus, sdbusplus::asio::object_server& objectServer,
+    sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     boost::asio::io_context& io, const std::string& sensorType,
     const std::string& sensorSysfsPath, const std::string& sensorName,
-    float pollRate, uint8_t busId, uint8_t address, const std::string& driver) :
+    const std::string& configurationPath, float pollRate, uint8_t busId,
+    uint8_t address, const std::string& driver) :
     sensorType(sensorType),
     sysfsPath(sensorSysfsPath), name(sensorName),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)), busId(busId),
     address(address), driver(driver), objServer(objectServer), waitTimer(io),
-    dbusConnection(conn)
+    dbusConnection(conn), leakLevel(LeakLevel::NORMAL)
 {
-    auto path = "/xyz/openbmc_project/sensors/leakage/" +
-                escapeName(sensorName);
+    sdbusplus::message::object_path inventoryObjPath(
+        "/xyz/openbmc_project/inventory/leakdetectors/");
+    inventoryObjPath /= name;
 
-    try
+    // Expose inventory related leak detector interfaces and properties
+    inventoryInterface = objectServer.add_interface(
+        inventoryObjPath, "xyz.openbmc_project.Inventory.Item.LeakDetector");
+    inventoryInterface->register_property("LeakDetectorType",
+                                          std::string("Moisture"));
+    if (!inventoryInterface->initialize())
     {
-        leakDetectStateIntf =
-            std::make_unique<LeakDetectStateIntf>(bus, path.c_str());
-        leakDetectItemIntf = std::make_unique<LeakDetectItemIntf>(bus,
-                                                                  path.c_str());
-    }
-    catch (const std::exception& e)
-    {
-        std::cerr << e.what() << std::endl;
+        std::cerr << "Error initializing leakage inventory interface for "
+                  << name << "\n";
+        return;
     }
 
-    if (sensorType == "FloatSwitch")
+    // Add association of the inventory object to the chassis.  This is required
+    // for other applications such as bmcweb to determine which chassis this
+    // particular Leak Detector belongs to.
+    inventoryAssociation = objectServer.add_interface(inventoryObjPath,
+                                                      association::interface);
+    std::vector<Association> inventoryAssociations;
+    inventoryAssociations.emplace_back(
+        "chassis", "contained_by",
+        sdbusplus::message::object_path(configurationPath).parent_path());
+    inventoryAssociation->register_property("Associations",
+                                            inventoryAssociations);
+    if (!inventoryAssociation->initialize())
     {
-        leakDetectItemIntf->leakDetectorType(
-            sdbusplus::xyz::openbmc_project::Inventory::Item::server::
-                LeakDetector::LeakDetectorTypeEnum::FloatSwitch);
+        std::cerr << "Error initializing association interface for " << name
+                  << "\n";
+        return;
     }
-    else
+
+    sdbusplus::message::object_path stateObjPath(
+        "/xyz/openbmc_project/state/leakdetectors/");
+    stateObjPath /= name;
+
+    // Expose leak detector state interfaces and properties
+    stateInterface = objectServer.add_interface(
+        stateObjPath, "xyz.openbmc_project.State.LeakDetector");
+    stateInterface->register_property("DetectorState",
+                                      getLeakLevelStatusName(leakLevel));
+    if (!stateInterface->initialize())
     {
-        leakDetectItemIntf->leakDetectorType(
-            sdbusplus::xyz::openbmc_project::Inventory::Item::server::
-                LeakDetector::LeakDetectorTypeEnum::Moisture);
+        std::cerr << "Error initializing leakage state interface for " << name
+                  << "\n";
+        return;
+    }
+
+    // Add association of the state object to the invetory object that describes
+    // the leak detector.  Other application such as bmcweb may use this to
+    // determine which leak detector the state is describing.
+    stateAssociation = objectServer.add_interface(stateObjPath,
+                                                  association::interface);
+    std::vector<Association> stateAssociations;
+    stateAssociations.emplace_back("inventory", "leak_detecting",
+                                   inventoryObjPath);
+    stateAssociation->register_property("Associations", stateAssociations);
+    if (!stateAssociation->initialize())
+    {
+        std::cerr << "Error initializing association interface for " << name
+                  << "\n";
+        return;
     }
 
     monitor();
@@ -87,7 +122,10 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
 DiscreteLeakDetectSensor::~DiscreteLeakDetectSensor()
 {
     waitTimer.cancel();
-    objServer.remove_interface(sensorInterface);
+    objServer.remove_interface(inventoryInterface);
+    objServer.remove_interface(inventoryAssociation);
+    objServer.remove_interface(stateInterface);
+    objServer.remove_interface(stateAssociation);
 }
 
 int DiscreteLeakDetectSensor::readLeakValue(const std::string& filePath)
@@ -108,21 +146,34 @@ int DiscreteLeakDetectSensor::getLeakInfo()
 
     if (leakVal == 1)
     {
-        leakDetectStateIntf->detectorState(
-            sdbusplus::xyz::openbmc_project::State::server::LeakDetector::
-                DetectorStateEnum::OK);
+        leakLevel = LeakLevel::NORMAL;
+        stateInterface->set_property("DetectorState",
+                                     getLeakLevelStatusName(leakLevel));
     }
     else
     {
-        leakDetectStateIntf->detectorState(
-            sdbusplus::xyz::openbmc_project::State::server::LeakDetector::
-                DetectorStateEnum::Critical);
-
-        createLeakageLogEntry(resourceErrorDetected, name, "Leakage Detected",
-                              resolution);
+        leakLevel = LeakLevel::LEAKAGE;
+        stateInterface->set_property("DetectorState",
+                                     getLeakLevelStatusName(leakLevel));
+        createLeakageLogEntry();
     }
 
     return 0;
+}
+
+std::string
+    DiscreteLeakDetectSensor::getLeakLevelStatusName(LeakLevel leaklevel)
+{
+    switch (leaklevel)
+    {
+        case LeakLevel::NORMAL:
+            return "OK";
+            break;
+        case LeakLevel::LEAKAGE:
+        default:
+            return "Critical";
+            break;
+    }
 }
 
 void DiscreteLeakDetectSensor::monitor()
@@ -153,54 +204,23 @@ void DiscreteLeakDetectSensor::monitor()
     });
 }
 
-inline void DiscreteLeakDetectSensor::createLeakageLogEntry(
-    const std::string& messageID, const std::string& arg0,
-    const std::string& arg1, const std::string& resolution,
-    const std::string& logNamespace)
+inline void DiscreteLeakDetectSensor::createLeakageLogEntry()
 {
-    using namespace sdbusplus::xyz::openbmc_project::Logging::server;
-    using Level =
-        sdbusplus::xyz::openbmc_project::Logging::server::Entry::Level;
-
-    std::map<std::string, std::string> addData;
-    addData["REDFISH_MESSAGE_ID"] = messageID;
-    Level level = Level::Critical;
-
-    if (messageID == resourceErrorDetected)
+    if constexpr (debug)
     {
-        addData["REDFISH_MESSAGE_ARGS"] = (arg0 + "," + arg1);
-        level = Level::Critical;
-    }
-    else
-    {
-        lg2::error("Message Registry messageID is not recognised", "MESSAGEID",
-                   messageID);
-        return;
+        std::cout << "Logging event for sensor: " << name << "\n";
     }
 
-    if (!resolution.empty())
-    {
-        addData["xyz.openbmc_project.Logging.Entry.Resolution"] = resolution;
-    }
+    std::string messageId = "ResourceEvent.1.0.ResourceStatusChangedCritical";
+    std::string resolution =
+        "Inspect for water leakage and consider power down switch tray.";
+    std::string severity = "xyz.openbmc_project.Logging.Entry.Level.Error";
+    std::string status = getLeakLevelStatusName(leakLevel);
 
-    if (!logNamespace.empty())
-    {
-        addData["namespace"] = logNamespace;
-    }
+    std::map<std::string, std::string> addData = {};
+    addData["REDFISH_MESSAGE_ID"] = messageId;
+    addData["REDFISH_MESSAGE_ARGS"] = name + "," + status;
+    addData["xyz.openbmc_project.Logging.Entry.Resolution"] = resolution;
 
-    auto severity =
-        sdbusplus::xyz::openbmc_project::Logging::server::convertForMessage(
-            level);
-    dbusConnection->async_method_call(
-        [](boost::system::error_code ec) {
-        if (ec)
-        {
-            lg2::error("error while logging message registry: ",
-                       "ERROR_MESSAGE", ec.message());
-            return;
-        }
-    },
-        "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
-        "xyz.openbmc_project.Logging.Create", "Create", messageID, severity,
-        addData);
+    addEventLog(messageId, severity, addData);
 }
