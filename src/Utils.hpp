@@ -417,5 +417,6 @@ bool getDeviceBusAddr(const std::string& deviceName, T& bus, T& addr)
     return true;
 }
 
-void addEventLog(const std::string& messageId, const std::string& severity,
+void addEventLog(const std::shared_ptr<sdbusplus::asio::connection>& conn,
+                 const std::string& messageId, const std::string& severity,
                  std::map<std::string, std::string>& addData);

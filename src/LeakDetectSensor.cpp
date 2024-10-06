@@ -332,7 +332,7 @@ void LeakDetectSensor::logEvent(LeakLevel leakLevel)
     addData["REDFISH_MESSAGE_ARGS"] = name + "," + status;
     addData["xyz.openbmc_project.Logging.Entry.Resolution"] = resolution;
 
-    addEventLog(messageId, severity, addData);
+    addEventLog(dbusConnection, messageId, severity, addData);
 }
 
 void LeakDetectSensor::startShutdown()
