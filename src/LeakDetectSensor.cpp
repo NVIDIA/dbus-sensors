@@ -332,8 +332,8 @@ void LeakDetectSensor::logEvent(LeakLevel leakLevel)
 
 void LeakDetectSensor::executeShutdown()
 {
-    std::variant<std::string> transitionHostOff =
-        "xyz.openbmc_project.State.Host.Transition.Off";
+    std::variant<std::string> transitionChassisOff =
+        "xyz.openbmc_project.State.Chassis.Transition.Off";
 
     dbusConnection->async_method_call(
         [](const boost::system::error_code& ec) {
@@ -344,10 +344,11 @@ void LeakDetectSensor::executeShutdown()
             return;
         }
     },
-        "xyz.openbmc_project.State.Host", "/xyz/openbmc_project/state/host0",
+        "xyz.openbmc_project.State.Chassis",
+        "/xyz/openbmc_project/state/chassis0",
         "org.freedesktop.DBus.Properties", "Set",
-        "xyz.openbmc_project.State.Host", "RequestedHostTransition",
-        transitionHostOff);
+        "xyz.openbmc_project.State.Chassis", "RequestedPowerTransition",
+        transitionChassisOff);
 }
 
 std::string LeakDetectSensor::getLeakLevelStatusName(LeakLevel leaklevel)
