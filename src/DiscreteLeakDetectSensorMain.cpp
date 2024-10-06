@@ -69,6 +69,8 @@ void createSensors(
         }
         for (const auto& [path, interfaces] : resp)
         {
+            const std::string* interfacePath = &path.str;
+
             for (const auto& [intf, cfg] : interfaces)
             {
                 if (intf != configInterfaceName(sensorType))
@@ -97,9 +99,7 @@ void createSensors(
                               << "\n";
                 }
 
-                sdbusplus::server::manager::manager objManager(bus, "/");
                 sysfsAttributesVec matchingPaths;
-
                 std::string basePath =
                     "/sys/bus/i2c/devices/i2c-" + std::to_string(busId) + "/" +
                     std::to_string(busId) + "-00" + std::to_string(address) +
@@ -119,8 +119,9 @@ void createSensors(
                                   << std::endl;
                         auto& sensor = sensors[file];
                         sensor = std::make_unique<DiscreteLeakDetectSensor>(
-                            bus, objectServer, dbusConnection, io, detectorType,
-                            dir, file, pollRate, busId, address, driver);
+                            objectServer, dbusConnection, io, detectorType, dir,
+                            file, *interfacePath, pollRate, busId, address,
+                            driver);
                     }
                 }
                 else
@@ -144,6 +145,8 @@ int main()
         leakSensors;
 
     objectServer.add_manager("/xyz/openbmc_project/sensors");
+    objectServer.add_manager("/xyz/openbmc_project/state");
+    objectServer.add_manager("/xyz/openbmc_project/inventory");
     systemBus->request_name("xyz.openbmc_project.DiscreteLeakDetectSensor");
 
     auto bus = sdbusplus::bus::new_default();

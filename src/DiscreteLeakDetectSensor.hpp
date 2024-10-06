@@ -23,23 +23,23 @@
 #include <xyz/openbmc_project/Logging/Entry/server.hpp>
 #include <xyz/openbmc_project/State/LeakDetector/server.hpp>
 
-using LeakDetectStateIntf = sdbusplus::server::object_t<
-    sdbusplus::xyz::openbmc_project::State::server::LeakDetector>;
-
-using LeakDetectItemIntf = sdbusplus::server::object_t<
-    sdbusplus::xyz::openbmc_project::Inventory::Item::server::LeakDetector>;
+enum class LeakLevel
+{
+    NORMAL,
+    LEAKAGE
+};
 
 class DiscreteLeakDetectSensor :
     public std::enable_shared_from_this<DiscreteLeakDetectSensor>
 {
   public:
-    DiscreteLeakDetectSensor(sdbusplus::bus::bus& bus,
-                             sdbusplus::asio::object_server& objectServer,
+    DiscreteLeakDetectSensor(sdbusplus::asio::object_server& objectServer,
                              std::shared_ptr<sdbusplus::asio::connection>& conn,
                              boost::asio::io_context& io,
                              const std::string& sensorType,
                              const std::string& sensorSysfsPath,
                              const std::string& sensorName,
+                             const std::string& configurationPath,
                              const float pollRate, const uint8_t busId,
                              const uint8_t address, const std::string& driver);
     ~DiscreteLeakDetectSensor();
@@ -57,16 +57,16 @@ class DiscreteLeakDetectSensor :
   private:
     int getLeakInfo();
     static int readLeakValue(const std::string& filePath);
-    void createLeakageLogEntry(
-        const std::string& messageID, const std::string& arg0,
-        const std::string& arg1, const std::string& resolution,
-        const std::string& logNamespace = "DiscreteLeakDetectSensor");
-    void setLeakageLabels();
+    static std::string getLeakLevelStatusName(LeakLevel leaklevel);
+    void createLeakageLogEntry();
 
-    std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
     sdbusplus::asio::object_server& objServer;
     boost::asio::steady_timer waitTimer;
     std::shared_ptr<sdbusplus::asio::connection> dbusConnection;
-    std::unique_ptr<LeakDetectStateIntf> leakDetectStateIntf = nullptr;
-    std::unique_ptr<LeakDetectItemIntf> leakDetectItemIntf = nullptr;
+    LeakLevel leakLevel;
+
+    std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryInterface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryAssociation;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> stateInterface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> stateAssociation;
 };
