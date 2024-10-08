@@ -85,5 +85,6 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
     void setLeakLevel(LeakLevel leakLevel);
     void logEvent(LeakLevel leakLevel);
     void executeShutdown();
+    void blinkFaultLed();
     static std::string getLeakLevelStatusName(LeakLevel leaklevel);
 };

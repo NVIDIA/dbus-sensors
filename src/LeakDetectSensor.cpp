@@ -299,10 +299,14 @@ void LeakDetectSensor::setLeakLevel(LeakLevel newLeakLevel)
                                      getLeakLevelStatusName(leakLevel));
 
         logEvent(leakLevel);
-        if (leakLevel == LeakLevel::LEAKAGE && shutdownOnLeak)
+        if (leakLevel == LeakLevel::LEAKAGE)
         {
-            std::cerr << "Executing shutdown due to " << name << "\n";
-            executeShutdown();
+            blinkFaultLed();
+            if (shutdownOnLeak)
+            {
+                std::cout << "Executing shutdown due to " << name << "\n";
+                executeShutdown();
+            }
         }
     }
 }
@@ -349,6 +353,79 @@ void LeakDetectSensor::executeShutdown()
         "org.freedesktop.DBus.Properties", "Set",
         "xyz.openbmc_project.State.Chassis", "RequestedPowerTransition",
         transitionChassisOff);
+}
+
+// Function to the Fault LED through phosphor-led-sysfs interfaces. The
+// fault_led must be defined in the device tree.
+void LeakDetectSensor::blinkFaultLed()
+{
+    std::cout << "Blinking Fault LED due to leak detected by " << name << ".\n";
+
+    const char* ledService = "xyz.openbmc_project.LED.Controller.fault_led";
+    const char* ledPath = "/xyz/openbmc_project/led/physical/fault_led";
+    const char* ledInterface = "xyz.openbmc_project.Led.Physical";
+
+    // Set blink rate of 4Hz with period of 250ms and duty of 50%
+    std::variant<uint8_t> dutyOn = (uint8_t)50;
+    std::variant<uint16_t> period = (uint16_t)250;
+
+    std::variant<std::string> ledActionOff =
+        "xyz.openbmc_project.Led.Physical.Action.Off";
+    std::variant<std::string> ledActionBlink =
+        "xyz.openbmc_project.Led.Physical.Action.Blink";
+
+    // Set the LED to an Off state first before configuring the parameters
+    // for Blink, as phosphor-led-sysfs requires a State transition for
+    // new parameters to take effect.
+    dbusConnection->async_method_call(
+        [](const boost::system::error_code& ec) {
+        if (ec)
+        {
+            std::cerr << "Failed to set fault LED to Off due to "
+                      << ec.message() << "\n";
+            return;
+        }
+    },
+        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+        ledInterface, "State", ledActionOff);
+
+    // LED parameters such as Duty and Period must be set before enabling the
+    // blink action on the LED.
+    dbusConnection->async_method_call(
+        [](const boost::system::error_code& ec) {
+        if (ec)
+        {
+            std::cerr << "Failed to set fault LED Duty due to " << ec.message()
+                      << "\n";
+            return;
+        }
+    },
+        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+        ledInterface, "DutyOn", dutyOn);
+
+    dbusConnection->async_method_call(
+        [](const boost::system::error_code& ec) {
+        if (ec)
+        {
+            std::cerr << "Failed to set fault LED Period due to "
+                      << ec.message() << "\n";
+            return;
+        }
+    },
+        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+        ledInterface, "Period", period);
+
+    dbusConnection->async_method_call(
+        [](const boost::system::error_code& ec) {
+        if (ec)
+        {
+            std::cerr << "Failed to set fault LED to Blink due to "
+                      << ec.message() << "\n";
+            return;
+        }
+    },
+        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+        ledInterface, "State", ledActionBlink);
 }
 
 std::string LeakDetectSensor::getLeakLevelStatusName(LeakLevel leaklevel)
