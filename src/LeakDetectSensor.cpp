@@ -50,15 +50,16 @@ LeakDetectSensor::LeakDetectSensor(
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     const std::string& sensorName, const std::shared_ptr<I2CDevice>& i2cDevice,
     const float pollRate, const double leakThreshold,
-    const std::string& configurationPath, bool shutdownOnLeak) :
+    const std::string& configurationPath, bool shutdownOnLeak,
+    const unsigned int shutdownDelaySeconds) :
     i2cDevice(i2cDevice),
     objServer(objectServer), dbusConnection(conn),
     inputDev(io, readPath, boost::asio::random_access_file::read_only),
-    waitTimer(io), name(sensorName), readPath(readPath),
+    waitTimer(io), shutdownTimer(io), name(sensorName), readPath(readPath),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
     leakThreshold(leakThreshold), leakLevel(LeakLevel::NORMAL),
     sensorOverride(false), internalValueSet(false),
-    shutdownOnLeak(shutdownOnLeak)
+    shutdownOnLeak(shutdownOnLeak), shutdownDelaySeconds(shutdownDelaySeconds)
 {
     sdbusplus::message::object_path sensorObjPath(
         "/xyz/openbmc_project/sensors/voltage/");
@@ -170,6 +171,7 @@ LeakDetectSensor::~LeakDetectSensor()
 {
     inputDev.close();
     waitTimer.cancel();
+    shutdownTimer.cancel();
 
     objServer.remove_interface(sensorInterface);
     objServer.remove_interface(sensorAssociation);
@@ -304,8 +306,7 @@ void LeakDetectSensor::setLeakLevel(LeakLevel newLeakLevel)
             blinkFaultLed();
             if (shutdownOnLeak)
             {
-                std::cout << "Executing shutdown due to " << name << "\n";
-                executeShutdown();
+                startShutdown();
             }
         }
     }
@@ -334,8 +335,41 @@ void LeakDetectSensor::logEvent(LeakLevel leakLevel)
     addEventLog(messageId, severity, addData);
 }
 
+void LeakDetectSensor::startShutdown()
+{
+    if (shutdownDelaySeconds)
+    {
+        std::cout << "Setting timer for " << shutdownDelaySeconds
+                  << " second(s) delay before shutdown due to " << name
+                  << ".\n";
+
+        shutdownTimer.expires_after(std::chrono::seconds(shutdownDelaySeconds));
+        shutdownTimer.async_wait([&](const boost::system::error_code& ec) {
+            if (ec == boost::asio::error::operation_aborted)
+            {
+                return; // we're being canceled
+            }
+
+            if (ec)
+            {
+                std::cerr << "Shutdown Timer callback error: " << ec.message()
+                          << "\n";
+                return;
+            }
+
+            executeShutdown();
+        });
+    }
+    else
+    {
+        executeShutdown();
+    }
+}
+
 void LeakDetectSensor::executeShutdown()
 {
+    std::cout << "Chassis shutdown requested by " << name << ".\n";
+
     std::variant<std::string> transitionChassisOff =
         "xyz.openbmc_project.State.Chassis.Transition.Off";
 

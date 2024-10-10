@@ -328,17 +328,35 @@ static void handleSensorConfigurations(
         auto findShutdown = baseConfiguration->second.find("ShutdownOnLeak");
         if (findShutdown == baseConfiguration->second.end())
         {
+            // A default configuration for shutdown MUST be defined, as other
+            // applications such as bmcweb may depend on the availability of
+            // this config to update runtime behavior
             std::cerr << "Undefined shutdown behavior for " << *interfacePath
                       << "\n";
             continue;
         }
         bool shutdownOnLeak = std::get<bool>(findShutdown->second);
 
+        auto findShutdownDelay =
+            baseConfiguration->second.find("ShutdownDelaySeconds");
+        if (findShutdownDelay == baseConfiguration->second.end())
+        {
+            // A default configuration for delay MUST be defined, as other
+            // applications such as bmcweb may depend on the availability of
+            // this config to update runtime behavior
+            std::cerr << "Undefined shutdown delay behavior for "
+                      << *interfacePath << "\n";
+            continue;
+        }
+        unsigned int shutdownDelaySeconds = std::visit(
+            VariantToUnsignedIntVisitor(), findShutdownDelay->second);
+
         // Create a new sensor object based on configurations deteremined above
         auto& sensor = sensors[sensorName];
         sensor = std::make_shared<LeakDetectSensor>(
             readPath, objectServer, io, dbusConnection, sensorName, i2cDev,
-            pollRate, leakThreshold, *interfacePath, shutdownOnLeak);
+            pollRate, leakThreshold, *interfacePath, shutdownOnLeak,
+            shutdownDelaySeconds);
 
         sensor->setupRead();
     }
