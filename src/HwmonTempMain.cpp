@@ -127,7 +127,8 @@ std::string getPlatform()
 }
 
 static struct SensorParams
-    getSensorParameters(const std::filesystem::path& path)
+    getSensorParameters(const std::filesystem::path& path,
+                        const std::string& interfacePath)
 {
     // offset is to default to 0 and scale to 1, see lore
     // https://lore.kernel.org/linux-iio/5c79425f-6e88-36b6-cdfe-4080738d039f@metafoo.de/
@@ -141,21 +142,15 @@ static struct SensorParams
         .platform = getPlatform(),
         .inventoryChassis = ""};
 
-    if (tmpSensorParameters.platform == "\"hgx\"" ||
-        tmpSensorParameters.platform == "\"hgxb\"" ||
-        tmpSensorParameters.platform == "\"hoppercb\"" ||
-        tmpSensorParameters.platform == "\"gb200nvl-hmc\"")
-    {
-        // HGX HMC Temperature Sensor's Inventory Chassis
-        tmpSensorParameters.inventoryChassis =
-            "/xyz/openbmc_project/inventory/system/chassis/HGX_BMC_0";
-    }
+    // Set the chassis (used for nvshmem)
+    tmpSensorParameters.inventoryChassis =
+        sdbusplus::message::object_path(interfacePath).parent_path();
     // Check to log error only once during init, if inventoryChassis is empty.
     // inventoryChassis endpoint requried for shared memory update
     if (tmpSensorParameters.inventoryChassis.empty())
     {
         std::cerr
-            << "found empty chassis endpoint for HwmonTemp sensor on platform"
+            << "Failed to populate the chassis endpoint for a HwmonTemp Sensor on platform: "
             << tmpSensorParameters.platform << "\n";
     }
 
@@ -387,7 +382,6 @@ void createSensors(
                 continue;
             }
 
-            auto thisSensorParameters = getSensorParameters(path);
             auto findSensorCfg = configMap.find({bus, addr});
             if (findSensorCfg == configMap.end())
             {
@@ -395,6 +389,8 @@ void createSensors(
             }
 
             const std::string& interfacePath = findSensorCfg->second.sensorPath;
+            auto thisSensorParameters = getSensorParameters(path,
+                                                            interfacePath);
             auto findI2CDev = devices.find(interfacePath);
 
             std::shared_ptr<I2CDevice> i2cDev;
