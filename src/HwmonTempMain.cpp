@@ -143,7 +143,8 @@ static struct SensorParams
 
     if (tmpSensorParameters.platform == "\"hgx\"" ||
         tmpSensorParameters.platform == "\"hgxb\"" ||
-        tmpSensorParameters.platform == "\"hoppercb\"")
+        tmpSensorParameters.platform == "\"hoppercb\"" ||
+        tmpSensorParameters.platform == "\"gb200nvl-hmc\"")
     {
         // HGX HMC Temperature Sensor's Inventory Chassis
         tmpSensorParameters.inventoryChassis =
