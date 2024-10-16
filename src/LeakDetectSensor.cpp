@@ -49,18 +49,19 @@ LeakDetectSensor::LeakDetectSensor(
     boost::asio::io_context& io,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     const std::string& sensorName, const std::shared_ptr<I2CDevice>& i2cDevice,
-    const float pollRate, const double leakThreshold, const double sensorMax,
-    const double sensorMin, const std::string& configurationPath,
-    bool shutdownOnLeak, const unsigned int shutdownDelaySeconds) :
+    const float pollRate, const double configLeakThreshold,
+    const double sensorMax, const double sensorMin,
+    const std::string& configurationPath, bool shutdownOnLeak,
+    const unsigned int shutdownDelaySeconds) :
     i2cDevice(i2cDevice),
     objServer(objectServer), dbusConnection(conn),
     inputDev(io, readPath, boost::asio::random_access_file::read_only),
     waitTimer(io), shutdownTimer(io), name(sensorName), readPath(readPath),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
-    leakThreshold(leakThreshold), sensorMax(sensorMax), sensorMin(sensorMin),
-    detectorState(DetectorState::NORMAL), sensorOverride(false),
-    internalValueSet(false), shutdownOnLeak(shutdownOnLeak),
-    shutdownDelaySeconds(shutdownDelaySeconds)
+    leakThreshold(configLeakThreshold), sensorMax(sensorMax),
+    sensorMin(sensorMin), detectorState(DetectorState::NORMAL),
+    sensorOverride(false), internalValueSet(false),
+    shutdownOnLeak(shutdownOnLeak), shutdownDelaySeconds(shutdownDelaySeconds)
 {
     sdbusplus::message::object_path sensorObjPath(
         "/xyz/openbmc_project/sensors/voltage/");
@@ -95,6 +96,27 @@ LeakDetectSensor::LeakDetectSensor(
     {
         std::cerr << "Error initializing sensor value interface for " << name
                   << "\n";
+    }
+
+    thresholdInterface = objectServer.add_interface(
+        sensorObjPath, "xyz.openbmc_project.Sensor.Threshold.Critical");
+
+    // Defines a custom SET property method to handle threshold adjustments. In
+    // addition to updating the threshold tracked by this object, it will also
+    // be persisted so that it will survive resets.
+    thresholdInterface->register_property(
+        "CriticalLow", leakThreshold,
+        [this](const double& newValue, double& oldValue) {
+        leakThreshold = newValue;
+        persistThreshold(leakThreshold);
+        oldValue = leakThreshold;
+        return true;
+    });
+
+    if (!thresholdInterface->initialize())
+    {
+        std::cerr << "Error initializing sensor threshold interface for "
+                  << name << "\n";
     }
 
     sensorAssociation = objectServer.add_interface(sensorObjPath,
@@ -175,6 +197,7 @@ LeakDetectSensor::~LeakDetectSensor()
     shutdownTimer.cancel();
 
     objServer.remove_interface(sensorInterface);
+    objServer.remove_interface(thresholdInterface);
     objServer.remove_interface(sensorAssociation);
     objServer.remove_interface(inventoryInterface);
     objServer.remove_interface(inventoryAssociation);
@@ -462,6 +485,28 @@ void LeakDetectSensor::blinkFaultLed()
     },
         ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
         ledInterface, "State", ledActionBlink);
+}
+
+// Update the threshold value stored in the Entity Manager configurable so that
+// it may be persisted through reboots and power cycles. On next start, the
+// leak detect daemon will use the persisted config threshold value to as the
+// threshold.
+void LeakDetectSensor::persistThreshold(double newThreshold)
+{
+    std::variant<double> threshold(newThreshold);
+
+    dbusConnection->async_method_call(
+        [](const boost::system::error_code& ec) {
+        if (ec)
+        {
+            std::cerr << "Failed to set leak threshold due to " << ec.message()
+                      << "\n";
+            return;
+        }
+    },
+        entityManagerName, configurationPath, "org.freedesktop.DBus.Properties",
+        "Set", "xyz.openbmc_project.Configuration.VoltageLeakDetector",
+        "LeakThresholdVolts", threshold);
 }
 
 // Converts the current detector state into the corresponding Health Status
