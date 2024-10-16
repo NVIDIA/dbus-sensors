@@ -48,7 +48,7 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
                      std::shared_ptr<sdbusplus::asio::connection>& conn,
                      const std::string& sensorName,
                      const std::shared_ptr<I2CDevice>& i2cDevice,
-                     const float pollRate, const double leakThreshold,
+                     const float pollRate, const double configLeakThreshold,
                      const double sensorMax, const double sensorMin,
                      const std::string& configurationPath, bool shutdownOnLeak,
                      const unsigned int shutdownDelaySeconds);
@@ -73,9 +73,11 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
     DetectorState detectorState;
     bool sensorOverride;
     bool internalValueSet;
+    std::string configurationPath;
     bool shutdownOnLeak;
     unsigned int shutdownDelaySeconds;
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> thresholdInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorAssociation;
     std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryAssociation;
@@ -91,5 +93,6 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
     void startShutdown();
     void executeShutdown();
     void blinkFaultLed();
+    void persistThreshold(double newThreshold);
     static std::string getDetectorStatusString(DetectorState detectorState);
 };
