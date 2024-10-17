@@ -165,14 +165,26 @@ LeakDetectSensor::LeakDetectSensor(
     stateObjPath /= name;
 
     // Expose leak detector state interfaces and properties
-    stateInterface = objectServer.add_interface(
+    leakStateInterface = objectServer.add_interface(
         stateObjPath, "xyz.openbmc_project.State.LeakDetector");
-    stateInterface->register_property("DetectorState",
-                                      getDetectorStatusString(detectorState));
-    if (!stateInterface->initialize())
+    leakStateInterface->register_property(
+        "DetectorState", getDetectorStatusString(detectorState));
+    if (!leakStateInterface->initialize())
     {
-        std::cerr << "Error initializing leakage state interface for " << name
+        std::cerr << "Error initializing detector state interface for " << name
                   << "\n";
+        return;
+    }
+
+    // Expose detector operational state interface and properties
+    opStateInterface = objectServer.add_interface(
+        stateObjPath, "xyz.openbmc_project.State.Decorator.OperationalStatus");
+    opStateInterface->register_property("State",
+                                        getDetectorStateString(detectorState));
+    if (!opStateInterface->initialize())
+    {
+        std::cerr << "Error initializing operational state interface for "
+                  << name << "\n";
         return;
     }
 
@@ -204,7 +216,8 @@ LeakDetectSensor::~LeakDetectSensor()
     objServer.remove_interface(sensorAssociation);
     objServer.remove_interface(inventoryInterface);
     objServer.remove_interface(inventoryAssociation);
-    objServer.remove_interface(stateInterface);
+    objServer.remove_interface(leakStateInterface);
+    objServer.remove_interface(opStateInterface);
     objServer.remove_interface(stateAssociation);
 }
 
@@ -233,14 +246,31 @@ void LeakDetectSensor::setupRead()
 // Based on the detector value, determine the current detector state
 void LeakDetectSensor::determineDetectorState(double detectorValue)
 {
-    // Logic here may need to be expanded to include more leakage
-    // levels in the future.
-    if (detectorValue < leakThreshold)
+    switch (detectorState)
     {
-        // Once the sensor is in "leakage" state, it will not be able to revert
-        // back to a "normal" state, as we consider this to be a critical issue
-        // that should be not resolved on its own.
-        setDetectorState(DetectorState::LEAKAGE);
+        case DetectorState::NORMAL:
+            if ((detectorValue > sensorMax) || (detectorValue < sensorMin))
+            {
+                setDetectorState(DetectorState::FAULT);
+            }
+            else if (detectorValue < leakThreshold)
+            {
+                setDetectorState(DetectorState::LEAKAGE);
+            }
+            break;
+        case DetectorState::FAULT:
+            if ((detectorValue < sensorMax) && (detectorValue > sensorMin))
+            {
+                setDetectorState(DetectorState::NORMAL);
+            }
+            break;
+        // Once the detector is in "leakage" state, it will remain in this state
+        // as this is a critical fault that will require external intervention
+        // to resolve.
+        case DetectorState::LEAKAGE:
+            break;
+        default:
+            throw std::runtime_error("Invalid detector state.");
     }
 }
 
@@ -325,17 +355,30 @@ void LeakDetectSensor::setDetectorState(DetectorState newDetectorState)
         // Update the internally tracked state
         detectorState = newDetectorState;
 
-        stateInterface->set_property("DetectorState",
-                                     getDetectorStatusString(detectorState));
+        // Update the dbus properties for Health Status and Resource State
+        leakStateInterface->set_property(
+            "DetectorState", getDetectorStatusString(detectorState));
+        opStateInterface->set_property("State",
+                                       getDetectorStateString(detectorState));
 
-        if (detectorState == DetectorState::LEAKAGE)
+        // Take the appropriate actions for the new state
+        switch (detectorState)
         {
-            logCriticalEvent();
-            blinkFaultLed();
-            if (shutdownOnLeak)
-            {
-                startShutdown();
-            }
+            case DetectorState::LEAKAGE:
+                logCriticalEvent();
+                blinkFaultLed();
+                if (shutdownOnLeak)
+                {
+                    startShutdown();
+                }
+                break;
+            case DetectorState::FAULT:
+                logFaultEvent();
+                break;
+            case DetectorState::NORMAL:
+                break;
+            default:
+                throw std::runtime_error("Invalid detector state.");
         }
     }
 }
@@ -358,6 +401,27 @@ void LeakDetectSensor::logCriticalEvent()
     std::map<std::string, std::string> addData = {};
     addData["REDFISH_MESSAGE_ID"] = messageId;
     addData["REDFISH_MESSAGE_ARGS"] = name + "," + status;
+    addData["xyz.openbmc_project.Logging.Entry.Resolution"] = resolution;
+
+    addEventLog(dbusConnection, messageId, severity, addData);
+}
+
+// Log an event indicating a leak detector sensor fault.
+void LeakDetectSensor::logFaultEvent()
+{
+    if constexpr (debug)
+    {
+        std::cout << "Logging event for sensor: " << name << "\n";
+    }
+
+    std::string messageId = "ResourceEvent.1.0.ResourceStateChanged";
+    std::string resolution = "Service degraded leak detector.";
+    std::string severity = "xyz.openbmc_project.Logging.Entry.Level.Warning";
+    std::string state = "Degraded";
+
+    std::map<std::string, std::string> addData = {};
+    addData["REDFISH_MESSAGE_ID"] = messageId;
+    addData["REDFISH_MESSAGE_ARGS"] = name + "," + state;
     addData["xyz.openbmc_project.Logging.Entry.Resolution"] = resolution;
 
     addEventLog(dbusConnection, messageId, severity, addData);
@@ -523,7 +587,27 @@ std::string
             return "OK";
             break;
         case DetectorState::LEAKAGE:
+        case DetectorState::FAULT:
             return "Critical";
+            break;
+        default:
+            throw std::runtime_error("Invalid detector state.");
+    }
+}
+
+// Converts the current detector state into the corresponding resource State
+// string as defined in the schema
+std::string
+    LeakDetectSensor::getDetectorStateString(DetectorState detectorState)
+{
+    switch (detectorState)
+    {
+        case DetectorState::NORMAL:
+        case DetectorState::LEAKAGE:
+            return "Enabled";
+            break;
+        case DetectorState::FAULT:
+            return "Degraded";
             break;
         default:
             throw std::runtime_error("Invalid detector state.");
