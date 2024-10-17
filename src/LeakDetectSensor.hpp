@@ -34,7 +34,8 @@
 enum class DetectorState
 {
     NORMAL,
-    LEAKAGE
+    LEAKAGE,
+    FAULT
 };
 
 class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
@@ -81,7 +82,8 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorAssociation;
     std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryAssociation;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> stateInterface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> leakStateInterface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> opStateInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> stateAssociation;
     double detectorValue = std::numeric_limits<double>::quiet_NaN();
 
@@ -90,9 +92,11 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
     void determineDetectorState(double detectorValue);
     void setDetectorState(DetectorState detectorState);
     void logCriticalEvent();
+    void logFaultEvent();
     void startShutdown();
     void executeShutdown();
     void blinkFaultLed();
     void persistThreshold(double newThreshold);
     static std::string getDetectorStatusString(DetectorState detectorState);
+    static std::string getDetectorStateString(DetectorState detectorState);
 };
