@@ -31,9 +31,7 @@
 #include <string>
 #include <vector>
 
-// TODO: Expand to include other leakage states, such as sensor faults,
-//       small leak and large leaks
-enum class LeakLevel
+enum class DetectorState
 {
     NORMAL,
     LEAKAGE
@@ -72,7 +70,7 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
     double leakThreshold;
     double sensorMax;
     double sensorMin;
-    LeakLevel leakLevel;
+    DetectorState detectorState;
     bool sensorOverride;
     bool internalValueSet;
     bool shutdownOnLeak;
@@ -87,11 +85,11 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
 
     void handleResponse(const boost::system::error_code& err, size_t bytesRead);
     void restartRead();
-    void determineLeakLevel(double detectorValue);
-    void setLeakLevel(LeakLevel leakLevel);
-    void logEvent(LeakLevel leakLevel);
+    void determineDetectorState(double detectorValue);
+    void setDetectorState(DetectorState detectorState);
+    void logCriticalEvent();
     void startShutdown();
     void executeShutdown();
     void blinkFaultLed();
-    static std::string getLeakLevelStatusName(LeakLevel leaklevel);
+    static std::string getDetectorStatusString(DetectorState detectorState);
 };
