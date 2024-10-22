@@ -51,6 +51,7 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
                      const std::string& sensorName,
                      const std::shared_ptr<I2CDevice>& i2cDevice,
                      const float pollRate, const double leakThreshold,
+                     const double sensorMax, const double sensorMin,
                      const std::string& configurationPath, bool shutdownOnLeak,
                      const unsigned int shutdownDelaySeconds);
     ~LeakDetectSensor();
@@ -69,6 +70,8 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
     std::string readPath;
     unsigned int sensorPollMs;
     double leakThreshold;
+    double sensorMax;
+    double sensorMin;
     LeakLevel leakLevel;
     bool sensorOverride;
     bool internalValueSet;

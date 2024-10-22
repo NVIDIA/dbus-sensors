@@ -49,17 +49,18 @@ LeakDetectSensor::LeakDetectSensor(
     boost::asio::io_context& io,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     const std::string& sensorName, const std::shared_ptr<I2CDevice>& i2cDevice,
-    const float pollRate, const double leakThreshold,
-    const std::string& configurationPath, bool shutdownOnLeak,
-    const unsigned int shutdownDelaySeconds) :
+    const float pollRate, const double leakThreshold, const double sensorMax,
+    const double sensorMin, const std::string& configurationPath,
+    bool shutdownOnLeak, const unsigned int shutdownDelaySeconds) :
     i2cDevice(i2cDevice),
     objServer(objectServer), dbusConnection(conn),
     inputDev(io, readPath, boost::asio::random_access_file::read_only),
     waitTimer(io), shutdownTimer(io), name(sensorName), readPath(readPath),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
-    leakThreshold(leakThreshold), leakLevel(LeakLevel::NORMAL),
-    sensorOverride(false), internalValueSet(false),
-    shutdownOnLeak(shutdownOnLeak), shutdownDelaySeconds(shutdownDelaySeconds)
+    leakThreshold(leakThreshold), sensorMax(sensorMax), sensorMin(sensorMin),
+    leakLevel(LeakLevel::NORMAL), sensorOverride(false),
+    internalValueSet(false), shutdownOnLeak(shutdownOnLeak),
+    shutdownDelaySeconds(shutdownDelaySeconds)
 {
     sdbusplus::message::object_path sensorObjPath(
         "/xyz/openbmc_project/sensors/voltage/");
