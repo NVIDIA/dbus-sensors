@@ -58,7 +58,7 @@ LeakDetectSensor::LeakDetectSensor(
     waitTimer(io), shutdownTimer(io), name(sensorName), readPath(readPath),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
     leakThreshold(leakThreshold), sensorMax(sensorMax), sensorMin(sensorMin),
-    leakLevel(LeakLevel::NORMAL), sensorOverride(false),
+    detectorState(DetectorState::NORMAL), sensorOverride(false),
     internalValueSet(false), shutdownOnLeak(shutdownOnLeak),
     shutdownDelaySeconds(shutdownDelaySeconds)
 {
@@ -85,7 +85,7 @@ LeakDetectSensor::LeakDetectSensor(
             detectorValue = newValue;
         }
 
-        determineLeakLevel(detectorValue);
+        determineDetectorState(detectorValue);
         oldValue = detectorValue;
         return true;
     });
@@ -143,7 +143,7 @@ LeakDetectSensor::LeakDetectSensor(
     stateInterface = objectServer.add_interface(
         stateObjPath, "xyz.openbmc_project.State.LeakDetector");
     stateInterface->register_property("DetectorState",
-                                      getLeakLevelStatusName(leakLevel));
+                                      getDetectorStatusString(detectorState));
     if (!stateInterface->initialize())
     {
         std::cerr << "Error initializing leakage state interface for " << name
@@ -204,8 +204,8 @@ void LeakDetectSensor::setupRead()
     });
 }
 
-// Based on the detector value, determine the leak level
-void LeakDetectSensor::determineLeakLevel(double detectorValue)
+// Based on the detector value, determine the current detector state
+void LeakDetectSensor::determineDetectorState(double detectorValue)
 {
     // Logic here may need to be expanded to include more leakage
     // levels in the future.
@@ -214,7 +214,7 @@ void LeakDetectSensor::determineLeakLevel(double detectorValue)
         // Once the sensor is in "leakage" state, it will not be able to revert
         // back to a "normal" state, as we consider this to be a critical issue
         // that should be not resolved on its own.
-        setLeakLevel(LeakLevel::LEAKAGE);
+        setDetectorState(DetectorState::LEAKAGE);
     }
 }
 
@@ -289,21 +289,22 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
     restartRead();
 }
 
-// Updates the sensor object's current leak level state, and take all
-// appropriate actions related to a state transition.
-void LeakDetectSensor::setLeakLevel(LeakLevel newLeakLevel)
+// Updates the sensor object's current detector state and take all appropriate
+// actions related to a state transition.
+void LeakDetectSensor::setDetectorState(DetectorState newDetectorState)
 {
-    // Only log event if the leak state has transitioned
-    if (leakLevel != newLeakLevel)
+    // Only take action if the detector state has changed
+    if (detectorState != newDetectorState)
     {
-        leakLevel = newLeakLevel;
+        // Update the internally tracked state
+        detectorState = newDetectorState;
 
         stateInterface->set_property("DetectorState",
-                                     getLeakLevelStatusName(leakLevel));
+                                     getDetectorStatusString(detectorState));
 
-        logEvent(leakLevel);
-        if (leakLevel == LeakLevel::LEAKAGE)
+        if (detectorState == DetectorState::LEAKAGE)
         {
+            logCriticalEvent();
             blinkFaultLed();
             if (shutdownOnLeak)
             {
@@ -313,9 +314,9 @@ void LeakDetectSensor::setLeakLevel(LeakLevel newLeakLevel)
     }
 }
 
-// Log an event indicating a leak level state transition.  This is separate
-// from the logs that may be added when thresholds of the sensor is crossed.
-void LeakDetectSensor::logEvent(LeakLevel leakLevel)
+// Log an event indicating a leakage.  This is separate from the logs that may
+// be added when thresholds of the sensor is crossed.
+void LeakDetectSensor::logCriticalEvent()
 {
     if constexpr (debug)
     {
@@ -326,7 +327,7 @@ void LeakDetectSensor::logEvent(LeakLevel leakLevel)
     std::string resolution =
         "Power down server immediately and inspect for water leakage.";
     std::string severity = "xyz.openbmc_project.Logging.Entry.Level.Error";
-    std::string status = getLeakLevelStatusName(leakLevel);
+    std::string status = getDetectorStatusString(DetectorState::LEAKAGE);
 
     std::map<std::string, std::string> addData = {};
     addData["REDFISH_MESSAGE_ID"] = messageId;
@@ -463,16 +464,20 @@ void LeakDetectSensor::blinkFaultLed()
         ledInterface, "State", ledActionBlink);
 }
 
-std::string LeakDetectSensor::getLeakLevelStatusName(LeakLevel leaklevel)
+// Converts the current detector state into the corresponding Health Status
+// string as defined in the schema
+std::string
+    LeakDetectSensor::getDetectorStatusString(DetectorState detectorState)
 {
-    switch (leaklevel)
+    switch (detectorState)
     {
-        case LeakLevel::NORMAL:
+        case DetectorState::NORMAL:
             return "OK";
             break;
-        case LeakLevel::LEAKAGE:
-        default:
+        case DetectorState::LEAKAGE:
             return "Critical";
             break;
+        default:
+            throw std::runtime_error("Invalid detector state.");
     }
 }
