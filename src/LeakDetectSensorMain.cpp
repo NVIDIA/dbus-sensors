@@ -325,6 +325,38 @@ static void handleSensorConfigurations(
             continue;
         }
 
+        auto findSensorValidMax =
+            baseConfiguration->second.find("MaxValidVolts");
+        if (findSensorValidMax == baseConfiguration->second.end())
+        {
+            std::cerr << "Could not determine sensor max for " << sensorName
+                      << "\n";
+            continue;
+        }
+        double sensorMax = std::visit(VariantToDoubleVisitor(),
+                                      findSensorValidMax->second);
+        if (!std::isfinite(sensorMax))
+        {
+            std::cerr << "Invalid sensor max config for " << sensorName << "\n";
+            continue;
+        }
+
+        auto findSensorValidMin =
+            baseConfiguration->second.find("MinValidVolts");
+        if (findSensorValidMin == baseConfiguration->second.end())
+        {
+            std::cerr << "Could not determine sensor min for " << sensorName
+                      << "\n";
+            continue;
+        }
+        double sensorMin = std::visit(VariantToDoubleVisitor(),
+                                      findSensorValidMin->second);
+        if (!std::isfinite(sensorMin))
+        {
+            std::cerr << "Invalid sensor min config for " << sensorName << "\n";
+            continue;
+        }
+
         auto findShutdown = baseConfiguration->second.find("ShutdownOnLeak");
         if (findShutdown == baseConfiguration->second.end())
         {
@@ -355,8 +387,8 @@ static void handleSensorConfigurations(
         auto& sensor = sensors[sensorName];
         sensor = std::make_shared<LeakDetectSensor>(
             readPath, objectServer, io, dbusConnection, sensorName, i2cDev,
-            pollRate, leakThreshold, *interfacePath, shutdownOnLeak,
-            shutdownDelaySeconds);
+            pollRate, leakThreshold, sensorMax, sensorMin, *interfacePath,
+            shutdownOnLeak, shutdownDelaySeconds);
 
         sensor->setupRead();
     }
