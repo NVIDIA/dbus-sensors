@@ -298,11 +298,9 @@ static void handleSensorConfigurations(
                                                                  readPath);
         if (i2cDev == nullptr)
         {
+            // Allow sensor creation to continue so that dbus interfaces may be
+            // created to indicate invalid values and detector fault state.
             std::cerr << "No valid i2c device found for " << sensorName << "\n";
-            // TODO: Add handling here for cases where no leak detectors are
-            // found at the expected device address. Need to indicate device
-            // malfunction either through event or a system shutdown.
-            continue;
         }
 
         float pollRate = getPollRate(baseConfiguration->second,
@@ -390,7 +388,11 @@ static void handleSensorConfigurations(
             pollRate, leakThreshold, sensorMax, sensorMin, *interfacePath,
             shutdownOnLeak, shutdownDelaySeconds);
 
-        sensor->setupRead();
+        // Only start polling loop if device was successfully instantiated
+        if (i2cDev != nullptr)
+        {
+            sensor->setupRead();
+        }
     }
 }
 
