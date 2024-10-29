@@ -54,9 +54,8 @@ LeakDetectSensor::LeakDetectSensor(
     const std::string& configurationPath, bool shutdownOnLeak,
     const unsigned int shutdownDelaySeconds) :
     i2cDevice(i2cDevice),
-    objServer(objectServer), dbusConnection(conn),
-    inputDev(io, readPath, boost::asio::random_access_file::read_only),
-    waitTimer(io), shutdownTimer(io), name(sensorName), readPath(readPath),
+    objServer(objectServer), dbusConnection(conn), inputDev(io), waitTimer(io),
+    shutdownTimer(io), name(sensorName), readPath(readPath),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
     leakThreshold(configLeakThreshold), sensorMax(sensorMax),
     sensorMin(sensorMin), detectorState(DetectorState::NORMAL),
@@ -203,6 +202,19 @@ LeakDetectSensor::LeakDetectSensor(
                   << "\n";
         return;
     }
+
+    if (i2cDevice != nullptr)
+    {
+        // Only open file if the i2c device was successfully instantiated with a
+        // valid path
+        inputDev.open(readPath, boost::asio::random_access_file::read_only);
+    }
+    else
+    {
+        // If there is no valid i2c device, directly set the detector to fault
+        // state
+        setDetectorState(DetectorState::FAULT);
+    }
 }
 
 LeakDetectSensor::~LeakDetectSensor()
@@ -249,7 +261,11 @@ void LeakDetectSensor::determineDetectorState(double detectorValue)
     switch (detectorState)
     {
         case DetectorState::NORMAL:
-            if ((detectorValue > sensorMax) || (detectorValue < sensorMin))
+            if (std::isnan(detectorValue))
+            {
+                setDetectorState(DetectorState::FAULT);
+            }
+            else if ((detectorValue > sensorMax) || (detectorValue < sensorMin))
             {
                 setDetectorState(DetectorState::FAULT);
             }
@@ -307,6 +323,8 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
         return;
     }
 
+    double newValue = std::numeric_limits<double>::quiet_NaN();
+
     if (!err)
     {
         double rawValue = 0.0;
@@ -319,27 +337,27 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
         }
         else
         {
-            double newValue = rawValue * sensorScaleFactor;
+            newValue = rawValue * sensorScaleFactor;
             newValue = std::round(newValue * roundFactor) / roundFactor;
-            if constexpr (debug)
-            {
-                std::cout << name << " detector value: " << newValue << "\n";
-            }
-
-            if (sensorInterface && (detectorValue != newValue))
-            {
-                // Set the flag to indicate this set property was called
-                // internally.  If sensorOverride is active, this new value
-                // will be ignored.
-                internalValueSet = true;
-                sensorInterface->set_property("Value", newValue);
-                internalValueSet = false;
-            }
         }
     }
     else
     {
         std::cerr << "Error in response.\n";
+    }
+
+    if constexpr (debug)
+    {
+        std::cout << name << " detector value: " << newValue << "\n";
+    }
+
+    if (sensorInterface && (detectorValue != newValue))
+    {
+        // Set the flag to indicate this set property was called internally.
+        // If sensorOverride is active, this new value will be ignored.
+        internalValueSet = true;
+        sensorInterface->set_property("Value", newValue);
+        internalValueSet = false;
     }
 
     restartRead();
