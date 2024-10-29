@@ -92,6 +92,8 @@ LeakDetectSensor::LeakDetectSensor(
         return true;
     });
     sensorInterface->register_property("Unit", sensor_paths::unitVolts);
+    sensorInterface->register_property("MinValue", sensorMin);
+    sensorInterface->register_property("MaxValue", sensorMax);
 
     if (!sensorInterface->initialize())
     {
