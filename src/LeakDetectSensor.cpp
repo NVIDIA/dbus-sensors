@@ -61,7 +61,8 @@ LeakDetectSensor::LeakDetectSensor(
     leakThreshold(configLeakThreshold), sensorMax(sensorMax),
     sensorMin(sensorMin), detectorState(DetectorState::NORMAL),
     sensorOverride(false), internalValueSet(false),
-    shutdownOnLeak(shutdownOnLeak), shutdownDelaySeconds(shutdownDelaySeconds)
+    configurationPath(configurationPath), shutdownOnLeak(shutdownOnLeak),
+    shutdownDelaySeconds(shutdownDelaySeconds)
 {
     sdbusplus::message::object_path sensorObjPath(
         "/xyz/openbmc_project/sensors/voltage/");
