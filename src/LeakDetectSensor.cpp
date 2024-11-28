@@ -44,6 +44,9 @@ static constexpr double sensorScaleFactor = 0.000806;
 // Round value to 3 decimal places
 static constexpr double roundFactor = 10000;
 
+// Consecutive leak readings before concluding that there is a leak
+static constexpr unsigned int leakDetectedCountThres = 3;
+
 LeakDetectSensor::LeakDetectSensor(
     const std::string& readPath, sdbusplus::asio::object_server& objectServer,
     boost::asio::io_context& io,
@@ -61,7 +64,7 @@ LeakDetectSensor::LeakDetectSensor(
     sensorMin(sensorMin), detectorState(DetectorState::NORMAL),
     sensorOverride(false), internalValueSet(false),
     configurationPath(configurationPath), shutdownOnLeak(shutdownOnLeak),
-    shutdownDelaySeconds(shutdownDelaySeconds)
+    shutdownDelaySeconds(shutdownDelaySeconds), leakDetectedCount(0)
 {
     sdbusplus::message::object_path sensorObjPath(
         "/xyz/openbmc_project/sensors/voltage/");
@@ -273,7 +276,19 @@ void LeakDetectSensor::determineDetectorState(double detectorValue)
             }
             else if (detectorValue < leakThreshold)
             {
-                setDetectorState(DetectorState::LEAKAGE);
+                // Only set detector state to leakage if 3 or more consecutive
+                // leak detector readings show a leak.
+                if (++leakDetectedCount >= leakDetectedCountThres)
+                {
+                    setDetectorState(DetectorState::LEAKAGE);
+                }
+            }
+            else
+            {
+                // Reset the count the detector is showing readings within
+                // normal range. Possible sensor faults do not reset this count
+                // in case the fault is caused by a leak.
+                leakDetectedCount = 0;
             }
             break;
         case DetectorState::FAULT:

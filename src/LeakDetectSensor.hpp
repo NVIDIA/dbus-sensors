@@ -77,6 +77,7 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
     std::string configurationPath;
     bool shutdownOnLeak;
     unsigned int shutdownDelaySeconds;
+    unsigned int leakDetectedCount;
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> thresholdInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorAssociation;
