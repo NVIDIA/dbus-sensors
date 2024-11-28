@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-static constexpr float pollRateDefault = 0.25;
+static constexpr float pollRateDefault = 0.1;
 
 static const I2CDeviceTypeMap i2CDeviceTypes{
     {"MAX1363", I2CDeviceType{"max1363", false}},
