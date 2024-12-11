@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <system_error>
 #include <vector>
+#include <string>
 
 PHOSPHOR_LOG2_USING;
 
