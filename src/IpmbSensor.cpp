@@ -680,7 +680,6 @@ void createSensors(
                     std::move(sensorThresholds), deviceAddress, channelAddress,
                     hostSMbusIndex, pollRate, sensorTypeName, maxValue,
                     minValue);
-
                 sensor->parseConfigValues(cfg);
                 if (!(sensor->sensorClassType(sensorClass)))
                 {

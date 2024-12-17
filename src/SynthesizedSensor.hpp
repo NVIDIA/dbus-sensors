@@ -25,12 +25,14 @@
 #include <memory>
 #include <string>
 #include <vector>
-
+// use operandMap to store the sensor names and their mathematical signs (-1 or
+// 1)
+using operandMap = boost::container::flat_map<std::string, int>;
 struct SynthesizedSensor :
     public Sensor,
     std::enable_shared_from_this<SynthesizedSensor>
 {
-    std::vector<std::string> sensorOperands;
+    operandMap sensorOperands;
 
     SynthesizedSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                       const std::string& name,
@@ -49,7 +51,6 @@ struct SynthesizedSensor :
     std::vector<sdbusplus::bus::match_t> matches;
     double inletTemp = std::numeric_limits<double>::quiet_NaN();
     boost::container::flat_map<std::string, double> powerReadings;
-
     sdbusplus::asio::object_server& objServer;
     std::chrono::time_point<std::chrono::steady_clock> lastTime;
     static double getTotalCFM();

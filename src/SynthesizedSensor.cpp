@@ -131,7 +131,6 @@ SynthesizedSensor::~SynthesizedSensor()
 void SynthesizedSensor::setupMatches()
 {
     constexpr const auto matchTypes{std::to_array<const char*>({"power"})};
-
     std::weak_ptr<SynthesizedSensor> weakRef = weak_from_this();
     for (const std::string type : matchTypes)
     {
@@ -146,17 +145,20 @@ void SynthesizedSensor::setupMatches()
             if (type == "power")
             {
                 std::string path = message.get_path();
-                for (std::string& sensName : self->sensorOperands)
+                for (const auto& [sensName, mSign] : self->sensorOperands)
                 {
                     if (path.ends_with(sensName))
                     {
-                        self->powerReadings[message.get_path()] = value;
+                        // Change the sensor reading sign according to the
+                        // sensorOperands map
+                        self->powerReadings[message.get_path()] = value * mSign;
                     }
                 }
             }
             self->updateReading();
         });
     }
+
     dbusConnection->async_method_call(
         [weakRef](boost::system::error_code ec, const GetSubTreeType& subtree) {
         if (ec)
@@ -178,7 +180,7 @@ void SynthesizedSensor::setupMatches()
                 continue;
             }
             std::string sensorName = path.substr(lastSlash + 1);
-            for (std::string& sensName : self->sensorOperands)
+            for (const auto& [sensName, mSign] : self->sensorOperands)
             {
                 if (sensorName == sensName)
                 {
@@ -186,8 +188,9 @@ void SynthesizedSensor::setupMatches()
                     // structured binding)
                     const std::string& cbPath = path;
                     self->dbusConnection->async_method_call(
-                        [weakRef, cbPath](boost::system::error_code ec,
-                                          const std::variant<double>& value) {
+                        [weakRef, cbPath,
+                         mSign](boost::system::error_code ec,
+                                const std::variant<double>& value) {
                         if (ec)
                         {
                             std::cerr << "Error getting value from " << cbPath
@@ -205,7 +208,9 @@ void SynthesizedSensor::setupMatches()
                             std::cerr << cbPath << "Reading " << reading
                                       << "\n";
                         }
-                        self->powerReadings[cbPath] = reading;
+                        // Change the sensor reading sign according to the
+                        // sensorOperands map
+                        self->powerReadings[cbPath] = reading * mSign;
                     },
                         matches[0].first, cbPath, properties::interface,
                         properties::get, sensorValueInterface, "Value");
@@ -283,7 +288,6 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
         for (const auto& [path, interfaces] : resp)
         {
             summationSensor = nullptr;
-
             for (const auto& [intf, cfg] : interfaces)
             {
                 // Get Summation sensor related info
@@ -300,16 +304,36 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
                         dbusConnection, name, path.str, objectServer,
                         std::move(sensorThresholds));
                     summationSensor->sensorOperands.clear();
-
-                    summationSensor->sensorOperands =
+                    /*
+                    Retrieve the SensorsToSum vector from entity manager files.
+                    Create the sensorOperands map: assign 1 for "+" or -1 for
+                    "-". For other values, use the sensor name as the map key.
+                    */
+                    std::vector<std::string> sensorOperandstTmp =
                         loadVariant<std::vector<std::string>>(cfg,
                                                               "SensorsToSum");
+                    int mathSign = 1;
+                    for (std::string paramStr : sensorOperandstTmp)
+                    {
+                        if (paramStr == "-")
+                        {
+                            mathSign = -1;
+                        }
+                        else if (paramStr == "+")
+                        {
+                            mathSign = 1;
+                        }
+                        else if (paramStr != "-" && paramStr != "+")
+                        {
+                            summationSensor->sensorOperands.emplace(
+                                std::move(paramStr), std::move(mathSign));
+                        }
+                    }
                 }
             }
             if (summationSensor)
             {
                 synthSensors.push_back(summationSensor);
-
                 summationSensor->setupMatches();
                 summationSensor->updateReading();
             }
