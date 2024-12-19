@@ -55,7 +55,6 @@ static constexpr uint8_t ipmbBusIndexDefault = 0;
 static constexpr float pollRateDefault = 1; // in seconds
 
 static constexpr const char* sensorPathPrefix = "/xyz/openbmc_project/sensors/";
-
 IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                        boost::asio::io_context& io,
                        const std::string& sensorName,
@@ -664,6 +663,14 @@ void createSensors(
                         maxValue = 127;
                     }
                 }
+                /*read the "SensorParam" vector and check for minValue and
+                MaxValue If one of the values is not in the SensorParam use the
+                defalut values.
+                */
+                paramMap sensorParamMap;
+                parseSensorParamFromConfig(interfaces, sensorParamMap);
+                getSensorParamMapValues(maxValue, minValue, sensorParamMap);
+
                 /* Default sensor type is "temperature" */
                 std::string sensorTypeName = "temperature";
                 auto findType = cfg.find("SensorType");

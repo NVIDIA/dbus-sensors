@@ -46,6 +46,7 @@ using GetSubTreeType = std::vector<
 using Association = std::tuple<std::string, std::string, std::string>;
 using AssociationList =
     std::vector<std::tuple<std::string, std::string, std::string>>;
+using paramMap = boost::container::flat_map<std::string, double>;
 
 inline std::string escapeName(const std::string& sensorName)
 {
@@ -420,3 +421,23 @@ bool getDeviceBusAddr(const std::string& deviceName, T& bus, T& addr)
 void addEventLog(const std::shared_ptr<sdbusplus::asio::connection>& conn,
                  const std::string& messageId, const std::string& severity,
                  std::map<std::string, std::string>& addData);
+
+/*
+Update the sensorParamMap with the Sensor Param vector
+Input:
+boost::container::flat_map<std::string, SensorBaseConfigMap> sensorData: The
+sensor raw data from entity manger boost::container::flat_map<std::string,
+double>& sensorParamMap – The map to update
+*/
+
+void parseSensorParamFromConfig(const SensorData& sensorData,
+                                paramMap& sensorParamMap);
+/*
+
+Update the values of the sensor parameters according to the sensorParamMap.
+Currently, the function supports only minValue and maxValue. Inputs: maxValue:
+the reference to update the maximum value minValue: the reference to update the
+minimum value sensorParamMap: the sensor parameters data
+*/
+void getSensorParamMapValues(double& maxValue, double& minValue,
+                             paramMap& sensorParamMap);

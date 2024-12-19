@@ -73,7 +73,8 @@ class ADCSensor : public Sensor, public std::enable_shared_from_this<ADCSensor>
               std::vector<thresholds::Threshold>&& thresholds,
               double scaleFactor, float pollRate, PowerState readState,
               const std::string& sensorConfiguration,
-              std::optional<BridgeGpio>&& bridgeGpio);
+              std::optional<BridgeGpio>&& bridgeGpio, double maxValue,
+              double minValue);
     ~ADCSensor() override;
     void setupRead();
 

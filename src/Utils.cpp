@@ -881,3 +881,46 @@ void addEventLog(const std::shared_ptr<sdbusplus::asio::connection>& conn,
         "xyz.openbmc_project.Logging.Create", "Create", messageId, severity,
         addData);
 }
+void parseSensorParamFromConfig(const SensorData& sensorData,
+                                paramMap& sensorParamMap)
+{
+    for (const auto& [intf, cfg] : sensorData)
+    {
+        if (intf.find("SensorParams") == std::string::npos)
+        {
+            continue;
+        }
+        double maxValue = 0;
+        double minValue = 0;
+        auto maxValueFind = cfg.find("MaxValue");
+        auto minValueFind = cfg.find("MinValue");
+        if (maxValueFind != cfg.end())
+        {
+            maxValue = std::visit(VariantToDoubleVisitor(),
+                                  maxValueFind->second);
+            sensorParamMap.emplace("maxValue", maxValue);
+        }
+        if (minValueFind != cfg.end())
+        {
+            minValue = std::visit(VariantToDoubleVisitor(),
+                                  minValueFind->second);
+            sensorParamMap.emplace("minValue", minValue);
+        }
+    }
+}
+
+void getSensorParamMapValues(double& maxValue, double& minValue,
+                             paramMap& sensorParamMap)
+{
+    for (const auto& [param, value] : sensorParamMap)
+    {
+        if (param == "minValue")
+        {
+            minValue = value;
+        }
+        else if (param == "maxValue")
+        {
+            maxValue = value;
+        }
+    }
+}

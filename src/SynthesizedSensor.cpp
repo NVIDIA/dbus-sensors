@@ -50,7 +50,6 @@
 
 constexpr const char* synthesizedsensorType = "SummationSensor";
 static constexpr bool debug = false;
-
 constexpr const auto monitorTypes{
     std::to_array<const char*>({synthesizedsensorType})};
 
@@ -96,10 +95,11 @@ SynthesizedSensor::SynthesizedSensor(
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     const std::string& sensorName, const std::string& sensorConfiguration,
     sdbusplus::asio::object_server& objectServer,
-    std::vector<thresholds::Threshold>&& thresholdData) :
+    std::vector<thresholds::Threshold>&& thresholdData, const double maxValue,
+    const double minValue) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
-           sensorConfiguration, synthesizedsensorType, false, false,
-           totalHscMaxReading, totalHscMinReading, conn),
+           sensorConfiguration, synthesizedsensorType, false, false, maxValue,
+           minValue, conn),
     objServer(objectServer)
 {
     sensorInterface =
@@ -298,11 +298,19 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
                     // for thresholds.
                     std::vector<thresholds::Threshold> sensorThresholds;
                     parseThresholdsFromConfig(interfaces, sensorThresholds);
-
+                    paramMap sensorParamMap;
+                    parseSensorParamFromConfig(interfaces, sensorParamMap);
+                    /*read the "SensorParam" vector and check for minValue and
+                    MaxValue If one of the values is not in the SensorParam use
+                    the defalut values.
+                    */
+                    double maxValue = totalHscMaxReading;
+                    double minValue = totalHscMinReading;
+                    getSensorParamMapValues(maxValue, minValue, sensorParamMap);
                     std::string name = loadVariant<std::string>(cfg, "Name");
                     summationSensor = std::make_shared<SynthesizedSensor>(
                         dbusConnection, name, path.str, objectServer,
-                        std::move(sensorThresholds));
+                        std::move(sensorThresholds), maxValue, minValue);
                     summationSensor->sensorOperands.clear();
                     /*
                     Retrieve the SensorsToSum vector from entity manager files.
