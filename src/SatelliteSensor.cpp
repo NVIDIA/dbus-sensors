@@ -60,9 +60,11 @@ SatelliteSensor::SatelliteSensor(
     sdbusplus::asio::object_server& objectServer,
     std::vector<thresholds::Threshold>&& thresholdData, uint8_t busId,
     uint8_t addr, uint16_t offset, std::string& sensorType,
-    std::string& valueType, size_t pollTime, double minVal, double maxVal) :
+    std::string& valueType, size_t pollTime, double minVal, double maxVal,
+    const PowerState powerState) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
-           sensorConfiguration, objType, false, false, maxVal, minVal, conn),
+           sensorConfiguration, objType, false, false, maxVal, minVal, conn,
+           powerState),
     name(escapeName(sensorName)), busId(busId), addr(addr), offset(offset),
     sensorType(sensorType), valueType(valueType), objectServer(objectServer),
     waitTimer(io), pollRate(pollTime)
@@ -108,6 +110,12 @@ SatelliteSensor::SatelliteSensor(
     }
 }
 
+void SatelliteSensor::deactivate()
+{
+    markAvailable(false);
+    waitTimer.cancel();
+}
+
 SatelliteSensor::~SatelliteSensor()
 {
     waitTimer.cancel();
@@ -121,7 +129,8 @@ SatelliteSensor::~SatelliteSensor()
 
 void SatelliteSensor::init()
 {
-    read();
+    markAvailable(true);
+    restartRead();
 }
 
 void SatelliteSensor::checkThresholds()
@@ -269,8 +278,7 @@ int SatelliteSensor::readPLDMEepromData(size_t off, uint8_t length,
     }
     return ret;
 }
-
-void SatelliteSensor::read()
+void SatelliteSensor::restartRead()
 {
     size_t pollTime = getPollRate(); // in seconds
 
@@ -286,46 +294,59 @@ void SatelliteSensor::read()
             lg2::error("timer error");
             return;
         }
-        double temp = 0;
-        int len = getLength(offset);
-        if (len == 0)
-        {
-            lg2::error("no offset is specified");
-            return;
-        }
-
-        int ret = 0;
-        // Sensor reading value types are sensor-specific. So, read
-        // and interpret sensor data based on it's value type.
-        if (valueType == "Raw")
-        {
-            ret = readRawEepromData(offset, len, &temp);
-        }
-        else if (valueType == "PLDM")
-        {
-            ret = readPLDMEepromData(offset, len, &temp);
-        }
-        else
-        {
-            lg2::error("Invalid ValueType for sensor: {NAME}", "NAME", name);
-            return;
-        }
-
-        if (ret >= 0)
-        {
-            if constexpr (debug)
-            {
-                lg2::error("Value update to {TEMP}", "TEMP", temp);
-            }
-            updateValueOnly(temp);
-        }
-        else
-        {
-            lg2::error("Invalid read getRegsInfo");
-            incrementError();
-        }
         read();
     });
+}
+
+void SatelliteSensor::read()
+{
+    if (!readingStateGood())
+    {
+        markAvailable(false);
+        updateValueOnly(std::numeric_limits<double>::quiet_NaN());
+        restartRead();
+        return;
+    }
+
+    double temp = 0;
+    int len = getLength(offset);
+    if (len == 0)
+    {
+        lg2::error("no offset is specified");
+        return;
+    }
+
+    int ret = 0;
+    // Sensor reading value types are sensor-specific. So, read
+    // and interpret sensor data based on it's value type.
+    if (valueType == "Raw")
+    {
+        ret = readRawEepromData(offset, len, &temp);
+    }
+    else if (valueType == "PLDM")
+    {
+        ret = readPLDMEepromData(offset, len, &temp);
+    }
+    else
+    {
+        lg2::error("Invalid ValueType for sensor: {NAME}", "NAME", name);
+        return;
+    }
+
+    if (ret >= 0)
+    {
+        if constexpr (debug)
+        {
+            lg2::error("Value update to {TEMP}", "TEMP", temp);
+        }
+        updateValueOnly(temp);
+    }
+    else
+    {
+        lg2::error("Invalid read getRegsInfo");
+        incrementError();
+    }
+    restartRead();
 }
 
 void createSensors(
@@ -382,6 +403,12 @@ void createSensors(
 
                 size_t rate = loadVariant<uint8_t>(entry.second, "PollRate");
 
+                std::string powerSate = loadVariant<std::string>(entry.second,
+                                                                 "PowerState");
+
+                PowerState pwrState;
+                setReadState(powerSate, pwrState);
+
                 double minVal = loadVariant<double>(entry.second, "MinValue");
 
                 double maxVal = loadVariant<double>(entry.second, "MaxValue");
@@ -391,6 +418,7 @@ void createSensors(
                               "\tName: {NAME}\n"
                               "\tBus: {BUS}\n"
                               "\tAddress:{ADDR}\n"
+                              "\tPowerState:{PWRSTATE}\n"
                               "\tOffset: {OFF}\n"
                               "\tType : {TYPE}\n"
                               "\tValue Type : {VALUETYPE}\n"
@@ -399,8 +427,8 @@ void createSensors(
                               "\tMaxValue: {MAX}\n",
                               "CONF", entry.first, "NAME", name, "BUS",
                               static_cast<int>(busId), "ADDR",
-                              static_cast<int>(addr), "OFF",
-                              static_cast<int>(off), "TYPE", sensorType,
+                              static_cast<int>(addr), "PWRSTATE", powerSate,
+                              "OFF", static_cast<int>(off), "TYPE", sensorType,
                               "VALUETYPE", valueType, "RATE", rate, "MIN",
                               static_cast<double>(minVal), "MAX",
                               static_cast<double>(maxVal));
@@ -412,7 +440,7 @@ void createSensors(
                 sensor = std::make_unique<SatelliteSensor>(
                     dbusConnection, io, name, pathPair.first, objectType,
                     objectServer, std::move(sensorThresholds), busId, addr, off,
-                    sensorType, valueType, rate, minVal, maxVal);
+                    sensorType, valueType, rate, minVal, maxVal, pwrState);
 
                 sensor->init();
             }
@@ -420,6 +448,30 @@ void createSensors(
     },
         entityManagerName, "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
+}
+
+static void powerStateChanged(PowerState type, bool newState)
+{
+    if (type != PowerState::on)
+    {
+        return;
+    }
+    for (auto& [name, sensor] : sensors)
+    {
+        if (sensor != nullptr && sensor->readState == type)
+        {
+            if (newState)
+            {
+                // power on
+                sensor->init();
+            }
+            else
+            {
+                // power off
+                sensor->deactivate();
+            }
+        }
+    }
 }
 
 int main()
@@ -434,6 +486,11 @@ int main()
         io, [&]() { createSensors(io, objectServer, sensors, systemBus); });
 
     boost::asio::steady_timer configTimer(io);
+
+    auto powerCallBack = [](PowerState type, bool state) {
+        powerStateChanged(type, state);
+    };
+    setupPowerMatchCallback(systemBus, powerCallBack);
 
     std::function<void(sdbusplus::message::message&)> eventHandler =
         [&](sdbusplus::message::message&) {
