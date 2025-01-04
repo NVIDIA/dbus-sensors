@@ -96,6 +96,9 @@ bool readingStateGood(const PowerState& powerState);
 constexpr const char* configInterfacePrefix =
     "xyz.openbmc_project.Configuration.";
 
+void updateTelemetry(const std::string& objPath, const std::string& ifaceName,
+                     const double& value, const std::string& parentChassis);
+
 inline std::string configInterfaceName(const std::string& type)
 {
     return std::string(configInterfacePrefix) + type;

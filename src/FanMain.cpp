@@ -32,6 +32,7 @@
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
+#include <tal.hpp>
 
 #include <array>
 #include <chrono>
@@ -658,6 +659,13 @@ int main()
     matches.emplace_back(std::move(match));
 
     setupManufacturingModeMatch(*systemBus);
+
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "fansensor"))
+    {
+        std::cout
+            << "Successfully registered TAL namespaceInit for Fan Sensor\n";
+    }
     io.run();
     return 0;
 }

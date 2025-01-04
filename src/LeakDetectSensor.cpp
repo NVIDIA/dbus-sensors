@@ -358,8 +358,14 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
         internalValueSet = true;
         sensorInterface->set_property("Value", newValue);
         internalValueSet = false;
-    }
 
+        std::string objPath = sensorInterface->get_object_path();
+        std::string ifaceName = sensorInterface->get_interface_name();
+        std::string parentChassis =
+            sdbusplus::message::object_path(configurationPath).parent_path();
+
+        updateTelemetry(objPath, ifaceName, newValue, parentChassis);
+    }
     restartRead();
 }
 
