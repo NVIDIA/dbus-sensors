@@ -31,6 +31,7 @@
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
+#include <tal.hpp>
 
 #include <algorithm>
 #include <array>
@@ -319,5 +320,11 @@ int main()
     });
 
     setupManufacturingModeMatch(*systemBus);
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "nvmesensor"))
+    {
+        std::cout
+            << "Successfully registered TAL namespaceInit for NVMe Sensor\n";
+    }
     io.run();
 }

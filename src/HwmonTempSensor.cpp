@@ -20,7 +20,6 @@
 #include "Thresholds.hpp"
 #include "Utils.hpp"
 #include "sensor.hpp"
-#include "sharedMemUtils.hpp"
 
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/asio/buffer.hpp>
@@ -29,12 +28,10 @@
 #include <boost/asio/random_access_file.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <tal.hpp>
 
 #include <charconv>
 #include <chrono>
 #include <cstddef>
-#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -215,21 +212,6 @@ void HwmonTempSensor::handleResponse(const boost::system::error_code& err,
         else
         {
             updateValue((nvalue + offsetValue) * scaleValue);
-            // Update Shared Memory Space
-            std::string propertyName = "Value";
-            std::string objPath = sensorInterface->get_object_path();
-            std::string ifaceName = sensorInterface->get_interface_name();
-
-            DbusVariantType propValue = value;
-            uint16_t retCode = 0;
-            uint64_t timestamp =
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch())
-                    .count();
-            std::vector<uint8_t> rawPropValue = {};
-            tal::TelemetryAggregator::updateTelemetry(
-                objPath, ifaceName, propertyName, rawPropValue, timestamp,
-                retCode, propValue, inventoryChassis);
         }
     }
     else

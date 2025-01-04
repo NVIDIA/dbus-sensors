@@ -317,7 +317,7 @@ void SatelliteSensor::read()
             {
                 lg2::error("Value update to {TEMP}", "TEMP", temp);
             }
-            updateValue(temp);
+            updateValueOnly(temp);
         }
         else
         {

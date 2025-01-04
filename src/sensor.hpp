@@ -5,10 +5,13 @@
 #include "SensorPaths.hpp"
 #include "Thresholds.hpp"
 #include "Utils.hpp"
+#include "sharedMemUtils.hpp"
 
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/exception.hpp>
+#include <tal.hpp>
 
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
@@ -479,7 +482,7 @@ struct Sensor
         return errCount >= errorThreshold;
     }
 
-    void updateValue(const double& newValue)
+    void updateValueOnly(const double& newValue)
     {
         // Ignore if overriding is enabled
         if (overriddenState)
@@ -513,6 +516,18 @@ struct Sensor
             markFunctional(true);
             markAvailable(true);
         }
+    }
+
+    void updateValue(const double& newValue)
+    {
+        updateValueOnly(newValue);
+
+        std::string objPath = sensorInterface->get_object_path();
+        std::string ifaceName = sensorInterface->get_interface_name();
+        std::string parentChassis =
+            sdbusplus::message::object_path(configurationPath).parent_path();
+
+        updateTelemetry(objPath, ifaceName, newValue, parentChassis);
     }
 
     void updateProperty(

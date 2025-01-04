@@ -20,6 +20,7 @@
 
 #include "DeviceMgmt.hpp"
 #include "VariantVisitors.hpp"
+#include "sharedMemUtils.hpp"
 
 #include <boost/asio/error.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -31,11 +32,13 @@
 #include <sdbusplus/exception.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
+#include <tal.hpp>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -880,4 +883,23 @@ void addEventLog(const std::shared_ptr<sdbusplus::asio::connection>& conn,
         "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
         "xyz.openbmc_project.Logging.Create", "Create", messageId, severity,
         addData);
+}
+
+void updateTelemetry(const std::string& objPath, const std::string& ifaceName,
+                     const double& value, const std::string& parentChassis)
+{
+    // Update Shared Memory Space
+    std::string propertyName = "Value";
+
+    DbusVariantType propValue = value;
+    uint16_t retCode = 0;
+    uint64_t timestamp =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    std::vector<uint8_t> rawPropValue = {};
+
+    tal::TelemetryAggregator::updateTelemetry(objPath, ifaceName, propertyName,
+                                              rawPropValue, timestamp, retCode,
+                                              propValue, parentChassis);
 }

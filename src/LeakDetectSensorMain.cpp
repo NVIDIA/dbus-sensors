@@ -22,6 +22,7 @@
 #include <boost/container/flat_set.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <tal.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -489,5 +490,11 @@ int main()
 
     systemBus->request_name("xyz.openbmc_project.LeakDetector");
 
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "leakdetectsensor"))
+    {
+        std::cout
+            << "Successfully registered TAL namespaceInit for LeakDetect Sensor\n";
+    }
     io.run();
 }
