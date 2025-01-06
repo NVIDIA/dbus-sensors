@@ -98,7 +98,8 @@ constexpr const char* configInterfacePrefix =
 
 #ifdef NVIDIA_SHMEM
 void updateTelemetry(const std::string& objPath, const std::string& ifaceName,
-                     const double& value, const std::string& parentChassis);
+                     const char* propertyName, const double& value,
+                     const std::string& parentChassis);
 #endif
 
 inline std::string configInterfaceName(const std::string& type)

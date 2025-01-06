@@ -365,7 +365,7 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
         std::string parentChassis =
             sdbusplus::message::object_path(configurationPath).parent_path();
 
-        updateTelemetry(objPath, ifaceName, newValue, parentChassis);
+        updateTelemetry(objPath, ifaceName, "Value", newValue, parentChassis);
 #endif
     }
     restartRead();

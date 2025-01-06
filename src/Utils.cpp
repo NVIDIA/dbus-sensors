@@ -930,11 +930,10 @@ void getSensorParamMapValues(double& maxValue, double& minValue,
 
 #ifdef NVIDIA_SHMEM
 void updateTelemetry(const std::string& objPath, const std::string& ifaceName,
-                     const double& value, const std::string& parentChassis)
+                     const char* propertyName, const double& value,
+                     const std::string& parentChassis)
 {
     // Update Shared Memory Space
-    std::string propertyName = "Value";
-
     DbusVariantType propValue = value;
     uint16_t retCode = 0;
     uint64_t timestamp =
