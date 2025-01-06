@@ -527,7 +527,7 @@ struct Sensor
         std::string parentChassis =
             sdbusplus::message::object_path(configurationPath).parent_path();
 
-        updateTelemetry(objPath, ifaceName, newValue, parentChassis);
+        updateTelemetry(objPath, ifaceName, "Value", newValue, parentChassis);
     }
 
     void updateProperty(

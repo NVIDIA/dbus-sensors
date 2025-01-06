@@ -886,11 +886,10 @@ void addEventLog(const std::shared_ptr<sdbusplus::asio::connection>& conn,
 }
 
 void updateTelemetry(const std::string& objPath, const std::string& ifaceName,
-                     const double& value, const std::string& parentChassis)
+                     const char* propertyName, const double& value,
+                     const std::string& parentChassis)
 {
     // Update Shared Memory Space
-    std::string propertyName = "Value";
-
     DbusVariantType propValue = value;
     uint16_t retCode = 0;
     uint64_t timestamp =
