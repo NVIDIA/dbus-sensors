@@ -385,6 +385,13 @@ int main()
         setupPropertiesChangedMatches(*systemBus, monitorTypes, eventHandler);
 
     setupManufacturingModeMatch(*systemBus);
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "synthesizedsensor"))
+    {
+        std::cout
+            << "Successfully registered TAL namespaceInit for SynthesizedSensor\n";
+    }
+
     io.run();
     return 0;
 }
