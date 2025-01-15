@@ -71,12 +71,9 @@ static void setupSensorMatch(
         {
             return;
         }
+        // The synthesized sensor value should update if any of the sensors
+        // comprising is 'NaN'
         double value = std::visit(VariantToDoubleVisitor(), findValue->second);
-        if (std::isnan(value))
-        {
-            return;
-        }
-
         callback(value, message);
     };
     matches.emplace_back(connection,
@@ -238,30 +235,17 @@ void SynthesizedSensor::updateReading()
 
 bool SynthesizedSensor::calculate(double& val)
 {
-    constexpr size_t maxErrorPrint = 5;
-    static size_t errorPrint = maxErrorPrint;
-
     double totalPower = 0;
     for (const auto& [path, reading] : powerReadings)
     {
         if (std::isnan(reading))
         {
-            continue;
+            // The synthesized sensor value should update if any of the sensors
+            // comprising is 'NaN'
+            return false;
         }
         totalPower += reading;
     }
-
-    if (totalPower == 0)
-    {
-        if (errorPrint > 0)
-        {
-            errorPrint--;
-            std::cerr << "total power 0\n";
-        }
-        val = 0;
-        return false;
-    }
-
     val = totalPower;
     return true;
 }
