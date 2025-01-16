@@ -33,6 +33,7 @@
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
+#include <tal.hpp>
 
 #include <array>
 #include <chrono>
@@ -426,5 +427,11 @@ int main()
         cpuPresenceHandler));
 
     setupManufacturingModeMatch(*systemBus);
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "adcsensor"))
+    {
+        std::cout
+            << "Successfully registered TAL namespaceInit for ADC Sensor\n";
+    }
     io.run();
 }
