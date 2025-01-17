@@ -125,23 +125,35 @@ void MCTPDDevice::setup(
                 "INVENTORY_PATH", objpath);
         }
     };
-    if (staticEID.has_value())
+    if (!usbInterfaceName.empty())
     {
-        connection->async_method_call(
-            onSetup, mctpdBusName,
-            mctpdControlPath + std::string("/interfaces/") + interface,
-            mctpdControlInterface, "AssignEndpointStatic", physaddr,
-            staticEID.value());
-    }
-    else
-    {
-        if (!usbInterfaceName.empty())
+        if (staticEID.has_value() && bridgePoolStartEid.has_value())
+        {
+            connection->async_method_call(
+                onSetup, mctpdBusName,
+                mctpdControlPath + std::string("/interfaces/") +
+                    usbInterfaceName,
+                mctpdControlInterface, "AssignEndpointStatic", physaddr,
+                staticEID.value(), bridgePoolStartEid.value());
+        }
+        else
         {
             connection->async_method_call(
                 onSetup, mctpdBusName,
                 mctpdControlPath + std::string("/interfaces/") +
                     usbInterfaceName,
                 mctpdControlInterface, "AssignEndpoint", physaddr);
+        }
+    }
+    else
+    {
+        if (staticEID.has_value() && bridgePoolStartEid.has_value())
+        {
+            connection->async_method_call(
+                onSetup, mctpdBusName,
+                mctpdControlPath + std::string("/interfaces/") + interface,
+                mctpdControlInterface, "AssignEndpointStatic", physaddr,
+                staticEID.value(), bridgePoolStartEid.value());
         }
         else
         {
@@ -385,6 +397,7 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
     auto mBus = iface.find("Bus");
     auto mName = iface.find("Name");
     auto mStaticEndpointID = iface.find("StaticEndpointID");
+    auto mbridgePoolStartEid = iface.find("BridgePoolStartEid");
     if (mAddress == iface.end() || mBus == iface.end() || mName == iface.end())
     {
         throw std::invalid_argument(
@@ -430,12 +443,35 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
         staticEID = parsedEID;
     }
 
+    std::optional<std::uint8_t> bridgePoolStartEid{};
+    if (mbridgePoolStartEid == iface.end())
+    {
+        warning(
+            "Info: Key 'BridgePoolStartEid' is not provided; skipping related processing.");
+    }
+    else
+    {
+        auto sbridgePoolStartEid = std::visit(VariantToStringVisitor(),
+                                              mbridgePoolStartEid->second);
+        std::uint8_t parsedbridgePoolStartEid{};
+        auto [dptr, dec] = std::from_chars(sbridgePoolStartEid.data(),
+                                           sbridgePoolStartEid.data() +
+                                               sbridgePoolStartEid.size(),
+                                           parsedbridgePoolStartEid);
+        if (dec != std::errc{})
+        {
+            throw std::invalid_argument("Bad BridgePool Start address");
+        }
+        bridgePoolStartEid = parsedbridgePoolStartEid;
+    }
+
     try
     {
-        if (staticEID.has_value())
+        if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
             return std::make_shared<I2CMCTPDDevice>(connection, bus, address,
-                                                    staticEID.value());
+                                                    staticEID.value(),
+                                                    bridgePoolStartEid.value());
         }
         return std::make_shared<I2CMCTPDDevice>(connection, bus, address);
     }
@@ -515,7 +551,10 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     }
     catch (const MCTPException& ex)
     {
-        warning("Failed to create USBMCTPDDevice");
+        warning(
+            "Failed to create USBMCTPDDevice at [ usbInterfaceName: {USB_INTERFACE}, physaddr_usb: {PHYSADDR_USB} ]: {EXCEPTION}",
+            "USB_INTERFACE", usbInterfaceName, "PHYSADDR_USB", physaddr_usb,
+            "EXCEPTION", ex);
         return {};
     }
 }
