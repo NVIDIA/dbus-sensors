@@ -261,9 +261,8 @@ class MCTPDDevice :
     MCTPDDevice(const std::shared_ptr<sdbusplus::asio::connection>& connection,
                 const std::string& interface,
                 const std::vector<uint8_t>& physaddr,
-                std::optional<std::uint8_t> staticEID);
-    MCTPDDevice(const std::shared_ptr<sdbusplus::asio::connection>& connection,
-                const std::string& usbInterfaceName);
+                std::optional<std::uint8_t> staticEID,
+                std::optional<std::uint8_t> bridgePoolStartEid);
     MCTPDDevice(const MCTPDDevice& other) = delete;
     MCTPDDevice(MCTPDDevice&& other) = delete;
     ~MCTPDDevice() override = default;
@@ -284,7 +283,7 @@ class MCTPDDevice :
     const std::string interface;
     const std::vector<uint8_t> physaddr;
     const std::optional<std::uint8_t> staticEID;
-    const std::string usbInterfaceName;
+    const std::optional<std::uint8_t> bridgePoolStartEid;
     std::shared_ptr<MCTPDEndpoint> endpoint;
     std::unique_ptr<sdbusplus::bus::match_t> removeMatch;
 
@@ -316,8 +315,10 @@ class I2CMCTPDDevice : public MCTPDDevice
     I2CMCTPDDevice() = delete;
     I2CMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection, int bus,
-        uint8_t physaddr, std::optional<uint8_t> staticEID = std::nullopt) :
-        MCTPDDevice(connection, interfaceFromBus(bus), {physaddr}, staticEID)
+        uint8_t physaddr, std::optional<uint8_t> staticEID = std::nullopt,
+        std::optional<uint8_t> bridgePoolStartEid = std::nullopt) :
+        MCTPDDevice(connection, interfaceFromBus(bus), {physaddr}, staticEID,
+                    bridgePoolStartEid)
     {}
     ~I2CMCTPDDevice() override = default;
 
@@ -339,8 +340,11 @@ class USBMCTPDDevice : public MCTPDDevice
     USBMCTPDDevice() = delete;
     USBMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
-        const std::string& usbInterfaceName) :
-        MCTPDDevice(connection, usbInterfaceName)
+        const std::string& interface, const std::vector<uint8_t>& physaddr,
+        std::optional<uint8_t> staticEID = std::nullopt,
+        std::optional<uint8_t> bridgePoolStartEid = std::nullopt) :
+        MCTPDDevice(connection, interface, physaddr, staticEID,
+                    bridgePoolStartEid)
     {}
     ~USBMCTPDDevice() override = default;
 
