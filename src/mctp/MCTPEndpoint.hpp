@@ -2,6 +2,7 @@
 
 #include "Utils.hpp"
 
+#include <boost/asio/steady_timer.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
@@ -278,6 +279,8 @@ class MCTPDDevice :
                    added) override;
     void remove() override;
     std::string describe() const override;
+    void onDiscoveryNotify(sdbusplus::message_t& msg);
+    void onDiscoveryMatchRule();
 
   private:
     static void
@@ -292,6 +295,11 @@ class MCTPDDevice :
     const std::optional<std::uint8_t> bridgePoolStartEid;
     std::shared_ptr<MCTPDEndpoint> endpoint;
     std::unique_ptr<sdbusplus::bus::match_t> removeMatch;
+    std::unique_ptr<sdbusplus::bus::match_t> discoveryNotifyMatch;
+    bool discoveryNeeded = false;
+    std::optional<uint8_t> pendingEID;
+    std::unique_ptr<boost::asio::steady_timer> discoveryCheckTimer;
+    void performDiscovery();
 
     /**
      * @brief Actions to perform once endpoint setup has succeeded

@@ -6,6 +6,8 @@
 #include <bits/fs_dir.h>
 
 #include <boost/system/detail/errc.hpp>
+#include <boost/asio/error.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus.hpp>
@@ -50,6 +52,114 @@ MCTPDDevice::MCTPDDevice(
     interface(interface), physaddr(physaddr), staticEID(staticEID),
     bridgePoolStartEid(bridgePoolStartEid)
 {}
+
+void MCTPDDevice::onDiscoveryMatchRule()
+{
+    const auto matchRule = sdbusplus::bus::match::rules::type::signal() +
+                           sdbusplus::bus::match::rules::path(mctpdControlPath) +
+                           sdbusplus::bus::match::rules::interface(mctpdControlInterface) +
+                           sdbusplus::bus::match::rules::member("DiscoveryNotify");
+
+    discoveryNotifyMatch = std::make_unique<sdbusplus::bus::match_t>(
+        *connection, matchRule,
+        [weakThis{weak_from_this()}](sdbusplus::message_t& msg) {
+            if (auto self = weakThis.lock())
+            {
+                self->onDiscoveryNotify(msg);
+            }
+            else
+            {
+                error("MCTPDDevice instance destroyed during DiscoveryNotify handling.");
+            }
+        });
+
+    info("DiscoveryNotify match registered.");
+
+    discoveryCheckTimer = std::make_unique<boost::asio::steady_timer>(
+        connection->get_io_context());
+}
+
+void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& msg)
+{
+    uint32_t eid32 = 0;
+    msg.read(eid32);
+    uint8_t eid = static_cast<uint8_t>(eid32);
+
+    if (discoveryNeeded)
+    {
+       info("Ignoring DiscoveryNotify for EID '{EID}' (already have a pending discovery).",
+        "EID", static_cast<int>(eid));
+        return;
+    }
+
+    discoveryNeeded = true;
+    pendingEID = eid;
+
+    info("First DiscoveryNotify for EID '{EID}' => scheduling discovery in ~5s.",
+     "EID", static_cast<int>(eid));
+
+    /* Broad logic: This  bumps up discovery notify handler timer for
+    another 5s. This is done to ensure that a flood of discovery notifies do
+    not cause us to repeatedly perform rediscovery. Upon a timer expiry, the
+    event loop will initiate a re-query of the routing table from the bridge
+    and update the D-Bus objects. */
+
+    // Cancel any previous timer (if still pending)
+    discoveryCheckTimer->cancel();
+
+    using namespace std::chrono_literals;
+    discoveryCheckTimer->expires_after(5s);
+    discoveryCheckTimer->async_wait(
+        [weakThis = weak_from_this()](const boost::system::error_code& ecWait) {
+            if (ecWait == boost::asio::error::operation_aborted)
+            {
+                return;
+            }
+            if (auto self = weakThis.lock())
+            {
+                // Call performDiscovery(), then reset flags
+                self->performDiscovery();
+                self->discoveryNeeded = false;
+                self->pendingEID.reset();
+            }
+        });
+}
+
+void MCTPDDevice::performDiscovery()
+{
+    if (!pendingEID.has_value())
+    {
+        error("performDiscovery() called with no EID stored.");
+        return;
+    }
+
+    uint8_t eid = pendingEID.value();
+
+    connection->async_method_call(
+        [weakSelf = weak_from_this(), eid](const boost::system::error_code& ec,
+                                           sdbusplus::message::message& reply) {
+        auto self = weakSelf.lock();
+        (void)reply;
+        if (!self)
+        {
+            return;
+        }
+
+        if (ec)
+        {
+            error("Failed calling GetRoutingTable for EID '{EID}': {ERROR}",
+                  "EID", static_cast<int>(eid), "ERROR", ec.message());
+        }
+        else
+        {
+            info("Successfully called GetRoutingTable for EID '{EID}'.", "EID",
+                 static_cast<int>(eid));
+        }
+    },
+        mctpdBusName,
+        (std::string(mctpdControlPath) + "/interfaces/" + this->interface),
+        mctpdControlInterface, "GetRoutingTable", eid);
+}
 
 void MCTPDDevice::onEndpointInterfacesRemoved(
     const std::weak_ptr<MCTPDDevice>& weak, const std::string& objpath,
@@ -112,6 +222,7 @@ void MCTPDDevice::setup(
         if (auto self = weak.lock())
         {
             self->finaliseEndpoint(objpath, eid, network, added);
+            self->onDiscoveryMatchRule();
         }
         else
         {
