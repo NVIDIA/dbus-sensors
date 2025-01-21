@@ -320,11 +320,13 @@ int main()
     });
 
     setupManufacturingModeMatch(*systemBus);
+#ifdef NVIDIA_SHMEM
     if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
                                                 "nvmesensor"))
     {
         std::cout
             << "Successfully registered TAL namespaceInit for NVMe Sensor\n";
     }
+#endif
     io.run();
 }

@@ -1247,11 +1247,13 @@ int main()
 
     setupManufacturingModeMatch(*systemBus);
 
+#ifdef NVIDIA_SHMEM
     if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
                                                 "psusensor"))
     {
         std::cout
             << "Successfully registered TAL namespaceInit for PSUSensor\n";
     }
+#endif
     io.run();
 }

@@ -385,12 +385,14 @@ int main()
         setupPropertiesChangedMatches(*systemBus, monitorTypes, eventHandler);
 
     setupManufacturingModeMatch(*systemBus);
+#ifdef NVIDIA_SHMEM
     if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
                                                 "synthesizedsensor"))
     {
         std::cout
             << "Successfully registered TAL namespaceInit for SynthesizedSensor\n";
     }
+#endif
 
     io.run();
     return 0;

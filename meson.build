@@ -55,6 +55,10 @@ if get_option('satellite').enabled()
     add_project_arguments('-DAUTO_GEN_SENSOR_HEADER', language : 'cpp')
 endif
 
+if get_option('shmem').enabled()
+  add_project_arguments('-DNVIDIA_SHMEM', language : 'cpp')
+endif
+
 subdir('service_files')
 subdir('src')
 

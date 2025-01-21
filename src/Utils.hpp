@@ -96,8 +96,10 @@ bool readingStateGood(const PowerState& powerState);
 constexpr const char* configInterfacePrefix =
     "xyz.openbmc_project.Configuration.";
 
+#ifdef NVIDIA_SHMEM
 void updateTelemetry(const std::string& objPath, const std::string& ifaceName,
                      const double& value, const std::string& parentChassis);
+#endif
 
 inline std::string configInterfaceName(const std::string& type)
 {

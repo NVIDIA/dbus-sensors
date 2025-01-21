@@ -928,6 +928,7 @@ void getSensorParamMapValues(double& maxValue, double& minValue,
     }
 }
 
+#ifdef NVIDIA_SHMEM
 void updateTelemetry(const std::string& objPath, const std::string& ifaceName,
                      const double& value, const std::string& parentChassis)
 {
@@ -946,3 +947,4 @@ void updateTelemetry(const std::string& objPath, const std::string& ifaceName,
                                               rawPropValue, timestamp, retCode,
                                               propValue, parentChassis);
 }
+#endif

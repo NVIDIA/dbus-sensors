@@ -359,12 +359,14 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
         sensorInterface->set_property("Value", newValue);
         internalValueSet = false;
 
+#ifdef NVIDIA_SHMEM
         std::string objPath = sensorInterface->get_object_path();
         std::string ifaceName = sensorInterface->get_interface_name();
         std::string parentChassis =
             sdbusplus::message::object_path(configurationPath).parent_path();
 
         updateTelemetry(objPath, ifaceName, newValue, parentChassis);
+#endif
     }
     restartRead();
 }

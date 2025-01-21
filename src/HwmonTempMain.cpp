@@ -714,10 +714,12 @@ int main()
 
     matches.emplace_back(std::move(ifaceRemovedMatch));
 
+#ifdef NVIDIA_SHMEM
     if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
                                                 "hwmontemp"))
     {
         std::cout << "Successfully registerd TAL namespaceInit for hwmontemp\n";
     }
+#endif
     io.run();
 }

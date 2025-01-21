@@ -427,11 +427,13 @@ int main()
         cpuPresenceHandler));
 
     setupManufacturingModeMatch(*systemBus);
+#ifdef NVIDIA_SHMEM
     if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
                                                 "adcsensor"))
     {
         std::cout
             << "Successfully registered TAL namespaceInit for ADC Sensor\n";
     }
+#endif
     io.run();
 }

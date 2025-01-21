@@ -26,3 +26,4 @@ option('satellite', type: 'feature', value: 'disabled', description: 'Enable Sat
 option('leak-detect', type: 'feature', value: 'disabled', description: 'Enable Leak Detect sensor.',)
 option('discrete-leak-detect', type: 'feature', value: 'disabled', description: 'Enable Discrete Leak Detect sensor.',)
 option('write-protect', type: 'feature', value: 'disabled', description: 'Enable Write Protect.',)
+option('shmem', type: 'feature', value: 'enabled', description: 'Use NVIDIA Shared-Memory IPC.',)

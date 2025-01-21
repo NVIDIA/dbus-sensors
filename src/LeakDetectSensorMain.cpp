@@ -490,11 +490,13 @@ int main()
 
     systemBus->request_name("xyz.openbmc_project.LeakDetector");
 
+#ifdef NVIDIA_SHMEM
     if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
                                                 "leakdetectsensor"))
     {
         std::cout
             << "Successfully registered TAL namespaceInit for LeakDetect Sensor\n";
     }
+#endif
     io.run();
 }

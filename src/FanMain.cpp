@@ -660,12 +660,14 @@ int main()
 
     setupManufacturingModeMatch(*systemBus);
 
+#ifdef NVIDIA_SHMEM
     if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
                                                 "fansensor"))
     {
         std::cout
             << "Successfully registered TAL namespaceInit for Fan Sensor\n";
     }
+#endif
     io.run();
     return 0;
 }
