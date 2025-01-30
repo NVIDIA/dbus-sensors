@@ -131,7 +131,6 @@ void createSensors(
                           << "\n";
                 continue;
             }
-            std::string polarity = std::get<std::string>(findPolarity->second);
 
             auto& sensorConstruct = sensors[sensorName];
             sensorConstruct = nullptr;
