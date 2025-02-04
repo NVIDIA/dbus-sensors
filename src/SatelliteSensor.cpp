@@ -139,7 +139,7 @@ void SatelliteSensor::checkThresholds()
 }
 
 template <typename T>
-int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, int length)
+int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, uint8_t length)
 {
     std::string i2cBus = "/dev/i2c-" + std::to_string(bus);
 
@@ -162,42 +162,43 @@ int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, int length)
     }
 
     int ret = 0;
-    struct i2c_rdwr_ioctl_data args = {nullptr, 0};
-    struct i2c_msg msg = {0, 0, 0, nullptr};
     std::array<uint8_t, 8> cmd{};
+    T data = 0;
 
-    msg.addr = addr;
-    args.msgs = &msg;
-    args.nmsgs = 1;
+    if (length > sizeof(data))
+    {
+        lg2::error("wrong i2c data length");
+        close(fd);
+        return -1;
+    }
 
-    msg.flags = 0;
-    msg.buf = cmd.data();
+    struct i2c_msg msgs[2] = {{
+                                  // write offset
+                                  .addr = addr,
+                                  .flags = 0,
+                                  .len = 2,
+                                  .buf = cmd.data(),
+                              },
+                              {// read data from the offset
+                               .addr = addr,
+                               .flags = I2C_M_RD,
+                               .len = length,
+                               .buf = (uint8_t*)&data}};
+
+    struct i2c_rdwr_ioctl_data args = {msgs, 2};
+
     // handle two bytes offset
     if (offset > 255)
     {
-        msg.len = 2;
-        msg.buf[0] = offset >> 8;
-        msg.buf[1] = offset & 0xFF;
+        msgs[0].len = 2;
+        msgs[0].buf[0] = offset >> 8;
+        msgs[0].buf[1] = offset & 0xFF;
     }
     else
     {
-        msg.len = 1;
-        msg.buf[0] = offset & 0xFF;
+        msgs[0].len = 1;
+        msgs[0].buf[0] = offset & 0xFF;
     }
-
-    // write offset
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
-    ret = ioctl(fd, I2C_RDWR, &args);
-    if (ret < 0)
-    {
-        close(fd);
-        return ret;
-    }
-
-    T data = 0;
-    msg.flags = I2C_M_RD;
-    msg.len = length;
-    msg.buf = (uint8_t*)&data;
 
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     ret = ioctl(fd, I2C_RDWR, &args);

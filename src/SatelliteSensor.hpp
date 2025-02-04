@@ -34,7 +34,8 @@
 #endif
 
 template <typename T>
-int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, int length);
+int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading,
+           uint8_t length);
 
 struct SatelliteSensor : public Sensor
 {
