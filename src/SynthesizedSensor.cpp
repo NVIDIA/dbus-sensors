@@ -236,6 +236,11 @@ void SynthesizedSensor::updateReading()
 bool SynthesizedSensor::calculate(double& val)
 {
     double totalPower = 0;
+    if (powerReadings.empty())
+    {
+        // If no sensors are loaded, the synthesized sensor value should be NaN.
+        return false;
+    }
     for (const auto& [path, reading] : powerReadings)
     {
         if (std::isnan(reading))
