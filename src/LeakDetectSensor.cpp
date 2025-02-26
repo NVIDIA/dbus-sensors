@@ -215,6 +215,8 @@ LeakDetectSensor::LeakDetectSensor(
         // state
         setDetectorState(DetectorState::FAULT);
     }
+
+    std::cout << name << " successfully instantiated.\n";
 }
 
 LeakDetectSensor::~LeakDetectSensor()
@@ -378,6 +380,9 @@ void LeakDetectSensor::setDetectorState(DetectorState newDetectorState)
     // Only take action if the detector state has changed
     if (detectorState != newDetectorState)
     {
+        std::cout << name << " changing state to: "
+                  << getDetectorStatusString(detectorState) << ".\n";
+
         // Update the internally tracked state
         detectorState = newDetectorState;
 
@@ -486,7 +491,7 @@ void LeakDetectSensor::startShutdown()
 
 void LeakDetectSensor::executeShutdown()
 {
-    std::cout << "Chassis shutdown requested by " << name << ".\n";
+    std::cout << "Executing shutdown requested by " << name << ".\n";
 
     std::variant<std::string> transitionChassisOff =
         "xyz.openbmc_project.State.Chassis.Transition.Off";
