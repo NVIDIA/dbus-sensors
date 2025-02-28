@@ -100,6 +100,7 @@ static const I2CDeviceTypeMap sensorTypes{
     {"TMP451", I2CDeviceType{"tpm451", true}},
     {"TMP432", I2CDeviceType{"tpm432", true}},
     {"W83773G", I2CDeviceType{"w83773g", true}},
+    {"TMP75C", I2CDeviceType{"tmp75c", true}},
 };
 
 std::string getPlatform()
