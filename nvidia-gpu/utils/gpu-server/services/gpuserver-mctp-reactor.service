@@ -1,0 +1,13 @@
+[Unit]
+Description=Telemetry MCTP Reactor Service
+After=gpuserverd.service
+Requires=gpuserverd.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+ExecStart=/usr/bin/gpuserver-mctp-reactor
+
+[Install]
+WantedBy=multi-user.target 
