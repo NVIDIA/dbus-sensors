@@ -1,0 +1,2 @@
+Index,Raw Input,Raw Expected Output,Description
+1,10DE8189030001FF,10DE0189030001XX00,Get Temperature Reading (XX is the variable temperature reading)
