@@ -57,6 +57,7 @@ endif
 
 subdir('service_files')
 subdir('src')
+subdir('nvidia-gpu')
 
 if not get_option('tests').disabled()
     subdir('tests')

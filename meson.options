@@ -27,3 +27,33 @@ option('satellite', type: 'feature', value: 'disabled', description: 'Enable Sat
 option('leak-detect', type: 'feature', value: 'disabled', description: 'Enable Leak Detect sensor.',)
 option('discrete-leak-detect', type: 'feature', value: 'disabled', description: 'Enable Discrete Leak Detect sensor.',)
 option('write-protect', type: 'feature', value: 'disabled', description: 'Enable Write Protect.',)
+option(
+    'instance-id-expiration-interval',
+    type: 'integer',
+    min: 1,
+    max: 4294967295,
+    description: 'The interval time of NSM instance id expiration in seconds',
+    value: 5,
+)
+option(
+    'number-of-request-retries',
+    type: 'integer',
+    min: 1,
+    max: 4294967295,
+    description: 'The number of NSM request retries',
+    value: 2,
+)
+option(
+    'response-time-out',
+    type: 'integer',
+    min: 1,
+    max: 4294967295,
+    description: 'The interval time of NSM response time out in milliseconds',
+    value: 2000,
+)
+option(
+    'enable-in-kernel-mctp',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Use the in-kernel MCTP stack instead of the demux daemon',
+)
