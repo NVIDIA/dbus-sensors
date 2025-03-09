@@ -57,3 +57,10 @@ option(
     value: 'disabled',
     description: 'Use the in-kernel MCTP stack instead of the demux daemon',
 )
+
+option(
+    'nvidia-gpu',
+     type: 'feature',
+     value: 'enabled',
+     description: 'Enable Nvidia GPU sensor.',
+)
