@@ -119,9 +119,16 @@ bool HwmonTempSensor::isActive()
 void HwmonTempSensor::activate(const std::string& newPath,
                                const std::shared_ptr<I2CDevice>& newI2CDevice)
 {
+    boost::system::error_code ec;
     path = newPath;
     i2cDevice = newI2CDevice;
-    inputDev.open(path, boost::asio::random_access_file::read_only);
+    inputDev.open(path, boost::asio::random_access_file::read_only, ec);
+    if (ec)
+    {
+        std::cerr << "Failed to activate Hwmon temp sensor: " << path << "\n";
+        return;
+    }
+
     markAvailable(true);
     setupRead();
 }

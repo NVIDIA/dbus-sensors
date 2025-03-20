@@ -631,6 +631,13 @@ static void powerStateChanged(
     boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
 {
+    // Only check for PowerOn sensors to prevent invoking createSensors
+    // repeatedly
+    if (type != PowerState::on)
+    {
+        return;
+    }
+
     if (newState)
     {
         createSensors(io, objectServer, sensors, dbusConnection, nullptr, true);
