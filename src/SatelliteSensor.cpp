@@ -222,7 +222,7 @@ int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, uint8_t length)
     // there is no reading if all bytes are 0xff
     if (emptyBytes == length)
     {
-        *reading = 0;
+        return -1;
     }
     else
     {
