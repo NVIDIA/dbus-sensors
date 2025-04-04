@@ -16,30 +16,42 @@
  */
 #include "SatelliteSensor.hpp"
 
+#include "SensorPaths.hpp"
+#include "Thresholds.hpp"
 #include "Utils.hpp"
-#include "VariantVisitors.hpp"
+#include "sensor.hpp"
 
-#include <boost/algorithm/string/predicate.hpp>
+#include <fcntl.h>
+#include <linux/i2c.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+
+#include <boost/asio/error.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/container/flat_map.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus.hpp>
 #include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/message.hpp>
 
+#include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <iostream>
-#include <limits>
 #include <memory>
-#include <numeric>
 #include <string>
+#include <utility>
 #include <vector>
 
 extern "C"
 {
-#include <i2c/smbus.h>
 #include <linux/i2c-dev.h>
 }
 
@@ -402,8 +414,7 @@ void createSensors(
                               static_cast<int>(addr), "OFF",
                               static_cast<int>(off), "TYPE", sensorType,
                               "VALUETYPE", valueType, "RATE", rate, "MIN",
-                              static_cast<double>(minVal), "MAX",
-                              static_cast<double>(maxVal));
+                              minVal, "MAX", maxVal);
                 }
 
                 auto& sensor = sensors[name];

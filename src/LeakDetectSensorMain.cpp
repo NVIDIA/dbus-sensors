@@ -19,13 +19,30 @@
 #include "LeakDetectSensor.hpp"
 #include "Utils.hpp"
 
+#include <boost/asio/error.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/message.hpp>
 
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
+#include <variant>
 #include <vector>
 
 static constexpr float pollRateDefault = 0.25;
@@ -154,7 +171,6 @@ static std::shared_ptr<I2CDevice> getI2CDevice(const I2CDeviceParams& params)
     // If the ADC supports multiple voltage references, update it here.  Not all
     // ADCs will have this setting, so it will not fail out if no paths are
     // found
-    std::string voltageRefFile = "voltage_reference";
     std::vector<std::filesystem::path> voltageRefPaths;
     findFiles(std::filesystem::path(devicePath), R"(voltage_reference$)",
               voltageRefPaths);

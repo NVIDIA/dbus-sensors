@@ -114,7 +114,7 @@ std::string getPlatform()
     std::string line;
     while (getline(osRelease, line))
     {
-        if (line.compare(0, 22, "OPENBMC_TARGET_MACHINE") == 0)
+        if (line.starts_with("OPENBMC_TARGET_MACHINE"))
         {
             size_t equalsPos = line.find('=');
             std::string targetPlatform = line.substr(equalsPos + 1);

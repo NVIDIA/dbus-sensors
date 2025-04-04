@@ -1,24 +1,17 @@
 #pragma once
 
-#include "Utils.hpp"
-
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
-#include <boost/asio/steady_timer.hpp>
-#include <boost/asio/streambuf.hpp>
 #include <gpiod.hpp>
+#include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/server/object.hpp>
 #include <xyz/openbmc_project/Association/Definitions/server.hpp>
 #include <xyz/openbmc_project/Inventory/Item/Cpu/server.hpp>
 #include <xyz/openbmc_project/Inventory/Item/server.hpp>
 
 #include <memory>
-#include <optional>
-#include <stdexcept>
 #include <string>
-#include <vector>
-
-namespace fs = std::filesystem;
 
 using ItemInterface = sdbusplus::server::object::object<
     sdbusplus::xyz::openbmc_project::Inventory::server::Item,

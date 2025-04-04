@@ -1,9 +1,14 @@
 #pragma once
 
 #include "NVMeContext.hpp"
+#include "NVMeSensor.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
+
+#include <cstddef>
+#include <memory>
+#include <thread>
 
 class NVMeBasicContext : public NVMeContext
 {

@@ -33,6 +33,8 @@ extern "C"
 #include <linux/i2c-dev.h>
 }
 
+namespace fs = std::filesystem;
+
 NVMeStatus::NVMeStatus(sdbusplus::asio::object_server& objectServer,
                        std::shared_ptr<sdbusplus::asio::connection>& conn,
                        boost::asio::io_context& io,

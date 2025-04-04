@@ -16,6 +16,30 @@
  */
 
 #include "DiscreteLeakDetectSensor.hpp"
+#include "Utils.hpp"
+
+#include <boost/asio/error.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/container/flat_map.hpp>
+#include <sdbusplus/asio/connection.hpp>
+#include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus.hpp>
+#include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/message.hpp>
+
+#include <array>
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace fs = std::filesystem;
 static constexpr float pollRateDefault = 0.5;
@@ -35,7 +59,8 @@ static void findMatchingSysfsAttributes(sysfsAttributesVec& matchingPaths,
         {
             for (const auto& subEntry : fs::directory_iterator(entry.path()))
             {
-                if (subEntry.path().filename().string().find(filePattern) == 0)
+                if (subEntry.path().filename().string().starts_with(
+                        filePattern))
                 {
                     matchingPaths.emplace_back(
                         entry.path().string(),

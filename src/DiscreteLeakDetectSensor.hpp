@@ -16,12 +16,14 @@
  */
 #pragma once
 
-#include "Utils.hpp"
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <sdbusplus/asio/connection.hpp>
+#include <sdbusplus/asio/object_server.hpp>
 
-#include <phosphor-logging/lg2.hpp>
-#include <xyz/openbmc_project/Inventory/Item/LeakDetector/server.hpp>
-#include <xyz/openbmc_project/Logging/Entry/server.hpp>
-#include <xyz/openbmc_project/State/LeakDetector/server.hpp>
+#include <cstdint>
+#include <memory>
+#include <string>
 
 enum class LeakLevel
 {
@@ -40,11 +42,11 @@ class DiscreteLeakDetectSensor :
                              const std::string& sensorSysfsPath,
                              const std::string& sensorName,
                              const std::string& configurationPath,
-                             const float pollRate, const uint8_t busId,
-                             const uint8_t address, const std::string& driver);
+                             float pollRate, uint8_t busId, uint8_t address,
+                             const std::string& driver);
     ~DiscreteLeakDetectSensor();
 
-    void monitor(void);
+    void monitor();
 
     std::string sensorType;
     std::string sysfsPath;
@@ -63,7 +65,7 @@ class DiscreteLeakDetectSensor :
     sdbusplus::asio::object_server& objServer;
     boost::asio::steady_timer waitTimer;
     std::shared_ptr<sdbusplus::asio::connection> dbusConnection;
-    LeakLevel leakLevel;
+    LeakLevel leakLevel{LeakLevel::NORMAL};
 
     std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryAssociation;

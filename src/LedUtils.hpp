@@ -4,9 +4,11 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <string>
 
 extern "C"
 {

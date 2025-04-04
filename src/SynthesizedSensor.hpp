@@ -16,7 +16,11 @@
  */
 
 #pragma once
+#include "Thresholds.hpp"
+
 #include <boost/container/flat_map.hpp>
+#include <sdbusplus/asio/connection.hpp>
+#include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/bus/match.hpp>
 #include <sensor.hpp>
 

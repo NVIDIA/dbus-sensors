@@ -18,18 +18,18 @@
 #pragma once
 
 #include "DeviceMgmt.hpp"
-#include "Thresholds.hpp"
-#include "sensor.hpp"
 
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/random_access_file.hpp>
-#include <gpiod.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <array>
+#include <cstddef>
+#include <limits>
 #include <memory>
-#include <optional>
-#include <stdexcept>
 #include <string>
-#include <vector>
 
 enum class DetectorState
 {
@@ -49,10 +49,10 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
                      std::shared_ptr<sdbusplus::asio::connection>& conn,
                      const std::string& sensorName,
                      const std::shared_ptr<I2CDevice>& i2cDevice,
-                     const float pollRate, const double configLeakThreshold,
-                     const double sensorMax, const double sensorMin,
+                     float pollRate, double configLeakThreshold,
+                     double sensorMax, double sensorMin,
                      const std::string& configurationPath, bool shutdownOnLeak,
-                     const unsigned int shutdownDelaySeconds);
+                     unsigned int shutdownDelaySeconds);
     ~LeakDetectSensor();
     std::string getSensorName();
     void setupRead();
@@ -71,9 +71,9 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
     double leakThreshold;
     double sensorMax;
     double sensorMin;
-    DetectorState detectorState;
-    bool sensorOverride;
-    bool internalValueSet;
+    DetectorState detectorState{DetectorState::NORMAL};
+    bool sensorOverride{false};
+    bool internalValueSet{false};
     std::string configurationPath;
     bool shutdownOnLeak;
     unsigned int shutdownDelaySeconds;

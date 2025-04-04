@@ -20,6 +20,8 @@
 #include <tuple>
 #include <vector>
 
+namespace fs = std::filesystem;
+
 ProcessorStatus::ProcessorStatus(
     sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& conn,

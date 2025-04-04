@@ -16,18 +16,17 @@
  */
 #pragma once
 
-#include <boost/asio.hpp>
-#include <boost/container/flat_map.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/posix/stream_descriptor.hpp>
 #include <gpiod.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <sdbusplus/bus/match.hpp>
 
+#include <chrono>
 #include <functional>
-#include <iostream>
+#include <memory>
 #include <string>
 #include <unordered_map>
-#include <variant>
 #include <vector>
 
 namespace gpio_presence_sensing

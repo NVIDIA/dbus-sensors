@@ -1,24 +1,32 @@
 #include "PLXTempSensor.hpp"
 
+#include "SensorPaths.hpp"
+#include "Thresholds.hpp"
+#include "Utils.hpp"
 #include "sensor.hpp"
 
 #include <fcntl.h>
 #include <linux/i2c-dev.h>
-#include <linux/i2c.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#include <boost/algorithm/string/predicate.hpp>
-#include <boost/asio/read_until.hpp>
+#include <boost/algorithm/string/replace.hpp>
+#include <boost/asio/error.hpp>
+#include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <array>
+#include <cerrno>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <iostream>
-#include <istream>
 #include <limits>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 static constexpr double maxReading = 127;

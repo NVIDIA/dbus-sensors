@@ -46,6 +46,8 @@
 #include <variant>
 #include <vector>
 
+namespace fs = std::filesystem;
+
 static constexpr bool debug = false;
 
 static constexpr const char* sensorType = "ChassisIntrusionSensor";

@@ -35,6 +35,8 @@ extern "C"
 #include <linux/i2c-dev.h>
 }
 
+namespace fs = std::filesystem;
+
 // NVMe Status command
 const static constexpr size_t nvmeStatusCmd = 0x00;
 

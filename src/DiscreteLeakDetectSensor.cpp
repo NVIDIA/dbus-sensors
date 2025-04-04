@@ -17,16 +17,23 @@
 
 #include "DiscreteLeakDetectSensor.hpp"
 
-#include <unistd.h>
+#include "Utils.hpp"
 
-#include <boost/asio/read_until.hpp>
+#include <boost/asio/error.hpp>
+#include <boost/asio/io_context.hpp>
+#include <sdbusplus/asio/connection.hpp>
+#include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/message/native_types.hpp>
 
 #include <cerrno>
+#include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
-#include <limits>
-#include <optional>
+#include <map>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 /* CPLD definitions
@@ -44,11 +51,10 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
     const std::string& sensorSysfsPath, const std::string& sensorName,
     const std::string& configurationPath, float pollRate, uint8_t busId,
     uint8_t address, const std::string& driver) :
-    sensorType(sensorType),
-    sysfsPath(sensorSysfsPath), name(sensorName),
+    sensorType(sensorType), sysfsPath(sensorSysfsPath), name(sensorName),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)), busId(busId),
     address(address), driver(driver), objServer(objectServer), waitTimer(io),
-    dbusConnection(conn), leakLevel(LeakLevel::NORMAL)
+    dbusConnection(conn)
 {
     sdbusplus::message::object_path inventoryObjPath(
         "/xyz/openbmc_project/inventory/leakdetectors/");

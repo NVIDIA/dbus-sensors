@@ -48,6 +48,8 @@ extern "C"
 #include <linux/i2c-dev.h>
 }
 
+namespace fs = std::filesystem;
+
 static constexpr bool debug = false;
 
 static constexpr unsigned int defaultPollSec = 1;

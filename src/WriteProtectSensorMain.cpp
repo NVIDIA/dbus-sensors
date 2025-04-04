@@ -62,7 +62,7 @@ Config getConfig(const SensorBaseConfigMap& properties,
 
 template <typename Callback>
 void getEmWriteProtectIf(const ManagedObjectType& managedObjs,
-                         Callback&& callback)
+                         Callback& callback)
 {
     for (const auto& obj : managedObjs)
     {
@@ -76,7 +76,7 @@ void getEmWriteProtectIf(const ManagedObjectType& managedObjs,
             {
                 config = getConfig(found->second,
                                    emObjPath.parent_path().filename());
-                std::forward<Callback>(callback)(config);
+                callback(config);
             }
             catch (std::exception& e)
             {

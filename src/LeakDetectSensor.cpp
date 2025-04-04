@@ -17,21 +17,30 @@
 
 #include "LeakDetectSensor.hpp"
 
-#include <unistd.h>
+#include "DeviceMgmt.hpp"
+#include "SensorPaths.hpp"
+#include "Utils.hpp"
 
-#include <boost/asio/read_until.hpp>
-#include <phosphor-logging/lg2.hpp>
+#include <boost/asio/buffer.hpp>
+#include <boost/asio/error.hpp>
+#include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/message/native_types.hpp>
 
+#include <charconv>
+#include <chrono>
 #include <cmath>
-#include <filesystem>
-#include <fstream>
+#include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
-#include <optional>
+#include <stdexcept>
 #include <string>
+#include <system_error>
+#include <variant>
 #include <vector>
 
 // Enable debug logging
@@ -53,15 +62,13 @@ LeakDetectSensor::LeakDetectSensor(
     const double sensorMax, const double sensorMin,
     const std::string& configurationPath, bool shutdownOnLeak,
     const unsigned int shutdownDelaySeconds) :
-    i2cDevice(i2cDevice),
-    objServer(objectServer), dbusConnection(conn), inputDev(io), waitTimer(io),
-    shutdownTimer(io), name(sensorName), readPath(readPath),
+    i2cDevice(i2cDevice), objServer(objectServer), dbusConnection(conn),
+    inputDev(io), waitTimer(io), shutdownTimer(io), name(sensorName),
+    readPath(readPath),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
     leakThreshold(configLeakThreshold), sensorMax(sensorMax),
-    sensorMin(sensorMin), detectorState(DetectorState::NORMAL),
-    sensorOverride(false), internalValueSet(false),
-    configurationPath(configurationPath), shutdownOnLeak(shutdownOnLeak),
-    shutdownDelaySeconds(shutdownDelaySeconds)
+    sensorMin(sensorMin), configurationPath(configurationPath),
+    shutdownOnLeak(shutdownOnLeak), shutdownDelaySeconds(shutdownDelaySeconds)
 {
     sdbusplus::message::object_path sensorObjPath(
         "/xyz/openbmc_project/sensors/voltage/");
@@ -261,11 +268,8 @@ void LeakDetectSensor::determineDetectorState(double detectorValue)
     switch (detectorState)
     {
         case DetectorState::NORMAL:
-            if (std::isnan(detectorValue))
-            {
-                setDetectorState(DetectorState::FAULT);
-            }
-            else if ((detectorValue > sensorMax) || (detectorValue < sensorMin))
+            if ((std::isnan(detectorValue)) || (detectorValue > sensorMax) ||
+                (detectorValue < sensorMin))
             {
                 setDetectorState(DetectorState::FAULT);
             }
@@ -447,7 +451,7 @@ void LeakDetectSensor::logFaultEvent()
 
 void LeakDetectSensor::startShutdown()
 {
-    if (shutdownDelaySeconds)
+    if (shutdownDelaySeconds != 0U)
     {
         std::cout << "Setting timer for " << shutdownDelaySeconds
                   << " second(s) delay before shutdown due to " << name

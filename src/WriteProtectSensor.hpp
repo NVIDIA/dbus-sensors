@@ -16,21 +16,14 @@
  */
 #pragma once
 
-#include <boost/asio.hpp>
-#include <boost/container/flat_map.hpp>
 #include <gpiod.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <sdbusplus/bus/match.hpp>
 
 #include <filesystem>
-#include <fstream>
-#include <functional>
-#include <iostream>
+#include <memory>
 #include <string>
 #include <unordered_map>
-#include <variant>
-#include <vector>
 
 namespace write_protect
 {

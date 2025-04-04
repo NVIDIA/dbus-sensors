@@ -59,7 +59,8 @@ void WriteProtect::addLine(const std::string& lineLabel, bool value)
     if (gpioLines.find(lineLabel) == gpioLines.end())
     {
         ::gpiod::line line = ::gpiod::find_line(lineLabel);
-        line.request({service, ::gpiod::line_request::DIRECTION_OUTPUT, value});
+        line.request({service, ::gpiod::line_request::DIRECTION_OUTPUT,
+                      static_cast<unsigned long long>(value)});
         gpioLines[lineLabel] = line;
     }
 }
@@ -71,7 +72,7 @@ void WriteProtect::setLine(const std::string& lineLabel, bool value)
         addLine(lineLabel, value);
     }
     gpioLines[lineLabel].set_config(::gpiod::line_request::DIRECTION_OUTPUT,
-                                    value);
+                                    static_cast<unsigned long long>(value));
 }
 
 int WriteProtect::readLine(const std::string& lineLabel, bool activeLow)
