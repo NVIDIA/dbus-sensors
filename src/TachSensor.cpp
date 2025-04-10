@@ -201,6 +201,11 @@ void TachSensor::handleResponse(const boost::system::error_code& err,
 
 void TachSensor::checkThresholds()
 {
+    if (!readingStateGood())
+    {
+        return;
+    }
+
     bool status = thresholds::checkThresholds(this);
 
     if ((redundancy != nullptr) && *redundancy)
