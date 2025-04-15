@@ -53,6 +53,7 @@ static constexpr uint8_t lun = 0;
 static constexpr uint8_t hostSMbusIndexDefault = 0x03;
 static constexpr uint8_t ipmbBusIndexDefault = 0;
 static constexpr float pollRateDefault = 1; // in seconds
+static constexpr uint8_t maxInitialRetry = 5;
 
 static constexpr const char* sensorPathPrefix = "/xyz/openbmc_project/sensors/";
 IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
@@ -125,6 +126,7 @@ void IpmbSensor::init()
     {
         runInitCmd();
     }
+    sendIpmbRequest();
     read();
 }
 
@@ -426,6 +428,14 @@ void IpmbSensor::ipmbRequestCompletionCb(const boost::system::error_code& ec,
     if (ec || (status != 0))
     {
         incrementError();
+        if (!isValueInitialized)
+        {
+            if (initCount < maxInitialRetry)
+            {
+                sendIpmbRequest();
+                initCount++;
+            }
+        }
         read();
         return;
     }
@@ -469,6 +479,7 @@ void IpmbSensor::ipmbRequestCompletionCb(const boost::system::error_code& ec,
     /* Adjust value as per scale and offset */
     value = (value * scaleVal) + offsetVal;
     updateValue(value);
+    isValueInitialized = true;
     read();
 }
 
