@@ -83,6 +83,7 @@ SatelliteSensor::SatelliteSensor(
     valueType(valueType), objectServer(objectServer), waitTimer(io),
     pollRate(pollTime)
 {
+    invalidLogInterval = std::max<size_t>(1, invalidLogReminderSec / pollRate);
     // make the string to lowercase for Dbus sensor type
     for (auto& c : sensorType)
     {
@@ -430,12 +431,29 @@ void SatelliteSensor::read()
         {
             lg2::error("Value update to {TEMP}", "TEMP", temp);
         }
+        if (invalidReadCount > 0)
+        {
+            lg2::info(
+                "Sensor {NAME} recovered after {COUNT} invalid reads at offset: {OFFSET}",
+                "NAME", name, "COUNT", invalidReadCount, "OFFSET", offset);
+        }
         updateValueOnly(temp);
+        invalidReadCount = 0;
     }
     else
     {
-        lg2::error("Invalid read at offset: {OFFSET} with value: {VALUE}",
-                   "OFFSET", offset, "VALUE", temp);
+        invalidReadCount++;
+        // Log on the good->bad transition, then periodically as a reminder
+        // while the sensor remains invalid. The reminder cadence is derived
+        // from invalidLogReminderSec and the sensor's pollRate so it stays
+        // ~constant regardless of poll rate or sensor count.
+        if (invalidReadCount == 1 || invalidReadCount % invalidLogInterval == 0)
+        {
+            lg2::error(
+                "Invalid sensor read for {NAME} at offset: {OFFSET} with value: {VALUE} (count: {COUNT})",
+                "NAME", name, "OFFSET", offset, "VALUE", temp, "COUNT",
+                invalidReadCount);
+        }
         incrementError();
     }
     restartRead();

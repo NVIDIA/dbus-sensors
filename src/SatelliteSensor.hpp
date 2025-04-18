@@ -72,6 +72,12 @@ struct SatelliteSensor : public Sensor
     size_t staleBit;
     std::string sensorType;
     std::string valueType;
+    uint invalidReadCount = 0;
+    // Reminder interval for the "still invalid" log line, in seconds. The
+    // per-sensor read count threshold is derived from this and the sensor's
+    // poll rate so the cadence is independent of pollRate and sensor count.
+    static constexpr size_t invalidLogReminderSec = 600; // 10 minutes
+    size_t invalidLogInterval = 1;
 
   private:
     int readRawEepromData(size_t off, uint8_t length, size_t staleOffset,
