@@ -48,6 +48,10 @@ int instance_db_init(struct instance_db **ctx, const char *dbpath)
 		return -EINVAL;
 	}
 
+    if (!dbpath) {
+		return -EINVAL;
+    }
+
 	/* Ensure the underlying file is sized for properly managing allocations
 	 */
 	rc = stat(dbpath, &statbuf);
