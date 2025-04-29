@@ -3,17 +3,16 @@
 #include "gpuserver.h"
 #include "gpuserver_mctp_discovery.h"
 
-#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/bus/match.hpp>
-#include <sdbusplus/server.hpp>
+#include <sdbusplus/message.hpp>
 
+#include <cstdint>
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
-#include <unordered_map>
 #include <variant>
+#include <vector>
 
 namespace gpuserver
 {

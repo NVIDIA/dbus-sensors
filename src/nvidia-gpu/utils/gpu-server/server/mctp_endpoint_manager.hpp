@@ -1,10 +1,8 @@
 #pragma once
 
-#include "gpuserver_mctp_discovery.h"
-
 #include "socket_handler.hpp"
-#include "socket_manager.hpp"
 
+#include <cstdint>
 #include <map>
 #include <vector>
 

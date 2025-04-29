@@ -19,14 +19,13 @@
 
 #include "types.hpp"
 
-#include <string.h>
+#include <asm-generic/socket.h>
 #include <sys/socket.h>
 
 #include <phosphor-logging/lg2.hpp>
 
-#include <iostream>
-#include <map>
-#include <optional>
+#include <cerrno>
+#include <cstring>
 #include <tuple>
 #include <unordered_map>
 

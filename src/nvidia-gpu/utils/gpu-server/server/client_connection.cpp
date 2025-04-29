@@ -1,6 +1,9 @@
 // NOLINTBEGIN
 #include "client_connection.hpp"
 
+#include "gpuserver.h"
+
+#include "globals.hpp"
 #include "mctp_endpoint_manager.hpp"
 
 #include <sys/socket.h>

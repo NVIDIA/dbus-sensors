@@ -6,7 +6,10 @@
 #pragma once
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/connection.hpp>
+
+#include <memory>
 
 /**
  * @brief Main task for handling GPU sensor updates

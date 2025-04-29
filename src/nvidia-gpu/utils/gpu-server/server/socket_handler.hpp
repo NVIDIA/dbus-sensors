@@ -12,9 +12,14 @@
 #include <sdeventplus/event.hpp>
 #include <sdeventplus/source/io.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
-#include <unordered_map>
+#include <string>
+#include <tuple>
+#include <vector>
 
 namespace requester
 {

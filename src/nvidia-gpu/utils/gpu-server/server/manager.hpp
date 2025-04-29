@@ -1,18 +1,17 @@
 #pragma once
 
 #include "client_connection.hpp"
+#include "handler.hpp"
 #include "mctp_endpoint_manager.hpp"
 #include "socket_handler.hpp"
-#include "handler.hpp"
-#include "socket_manager.hpp"
 
 #include <sdeventplus/event.hpp>
 #include <sdeventplus/source/io.hpp>
 
-#include <filesystem>
+#include <cstdint>
 #include <map>
 #include <memory>
-#include <vector>
+#include <string>
 
 namespace gpuserver
 {

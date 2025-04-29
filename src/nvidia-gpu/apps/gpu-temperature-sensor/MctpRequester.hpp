@@ -11,6 +11,11 @@
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/local/datagram_protocol.hpp>
+#include <boost/asio/socket_base.hpp>
+
+#include <cstdint>
+#include <utility>
+#include <vector>
 
 namespace mctp
 {
