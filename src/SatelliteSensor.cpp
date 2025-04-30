@@ -334,7 +334,11 @@ void SatelliteSensor::read()
         return;
     }
 
-    if (ret >= 0)
+    // Check if the sensor reading is within the valid range. In the case where
+    // the sensor type is "Energy", the sensor value monotonically increases
+    // over time, so the sensor reading is not bounded by a max value.
+    if (ret >= 0 && ((temp >= minValue && temp <= maxValue) ||
+                     (sensorType == "Energy" && temp >= minValue)))
     {
         if constexpr (debug)
         {
@@ -344,7 +348,8 @@ void SatelliteSensor::read()
     }
     else
     {
-        lg2::error("Invalid read getRegsInfo");
+        lg2::error("Invalid read at offset: {OFFSET} with value: {VALUE}",
+                   "OFFSET", offset, "VALUE", temp);
         incrementError();
     }
     restartRead();
