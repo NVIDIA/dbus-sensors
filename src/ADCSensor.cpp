@@ -241,5 +241,6 @@ void ADCSensor::checkThresholds()
         return;
     }
 
-    thresholds::checkThresholdsPowerDelay(weak_from_this(), thresholdTimer);
+    [[maybe_unused]] bool status =
+        thresholds::checkThresholdsPowerDelay(weak_from_this(), thresholdTimer);
 }
