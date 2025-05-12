@@ -349,8 +349,17 @@ void createSensors(
                 }
                 if (fanType == FanTypes::i2c)
                 {
+                    std::error_code ec;
                     std::string deviceName =
-                        fs::read_symlink(directory / "device").filename();
+                        fs::read_symlink(directory / "device", ec).filename();
+                    if (ec)
+                    {
+                        // This can happen if the hwmon directory is no longer
+                        std::cerr
+                            << "Error reading device name: " << ec.message()
+                            << "\n";
+                        continue;
+                    }
 
                     size_t bus = 0;
                     size_t addr = 0;
