@@ -114,6 +114,7 @@ class DBusAssociationServer : public AssociationServer
         iface = USBMCTPDDevice::match(config);
         if (iface)
         {
+            info("Creating USBMCTPDDevice");
             return USBMCTPDDevice::from(connection, *iface);
         }
 
@@ -221,7 +222,6 @@ static void removeInventory(const std::shared_ptr<MCTPReactor>& reactor,
             USBMCTPDDevice::match(removed) || SPIMCTPDDevice::match(removed) ||
             XROTMCTPDDevice::match(removed) ||
             PCIeMCTPDDevice::match(removed) ||
-<<<<<<< HEAD
             USBGadgetMCTPDevice::match(removed) ||
             BridgePoolMCTPDevice::match(removed);
         if (mctpConfigRemoved)
@@ -566,7 +566,7 @@ int main()
     boost::asio::post(io, [reactor, systemBus]() {
         auto gsc = std::make_shared<GetSensorConfiguration>(
             systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
-        const std::vector<std::string_view> types{{"MCTPUSBTarget"}};
+        const std::vector<std::string_view> types{{"MCTPUSBDevice"}};
         gsc->getConfiguration(types);
     });
 

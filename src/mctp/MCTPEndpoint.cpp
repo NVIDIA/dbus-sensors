@@ -1675,7 +1675,7 @@ std::string I3CMCTPDDevice::interfaceFromBus(int bus)
     throw MCTPException("No matching net device found for the specified bus");
 }
 
-/* Changes for MCTPUSB */
+/* MCTP USB (upstream MCTPUSBDevice consumer, Gerrit 80452) */
 
 std::optional<SensorBaseConfigMap> USBMCTPDDevice::match(
     const SensorData& config)
@@ -1723,13 +1723,13 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
         mInterface == iface.end())
     {
         throw std::invalid_argument(
-            "Configuration object violates MCTPUSBTarget schema");
+            "Configuration object violates MCTPUSBDevice schema");
     }
 
-    std::vector<std::string> names = getDeviceNames(iface);
-    const auto* name = names[0].c_str();
+    auto name = std::visit(VariantToStringVisitor(), mName->second);
     auto interface = std::visit(VariantToStringVisitor(), mInterface->second);
 
+<<<<<<< HEAD
     std::optional<std::uint8_t> staticEID{};
     if (mStaticEndpointID == iface.end())
     {
@@ -1982,7 +1982,7 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     catch (const MCTPException& ex)
     {
         warning(
-            "Failed to create USBMCTPDDevice at [ interface: {USB_INTERFACE} ]: {EXCEPTION}",
+            "Failed to create MCTPUSBDevice at [ interface: {USB_INTERFACE} ]: {EXCEPTION}",
             "USB_INTERFACE", interface, "EXCEPTION", ex);
         return {};
     }

@@ -551,6 +551,11 @@ class USBMCTPDDevice : public MCTPDDevice
         const SensorBaseConfigMap& iface);
 
     USBMCTPDDevice() = delete;
+    // Upstream MCTPUSBDevice consumer (Gerrit 80452): mctpd assigns the EID
+    // dynamically, so no static/bridge-pool/ignore configuration is read.
+    // Those base-class parameters are passed as std::nullopt to satisfy the
+    // downstream MCTPDDevice constructor while preserving the upstream
+    // dynamic-discovery behaviour.
     USBMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
         const std::string& name, const std::string& interface,
@@ -593,7 +598,7 @@ class USBMCTPDDevice : public MCTPDDevice
     }
 
   private:
-    static constexpr const char* configType = "MCTPUSBTarget";
+    static constexpr const char* configType = "MCTPUSBDevice";
     const uint8_t recoveryThreshold;
 };
 
