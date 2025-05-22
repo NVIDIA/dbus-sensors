@@ -365,3 +365,27 @@ class USBMCTPDDevice : public MCTPDDevice
   private:
     static constexpr const char* configType = "MCTPUSBTarget";
 };
+
+class SPIMCTPDDevice : public MCTPDDevice
+{
+  public:
+    static std::optional<SensorBaseConfigMap> match(const SensorData& config);
+    static bool match(const std::set<std::string>& interfaces);
+    static std::shared_ptr<SPIMCTPDDevice>
+        from(const std::shared_ptr<sdbusplus::asio::connection>& connection,
+             const SensorBaseConfigMap& iface);
+
+    SPIMCTPDDevice() = delete;
+    SPIMCTPDDevice(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection, int bus,
+        int chipselect, std::optional<uint8_t> staticEID = std::nullopt) :
+        MCTPDDevice(connection, interfaceFromBusCs(bus, chipselect), std::vector<uint8_t>{}, staticEID,
+                    std::nullopt)
+    {}
+    ~SPIMCTPDDevice() override = default;
+
+  private:
+    static constexpr const char* configType = "MCTPSPIDevice";
+
+    static std::string interfaceFromBusCs(int bus, int chipselect);
+};

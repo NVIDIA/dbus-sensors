@@ -93,6 +93,12 @@ static std::shared_ptr<MCTPDevice> deviceFromConfig(
         {
             return USBMCTPDDevice::from(connection, *iface);
         }
+
+        iface = SPIMCTPDDevice::match(config);
+        if (iface)
+        {
+            return SPIMCTPDDevice::from(connection, *iface);
+        }
     }
     catch (const std::invalid_argument& ex)
     {
@@ -256,6 +262,12 @@ int main()
         auto gsc = std::make_shared<GetSensorConfiguration>(
             systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
         gsc->getConfiguration({"MCTPUSBTarget"});
+    });
+
+    boost::asio::post(io, [reactor, systemBus]() {
+      auto gsc = std::make_shared<GetSensorConfiguration>(
+          systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
+      gsc->getConfiguration({"MCTPSPIDevice"});
     });
 
     io.run();

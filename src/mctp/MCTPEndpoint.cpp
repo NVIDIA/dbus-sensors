@@ -583,7 +583,7 @@ std::string I2CMCTPDDevice::interfaceFromBus(int bus)
     return it->path().filename();
 }
 
-/* Changes for I2CMCTPUSB */
+/* Changes for MCTPUSB */
 
 std::optional<SensorBaseConfigMap>
     USBMCTPDDevice::match(const SensorData& config)
@@ -692,4 +692,121 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
             "USB_INTERFACE", interface, "EXCEPTION", ex);
         return {};
     }
+}
+
+/* MCTP SPI*/
+std::optional<SensorBaseConfigMap>
+    SPIMCTPDDevice::match(const SensorData& config)
+{
+    auto iface = config.find(configInterfaceName(configType));
+    if (iface == config.end())
+    {
+        return std::nullopt;
+    }
+    return iface->second;
+}
+
+bool SPIMCTPDDevice::match(const std::set<std::string>& interfaces)
+{
+    return interfaces.contains(configInterfaceName(configType));
+}
+
+std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
+    const std::shared_ptr<sdbusplus::asio::connection>& connection,
+    const SensorBaseConfigMap& iface)
+{
+    auto mType = iface.find("Type");
+    if (mType == iface.end())
+    {
+        throw std::invalid_argument(
+            "No 'Type' member found for provided configuration object");
+    }
+
+    auto type = std::visit(VariantToStringVisitor(), mType->second);
+    if (type != configType)
+    {
+        throw std::invalid_argument("Not a SPI device");
+    }
+
+    auto mName = iface.find("Name");
+    auto mBus = iface.find("Bus");
+    auto mChipselect = iface.find("ChipSelect");
+    auto mStaticEndpointID = iface.find("StaticEndpointID");
+    if (mChipselect == iface.end() || mBus == iface.end() || mName == iface.end())
+    {
+        throw std::invalid_argument(
+            "Configuration object violates MCTPSPIDevice schema");
+    }
+
+    auto sBus = std::visit(VariantToStringVisitor(), mBus->second);
+    int bus{};
+    auto [bptr, bec] = std::from_chars(sBus.data(), sBus.data() + sBus.size(),
+                                       bus);
+    if (bec != std::errc{})
+    {
+        throw std::invalid_argument("Bad bus index");
+    }
+
+    auto sChipselect = std::visit(VariantToStringVisitor(), mChipselect->second);
+    int chipselect{};
+    auto [cptr, cec] = std::from_chars(sChipselect.data(), sChipselect.data() + sChipselect.size(),
+    chipselect);
+    if (cec != std::errc{})
+    {
+        throw std::invalid_argument("Bad chip select");
+    }
+
+    std::optional<std::uint8_t> staticEID{};
+    if (mStaticEndpointID == iface.end())
+    {
+        warning(
+            "Info: Key 'StaticEndpointID' is not provided; skipping related processing.");
+    }
+    else
+    {
+        auto sStaticEndpointID = std::visit(VariantToStringVisitor(),
+                                            mStaticEndpointID->second);
+        std::uint8_t parsedEID{};
+        auto [cptr, cec] = std::from_chars(
+            sStaticEndpointID.data(),
+            sStaticEndpointID.data() + sStaticEndpointID.size(), parsedEID);
+        if (cec != std::errc{})
+        {
+            throw std::invalid_argument("Bad endpoint address");
+        }
+        staticEID = parsedEID;
+    }
+
+    try
+    {
+        if (staticEID.has_value())
+        {
+            return std::make_shared<SPIMCTPDDevice>(connection, bus, chipselect,
+                                                    staticEID.value());
+        }
+        return std::make_shared<SPIMCTPDDevice>(connection, bus, chipselect);
+    }
+    catch (const MCTPException& ex)
+    {
+        warning(
+            "Failed to create SPIMCTPDDevice at [ bus: {SPI_BUS}, chipselect: {SPI_CS} ]: {EXCEPTION}",
+            "SPI_BUS", bus, "SPI_CS", chipselect, "EXCEPTION", ex);
+        return {};
+    }
+}
+
+std::string SPIMCTPDDevice::interfaceFromBusCs(int bus, int chipselect)
+{
+    std::filesystem::path netdir =
+        std::format("/sys/bus/spi/devices/spi{}.{}/net", bus, chipselect);
+    std::error_code ec;
+    std::filesystem::directory_iterator it(netdir, ec);
+    if (ec || it == std::filesystem::end(it))
+    {
+        error("No net device associated with SPI bus {SPI_BUS} at {NET_DEVICE}",
+              "SPI_BUS", bus, "NET_DEVICE", netdir);
+        throw MCTPException("Bus is not configured as an MCTP interface");
+    }
+
+    return it->path().filename();
 }
