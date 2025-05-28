@@ -37,6 +37,7 @@ static constexpr uint8_t lun = 0;
 static constexpr float pollRateDefault = 1; // in seconds
 static constexpr uint8_t cableStatusBit = 0;
 static constexpr uint8_t configurationErrorBit = 1;
+static constexpr uint8_t maxInitialRetry = 5;
 
 boost::asio::io_context io;
 auto conn = std::make_shared<sdbusplus::asio::connection>(io);
@@ -161,7 +162,19 @@ bool IpmbSensor::processReading(const std::vector<uint8_t>& data,
 
 void IpmbSensor::read()
 {
-    waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
+    if (!isValueInitialized)
+    {
+        if (initCount < maxInitialRetry)
+        {
+            waitTimer.expires_after(std::chrono::milliseconds(
+                static_cast<int>(pollRateDefault * 1000)));
+            initCount++;
+        }
+    }
+    else
+    {
+        waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
+    }
     waitTimer.async_wait([this](const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
@@ -199,6 +212,7 @@ void IpmbSensor::read()
                 read();
                 return;
             }
+            isValueInitialized = true;
             // Per IPMI 'Get Sensor Reading' specification , 3th byte
             // discrete reading sensor
             sensorInterface->set_property(
