@@ -208,7 +208,13 @@ void SynthesizedSensor::setupMatches()
                         // Change the sensor reading sign according to the
                         // sensorOperands map
                         self->powerReadings[cbPath] = reading * mSign;
-                        self->updateReading();
+                        // Only update the synthesized sensor reading when all
+                        // the sensor operands have been loaded
+                        if (self->powerReadings.size() ==
+                            self->sensorOperands.size())
+                        {
+                            self->updateReading();
+                        }
                     },
                         matches[0].first, cbPath, properties::interface,
                         properties::get, sensorValueInterface, "Value");
