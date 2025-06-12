@@ -231,13 +231,15 @@ void MCTPDDevice::setup(
                 "INVENTORY_PATH", objpath);
         }
     };
-    if (staticEID.has_value() && bridgePoolStartEid.has_value())
+    if (staticEID.has_value())
     {
         connection->async_method_call(
             onSetup, mctpdBusName,
             mctpdControlPath + std::string("/interfaces/") + interface,
             mctpdControlInterface, "AssignEndpointStatic", physaddr,
-            staticEID.value(), bridgePoolStartEid.value());
+            staticEID.value(),
+            static_cast<uint8_t>(bridgePoolStartEid.value_or(
+                static_cast<uint8_t>(staticEID.value() + 1))));
     }
     else
     {
