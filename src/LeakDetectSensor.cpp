@@ -53,6 +53,9 @@ static constexpr double sensorScaleFactor = 0.000806;
 // Round value to 3 decimal places
 static constexpr double roundFactor = 10000;
 
+// Consecutive leak readings before concluding that there is a leak
+static constexpr unsigned int leakDetectedCountThres = 3;
+
 LeakDetectSensor::LeakDetectSensor(
     const std::string& readPath, sdbusplus::asio::object_server& objectServer,
     boost::asio::io_context& io,
@@ -67,8 +70,10 @@ LeakDetectSensor::LeakDetectSensor(
     readPath(readPath),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)),
     leakThreshold(configLeakThreshold), sensorMax(sensorMax),
-    sensorMin(sensorMin), configurationPath(configurationPath),
-    shutdownOnLeak(shutdownOnLeak), shutdownDelaySeconds(shutdownDelaySeconds)
+    sensorMin(sensorMin), detectorState(DetectorState::NORMAL),
+    sensorOverride(false), internalValueSet(false),
+    configurationPath(configurationPath), shutdownOnLeak(shutdownOnLeak),
+    shutdownDelaySeconds(shutdownDelaySeconds), leakDetectedCount(0)
 {
     sdbusplus::message::object_path sensorObjPath(
         "/xyz/openbmc_project/sensors/voltage/");
@@ -222,6 +227,8 @@ LeakDetectSensor::LeakDetectSensor(
         // state
         setDetectorState(DetectorState::FAULT);
     }
+
+    std::cout << name << " successfully instantiated.\n";
 }
 
 LeakDetectSensor::~LeakDetectSensor()
@@ -275,7 +282,19 @@ void LeakDetectSensor::determineDetectorState(double detectorValue)
             }
             else if (detectorValue < leakThreshold)
             {
-                setDetectorState(DetectorState::LEAKAGE);
+                // Only set detector state to leakage if 3 or more consecutive
+                // leak detector readings show a leak.
+                if (++leakDetectedCount >= leakDetectedCountThres)
+                {
+                    setDetectorState(DetectorState::LEAKAGE);
+                }
+            }
+            else
+            {
+                // Reset the count the detector is showing readings within
+                // normal range. Possible sensor faults do not reset this count
+                // in case the fault is caused by a leak.
+                leakDetectedCount = 0;
             }
             break;
         case DetectorState::FAULT:
@@ -362,8 +381,16 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
         internalValueSet = true;
         sensorInterface->set_property("Value", newValue);
         internalValueSet = false;
-    }
 
+#ifdef NVIDIA_SHMEM
+        std::string objPath = sensorInterface->get_object_path();
+        std::string ifaceName = sensorInterface->get_interface_name();
+        std::string parentChassis =
+            sdbusplus::message::object_path(configurationPath).parent_path();
+
+        updateTelemetry(objPath, ifaceName, "Value", newValue, parentChassis);
+#endif
+    }
     restartRead();
 }
 
@@ -374,6 +401,9 @@ void LeakDetectSensor::setDetectorState(DetectorState newDetectorState)
     // Only take action if the detector state has changed
     if (detectorState != newDetectorState)
     {
+        std::cout << name << " changing state to: "
+                  << getDetectorStatusString(detectorState) << ".\n";
+
         // Update the internally tracked state
         detectorState = newDetectorState;
 
@@ -482,7 +512,7 @@ void LeakDetectSensor::startShutdown()
 
 void LeakDetectSensor::executeShutdown()
 {
-    std::cout << "Chassis shutdown requested by " << name << ".\n";
+    std::cout << "Executing shutdown requested by " << name << ".\n";
 
     std::variant<std::string> transitionChassisOff =
         "xyz.openbmc_project.State.Chassis.Transition.Off";

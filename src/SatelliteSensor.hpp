@@ -35,7 +35,8 @@
 #endif
 
 template <typename T>
-int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, int length);
+int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading,
+           uint8_t length);
 
 struct SatelliteSensor : public Sensor
 {
@@ -47,7 +48,8 @@ struct SatelliteSensor : public Sensor
                     std::vector<thresholds::Threshold>&& thresholdData,
                     uint8_t busId, uint8_t addr, uint16_t offset,
                     std::string& sensorType, std::string& valueType,
-                    size_t pollTime, double minVal, double maxVal);
+                    size_t pollTime, double minVal, double maxVal,
+                    PowerState powerState);
     ~SatelliteSensor() override;
 
     void checkThresholds() override;
@@ -56,6 +58,8 @@ struct SatelliteSensor : public Sensor
         return pollRate;
     }
     void read();
+    void restartRead();
+    void deactivate();
     void init();
 
     std::string name;

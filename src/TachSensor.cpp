@@ -64,7 +64,8 @@ TachSensor::TachSensor(const std::string& path, const std::string& objectType,
     objServer(objectServer), redundancy(redundancy),
     presence(std::move(presenceSensor)),
     inputDev(io, path, boost::asio::random_access_file::read_only),
-    waitTimer(io), path(path), led(ledIn), ledReg(ledReg), offset(offset)
+    waitTimer(io), path(path), led(ledIn), ledReg(ledReg), offset(offset),
+    thresholdTimer(io)
 {
     sensorInterface = objectServer.add_interface(
         "/xyz/openbmc_project/sensors/fan_tach/" + name,
@@ -201,7 +202,13 @@ void TachSensor::handleResponse(const boost::system::error_code& err,
 
 void TachSensor::checkThresholds()
 {
-    bool status = thresholds::checkThresholds(this);
+    if (!readingStateGood())
+    {
+        return;
+    }
+
+    bool status = thresholds::checkThresholdsPowerDelay(weak_from_this(),
+                                                        thresholdTimer);
 
     if ((redundancy != nullptr) && *redundancy)
     {

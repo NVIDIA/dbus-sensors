@@ -20,6 +20,7 @@
 
 #include "DeviceMgmt.hpp"
 #include "VariantVisitors.hpp"
+#include "sharedMemUtils.hpp"
 
 #include <boost/asio/error.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -31,11 +32,13 @@
 #include <sdbusplus/exception.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
+#include <tal.hpp>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -881,3 +884,66 @@ void addEventLog(const std::shared_ptr<sdbusplus::asio::connection>& conn,
         "xyz.openbmc_project.Logging.Create", "Create", messageId, severity,
         addData);
 }
+void parseSensorParamFromConfig(const SensorData& sensorData,
+                                paramMap& sensorParamMap)
+{
+    for (const auto& [intf, cfg] : sensorData)
+    {
+        if (intf.find("SensorParams") == std::string::npos)
+        {
+            continue;
+        }
+        double maxValue = 0;
+        double minValue = 0;
+        auto maxValueFind = cfg.find("MaxValue");
+        auto minValueFind = cfg.find("MinValue");
+        if (maxValueFind != cfg.end())
+        {
+            maxValue = std::visit(VariantToDoubleVisitor(),
+                                  maxValueFind->second);
+            sensorParamMap.emplace("maxValue", maxValue);
+        }
+        if (minValueFind != cfg.end())
+        {
+            minValue = std::visit(VariantToDoubleVisitor(),
+                                  minValueFind->second);
+            sensorParamMap.emplace("minValue", minValue);
+        }
+    }
+}
+
+void getSensorParamMapValues(double& maxValue, double& minValue,
+                             paramMap& sensorParamMap)
+{
+    for (const auto& [param, value] : sensorParamMap)
+    {
+        if (param == "minValue")
+        {
+            minValue = value;
+        }
+        else if (param == "maxValue")
+        {
+            maxValue = value;
+        }
+    }
+}
+
+#ifdef NVIDIA_SHMEM
+void updateTelemetry(const std::string& objPath, const std::string& ifaceName,
+                     const char* propertyName, const double& value,
+                     const std::string& parentChassis)
+{
+    // Update Shared Memory Space
+    DbusVariantType propValue = value;
+    uint16_t retCode = 0;
+    uint64_t timestamp =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    std::vector<uint8_t> rawPropValue = {};
+
+    tal::TelemetryAggregator::updateTelemetry(objPath, ifaceName, propertyName,
+                                              rawPropValue, timestamp, retCode,
+                                              propValue, parentChassis);
+}
+#endif

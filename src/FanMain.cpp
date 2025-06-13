@@ -32,6 +32,7 @@
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
+#include <tal.hpp>
 
 #include <array>
 #include <chrono>
@@ -348,8 +349,17 @@ void createSensors(
                 }
                 if (fanType == FanTypes::i2c)
                 {
+                    std::error_code ec;
                     std::string deviceName =
-                        fs::read_symlink(directory / "device").filename();
+                        fs::read_symlink(directory / "device", ec).filename();
+                    if (ec)
+                    {
+                        // This can happen if the hwmon directory is no longer
+                        std::cerr
+                            << "Error reading device name: " << ec.message()
+                            << "\n";
+                        continue;
+                    }
 
                     size_t bus = 0;
                     size_t addr = 0;
@@ -658,6 +668,15 @@ int main()
     matches.emplace_back(std::move(match));
 
     setupManufacturingModeMatch(*systemBus);
+
+#ifdef NVIDIA_SHMEM
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "fansensor"))
+    {
+        std::cout
+            << "Successfully registered TAL namespaceInit for Fan Sensor\n";
+    }
+#endif
     io.run();
     return 0;
 }

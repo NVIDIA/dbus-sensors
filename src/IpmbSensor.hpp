@@ -136,6 +136,8 @@ struct IpmbSensor :
     std::optional<uint8_t> initCommand;
     std::vector<uint8_t> initData;
     int sensorPollMs;
+    bool isValueInitialized = false;
+    uint8_t initCount = 0;
 
     ReadingFormat readingFormat = ReadingFormat::byte0;
 

@@ -38,6 +38,7 @@
 #include <sdbusplus/exception.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
+#include <tal.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1245,5 +1246,14 @@ int main()
     getPresentCpus(systemBus);
 
     setupManufacturingModeMatch(*systemBus);
+
+#ifdef NVIDIA_SHMEM
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "psusensor"))
+    {
+        std::cout
+            << "Successfully registered TAL namespaceInit for PSUSensor\n";
+    }
+#endif
     io.run();
 }

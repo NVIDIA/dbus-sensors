@@ -103,6 +103,7 @@ class TachSensor :
     std::optional<uint8_t> ledReg;
     std::optional<uint8_t> offset;
     bool ledState = false;
+    thresholds::ThresholdTimer thresholdTimer;
 
     void handleResponse(const boost::system::error_code& err, size_t bytesRead);
     void restartRead(size_t pollTime);

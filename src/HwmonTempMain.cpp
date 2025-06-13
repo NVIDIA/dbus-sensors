@@ -100,6 +100,7 @@ static const I2CDeviceTypeMap sensorTypes{
     {"TMP451", I2CDeviceType{"tpm451", true}},
     {"TMP432", I2CDeviceType{"tpm432", true}},
     {"W83773G", I2CDeviceType{"w83773g", true}},
+    {"TMP75C", I2CDeviceType{"tmp75c", true}},
 };
 
 std::string getPlatform()
@@ -630,6 +631,13 @@ static void powerStateChanged(
     boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
 {
+    // Only check for PowerOn sensors to prevent invoking createSensors
+    // repeatedly
+    if (type != PowerState::on)
+    {
+        return;
+    }
+
     if (newState)
     {
         createSensors(io, objectServer, sensors, dbusConnection, nullptr, true);
@@ -714,10 +722,12 @@ int main()
 
     matches.emplace_back(std::move(ifaceRemovedMatch));
 
+#ifdef NVIDIA_SHMEM
     if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
                                                 "hwmontemp"))
     {
         std::cout << "Successfully registerd TAL namespaceInit for hwmontemp\n";
     }
+#endif
     io.run();
 }

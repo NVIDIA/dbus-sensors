@@ -33,6 +33,7 @@
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
+#include <tal.hpp>
 
 #include <array>
 #include <chrono>
@@ -53,6 +54,8 @@
 static constexpr bool debug = false;
 static constexpr float pollRateDefault = 0.5;
 static constexpr float gpioBridgeSetupTimeDefault = 0.02;
+static constexpr double maxVoltageReading = 1.8; // pre sensor scaling
+static constexpr double minVoltageReading = 0;
 
 namespace fs = std::filesystem;
 
@@ -256,7 +259,11 @@ void createSensors(
                     scaleFactor = 1.0;
                 }
             }
-
+            double maxValue = maxVoltageReading;
+            double minValue = minVoltageReading;
+            paramMap sensorParamMap;
+            parseSensorParamFromConfig(*sensorData, sensorParamMap);
+            getSensorParamMapValues(maxValue, minValue, sensorParamMap);
             float pollRate = getPollRate(baseConfiguration->second,
                                          pollRateDefault);
             PowerState readState = getPowerState(baseConfiguration->second);
@@ -305,7 +312,7 @@ void createSensors(
             sensor = std::make_shared<ADCSensor>(
                 path.string(), objectServer, dbusConnection, io, sensorName,
                 std::move(sensorThresholds), scaleFactor, pollRate, readState,
-                *interfacePath, std::move(bridgeGpio));
+                *interfacePath, std::move(bridgeGpio), maxValue, minValue);
             sensor->setupRead();
         }
     });
@@ -420,5 +427,13 @@ int main()
         cpuPresenceHandler));
 
     setupManufacturingModeMatch(*systemBus);
+#ifdef NVIDIA_SHMEM
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "adcsensor"))
+    {
+        std::cout
+            << "Successfully registered TAL namespaceInit for ADC Sensor\n";
+    }
+#endif
     io.run();
 }

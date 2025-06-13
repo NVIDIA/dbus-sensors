@@ -100,7 +100,6 @@ void createSensors(
             {
                 if (intf != configInterfaceName(sensorType))
                 {
-                    std::cerr << "Cannot find config interface name\n";
                     continue;
                 }
 

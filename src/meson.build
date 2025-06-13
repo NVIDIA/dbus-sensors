@@ -463,7 +463,3 @@ if get_option('write-protect').enabled()
         install: true
     )
 endif
-
-if get_option('nvidia-gpu').allowed()
-    subdir('nvidia-gpu')
-endif

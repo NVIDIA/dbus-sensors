@@ -29,6 +29,7 @@
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
+#include <tal.hpp>
 
 #include <array>
 #include <chrono>
@@ -45,7 +46,7 @@
 #include <variant>
 #include <vector>
 
-static constexpr float pollRateDefault = 0.25;
+static constexpr float pollRateDefault = 0.1;
 
 static const I2CDeviceTypeMap i2CDeviceTypes{
     {"MAX1363", I2CDeviceType{"max1363", false}},
@@ -505,5 +506,13 @@ int main()
 
     systemBus->request_name("xyz.openbmc_project.LeakDetector");
 
+#ifdef NVIDIA_SHMEM
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "leakdetectsensor"))
+    {
+        std::cout
+            << "Successfully registered TAL namespaceInit for LeakDetect Sensor\n";
+    }
+#endif
     io.run();
 }

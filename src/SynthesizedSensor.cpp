@@ -50,7 +50,6 @@
 
 constexpr const char* synthesizedsensorType = "SummationSensor";
 static constexpr bool debug = false;
-
 constexpr const auto monitorTypes{
     std::to_array<const char*>({synthesizedsensorType})};
 
@@ -72,12 +71,9 @@ static void setupSensorMatch(
         {
             return;
         }
+        // The synthesized sensor value should update if any of the sensors
+        // comprising is 'NaN'
         double value = std::visit(VariantToDoubleVisitor(), findValue->second);
-        if (std::isnan(value))
-        {
-            return;
-        }
-
         callback(value, message);
     };
     matches.emplace_back(connection,
@@ -96,10 +92,11 @@ SynthesizedSensor::SynthesizedSensor(
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     const std::string& sensorName, const std::string& sensorConfiguration,
     sdbusplus::asio::object_server& objectServer,
-    std::vector<thresholds::Threshold>&& thresholdData) :
+    std::vector<thresholds::Threshold>&& thresholdData, const double maxValue,
+    const double minValue) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
-           sensorConfiguration, synthesizedsensorType, false, false,
-           totalHscMaxReading, totalHscMinReading, conn),
+           sensorConfiguration, synthesizedsensorType, false, false, maxValue,
+           minValue, conn),
     objServer(objectServer)
 {
     sensorInterface =
@@ -131,7 +128,6 @@ SynthesizedSensor::~SynthesizedSensor()
 void SynthesizedSensor::setupMatches()
 {
     constexpr const auto matchTypes{std::to_array<const char*>({"power"})};
-
     std::weak_ptr<SynthesizedSensor> weakRef = weak_from_this();
     for (const std::string type : matchTypes)
     {
@@ -146,17 +142,20 @@ void SynthesizedSensor::setupMatches()
             if (type == "power")
             {
                 std::string path = message.get_path();
-                for (std::string& sensName : self->sensorOperands)
+                for (const auto& [sensName, mSign] : self->sensorOperands)
                 {
                     if (path.ends_with(sensName))
                     {
-                        self->powerReadings[message.get_path()] = value;
+                        // Change the sensor reading sign according to the
+                        // sensorOperands map
+                        self->powerReadings[message.get_path()] = value * mSign;
                     }
                 }
             }
             self->updateReading();
         });
     }
+
     dbusConnection->async_method_call(
         [weakRef](boost::system::error_code ec, const GetSubTreeType& subtree) {
         if (ec)
@@ -178,7 +177,7 @@ void SynthesizedSensor::setupMatches()
                 continue;
             }
             std::string sensorName = path.substr(lastSlash + 1);
-            for (std::string& sensName : self->sensorOperands)
+            for (const auto& [sensName, mSign] : self->sensorOperands)
             {
                 if (sensorName == sensName)
                 {
@@ -186,8 +185,9 @@ void SynthesizedSensor::setupMatches()
                     // structured binding)
                     const std::string& cbPath = path;
                     self->dbusConnection->async_method_call(
-                        [weakRef, cbPath](boost::system::error_code ec,
-                                          const std::variant<double>& value) {
+                        [weakRef, cbPath,
+                         mSign](boost::system::error_code ec,
+                                const std::variant<double>& value) {
                         if (ec)
                         {
                             std::cerr << "Error getting value from " << cbPath
@@ -205,7 +205,16 @@ void SynthesizedSensor::setupMatches()
                             std::cerr << cbPath << "Reading " << reading
                                       << "\n";
                         }
-                        self->powerReadings[cbPath] = reading;
+                        // Change the sensor reading sign according to the
+                        // sensorOperands map
+                        self->powerReadings[cbPath] = reading * mSign;
+                        // Only update the synthesized sensor reading when all
+                        // the sensor operands have been loaded
+                        if (self->powerReadings.size() ==
+                            self->sensorOperands.size())
+                        {
+                            self->updateReading();
+                        }
                     },
                         matches[0].first, cbPath, properties::interface,
                         properties::get, sensorValueInterface, "Value");
@@ -233,30 +242,22 @@ void SynthesizedSensor::updateReading()
 
 bool SynthesizedSensor::calculate(double& val)
 {
-    constexpr size_t maxErrorPrint = 5;
-    static size_t errorPrint = maxErrorPrint;
-
     double totalPower = 0;
+    if (powerReadings.empty())
+    {
+        // If no sensors are loaded, the synthesized sensor value should be NaN.
+        return false;
+    }
     for (const auto& [path, reading] : powerReadings)
     {
         if (std::isnan(reading))
         {
-            continue;
+            // The synthesized sensor value should update if any of the sensors
+            // comprising is 'NaN'
+            return false;
         }
         totalPower += reading;
     }
-
-    if (totalPower == 0)
-    {
-        if (errorPrint > 0)
-        {
-            errorPrint--;
-            std::cerr << "total power 0\n";
-        }
-        val = 0;
-        return false;
-    }
-
     val = totalPower;
     return true;
 }
@@ -283,7 +284,6 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
         for (const auto& [path, interfaces] : resp)
         {
             summationSensor = nullptr;
-
             for (const auto& [intf, cfg] : interfaces)
             {
                 // Get Summation sensor related info
@@ -294,22 +294,50 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
                     // for thresholds.
                     std::vector<thresholds::Threshold> sensorThresholds;
                     parseThresholdsFromConfig(interfaces, sensorThresholds);
-
+                    paramMap sensorParamMap;
+                    parseSensorParamFromConfig(interfaces, sensorParamMap);
+                    /*read the "SensorParam" vector and check for minValue and
+                    MaxValue If one of the values is not in the SensorParam use
+                    the defalut values.
+                    */
+                    double maxValue = totalHscMaxReading;
+                    double minValue = totalHscMinReading;
+                    getSensorParamMapValues(maxValue, minValue, sensorParamMap);
                     std::string name = loadVariant<std::string>(cfg, "Name");
                     summationSensor = std::make_shared<SynthesizedSensor>(
                         dbusConnection, name, path.str, objectServer,
-                        std::move(sensorThresholds));
+                        std::move(sensorThresholds), maxValue, minValue);
                     summationSensor->sensorOperands.clear();
-
-                    summationSensor->sensorOperands =
+                    /*
+                    Retrieve the SensorsToSum vector from entity manager files.
+                    Create the sensorOperands map: assign 1 for "+" or -1 for
+                    "-". For other values, use the sensor name as the map key.
+                    */
+                    std::vector<std::string> sensorOperandstTmp =
                         loadVariant<std::vector<std::string>>(cfg,
                                                               "SensorsToSum");
+                    int mathSign = 1;
+                    for (std::string paramStr : sensorOperandstTmp)
+                    {
+                        if (paramStr == "-")
+                        {
+                            mathSign = -1;
+                        }
+                        else if (paramStr == "+")
+                        {
+                            mathSign = 1;
+                        }
+                        else if (paramStr != "-" && paramStr != "+")
+                        {
+                            summationSensor->sensorOperands.emplace(
+                                std::move(paramStr), std::move(mathSign));
+                        }
+                    }
                 }
             }
             if (summationSensor)
             {
                 synthSensors.push_back(summationSensor);
-
                 summationSensor->setupMatches();
                 summationSensor->updateReading();
             }
@@ -353,6 +381,15 @@ int main()
         setupPropertiesChangedMatches(*systemBus, monitorTypes, eventHandler);
 
     setupManufacturingModeMatch(*systemBus);
+#ifdef NVIDIA_SHMEM
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "synthesizedsensor"))
+    {
+        std::cout
+            << "Successfully registered TAL namespaceInit for SynthesizedSensor\n";
+    }
+#endif
+
     io.run();
     return 0;
 }
