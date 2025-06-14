@@ -57,7 +57,7 @@ void MCTPDDevice::onDiscoveryMatchRule()
 {
     const auto matchRule = sdbusplus::bus::match::rules::type::signal() +
                            sdbusplus::bus::match::rules::path(mctpdControlPath) +
-                           sdbusplus::bus::match::rules::interface(mctpdControlInterface) +
+                           sdbusplus::bus::match::rules::interface(mctpdEndpointControlInterface) +
                            sdbusplus::bus::match::rules::member("DiscoveryNotify");
 
     discoveryNotifyMatch = std::make_unique<sdbusplus::bus::match_t>(
