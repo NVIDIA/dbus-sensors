@@ -152,7 +152,10 @@ void SynthesizedSensor::setupMatches()
                     }
                 }
             }
-            self->updateReading();
+            if (self->powerReadings.size() == self->sensorOperands.size())
+            {
+                self->updateReading();
+            }
         });
     }
 
@@ -339,7 +342,11 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
             {
                 synthSensors.push_back(summationSensor);
                 summationSensor->setupMatches();
-                summationSensor->updateReading();
+                if (summationSensor->powerReadings.size() ==
+                    summationSensor->sensorOperands.size())
+                {
+                    summationSensor->updateReading();
+                }
             }
         }
     });
