@@ -179,3 +179,9 @@ option(
     value: 'enabled',
     description: 'Use NVIDIA Shared-Memory IPC.',
 )
+option(
+    'nvme-mi',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable NVMe-MI sensor.',
+)

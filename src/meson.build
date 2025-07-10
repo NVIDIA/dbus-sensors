@@ -208,6 +208,25 @@ if get_option('nvme').allowed()
     )
 endif
 
+if get_option('nvme-mi').allowed()
+    nvme_srcs = files('NVMeMiSensor.cpp', 'NVMeMiSensorMain.cpp')
+    nvme_srcs += files('NVMeMiContext.cpp')
+    nvme_srcs += files('NVMeMiStatusSensor.cpp')
+    nvme_srcs += files('NVMeMiManager.cpp')
+
+    libnvme = dependency('libnvme')
+    libnvme_mi = dependency('libnvme-mi')
+
+    nvme_deps = [default_deps, i2c, thresholds_dep, utils_dep, threads, libnvme, libnvme_mi]
+
+    executable(
+        'misensor',
+        sources: nvme_srcs,
+        dependencies: nvme_deps,
+        install: true,
+    )
+endif
+
 if get_option('psu').allowed()
     executable(
         'psusensor',

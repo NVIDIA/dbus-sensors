@@ -20,6 +20,7 @@ unit_files = [
     ['nvidia-gpu', 'xyz.openbmc_project.nvidiagpusensor.service'],
     ['mcu', 'xyz.openbmc_project.mcutempsensor.service'],
     ['nvme', 'xyz.openbmc_project.nvmesensor.service'],
+    ['nvme-mi', 'xyz.openbmc_project.nvmemisensor.service'],
     ['psu', 'xyz.openbmc_project.psusensor.service'],
     ['external', 'xyz.openbmc_project.externalsensor.service'],
     ['procstatus', 'xyz.openbmc_project.processorstatus.service'],
