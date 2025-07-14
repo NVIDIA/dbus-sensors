@@ -434,3 +434,19 @@ void NVMeBasicContext::processResponse(std::shared_ptr<NVMeSensor>& sensor,
 
     sensor->updateValue(value);
 }
+
+void NVMeBasicContext::close()
+{
+    // Call the base class close method
+    NVMeContext::close();
+
+    // Close the stream descriptors to signal the thread to terminate
+    reqStream.close();
+    respStream.close();
+
+    // Wait for the thread to finish
+    if (thread.joinable())
+    {
+        thread.join();
+    }
+}

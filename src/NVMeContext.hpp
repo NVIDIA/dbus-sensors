@@ -24,6 +24,7 @@ class NVMeContext : public std::enable_shared_from_this<NVMeContext>
     virtual ~NVMeContext()
     {
         scanTimer.cancel();
+        sensors.clear();
     }
 
     void addSensor(const std::shared_ptr<NVMeSensor>& sensor)
