@@ -33,10 +33,7 @@ class NVMeMiContext : public NVMeContext, public std::enable_shared_from_this<NV
     void close() override;
     void pollNVMeDevices() override;
     void readAndProcessNVMeSensor() override;
-    // Unified response processing function
-    template <typename SensorType>
-    void processResponse(std::shared_ptr<SensorType>& sensor, void* msg,
-                         size_t len);
+    void processResponse(void* msg, size_t len);
 
     void setupPipes(FileHandle requestPipe, FileHandle responsePipe,
                     boost::asio::posix::stream_descriptor requestStream,
@@ -53,11 +50,9 @@ class NVMeMiContext : public NVMeContext, public std::enable_shared_from_this<NV
     }
 
   private:
-    template <typename SensorType, typename ProcessFunc>
-    void sendNVMeCommand(uint8_t command, const std::string& sensorType,
-                         std::shared_ptr<SensorType> sensor,
-                         ProcessFunc processFunc);
+    void sendNVMeMICommand();
 
+  private:
     boost::asio::io_context& io;
     uint8_t eid{0};
 

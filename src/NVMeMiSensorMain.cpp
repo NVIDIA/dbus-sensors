@@ -196,10 +196,9 @@ static void discoverMctpEndpoint(
 }
 
 static std::shared_ptr<NVMeContext>
-    provideMiContext(boost::asio::io_context& io, NVMEMap& map,
-                     std::string sensorName, uint8_t eid)
+    provideMiContext(boost::asio::io_context& io, NVMEMap& map, uint8_t eid)
 {
-    auto findRoot = map.find(sensorName);
+    auto findRoot = map.find(eid);
     if (findRoot != map.end())
     {
         return findRoot->second;
@@ -207,7 +206,7 @@ static std::shared_ptr<NVMeContext>
 
     std::shared_ptr<NVMeContext> context = std::make_shared<NVMeMiContext>(io,
                                                                            eid);
-    map[sensorName] = context;
+    map[eid] = context;
 
     return context;
 }
@@ -288,74 +287,85 @@ static void handleSensorConfigurations(
         }
     }
 
-    // Start MCTP discovery for each sensor configuration
+    // Group sensor configurations by EID
+    std::map<uint8_t, std::vector<SensorConfig>> sensorsByEid;
     for (const auto& sensorConfig : pendingSensors)
     {
-        discoverMctpEndpoint(sensorConfig.eid, dbusConnection,
+        sensorsByEid[sensorConfig.eid].push_back(sensorConfig);
+    }
+
+    // Start MCTP discovery for each unique EID
+    for (const auto& [eid, sensorConfigs] : sensorsByEid)
+    {
+        discoverMctpEndpoint(eid, dbusConnection,
                              [&io, &objectServer, &dbusConnection,
-                              sensorConfig](uint8_t discoveredEid, int net) {
+                              sensorConfigs,
+                              eid](uint8_t discoveredEid, int net) {
             // Check if discovered EID matches expected EID
-            if (discoveredEid != sensorConfig.eid)
+            if (discoveredEid != eid)
             {
                 lg2::debug("EID mismatch: expected {EXPECTED}, found {FOUND}",
-                           "EXPECTED", sensorConfig.eid, "FOUND",
-                           discoveredEid);
+                           "EXPECTED", eid, "FOUND", discoveredEid);
                 return;
             }
 
-            std::shared_ptr<NVMeContext> context = provideMiContext(
-                io, nvmeDeviceMap, sensorConfig.sensorName, discoveredEid);
+            std::shared_ptr<NVMeContext> context =
+                provideMiContext(io, nvmeDeviceMap, discoveredEid);
 
             auto nvmeContext = std::static_pointer_cast<NVMeMiContext>(context);
             if (commManager)
             {
-                commManager->addContext(nvmeContext, net, discoveredEid,
-                                        sensorConfig.sensorName);
+                commManager->addContext(nvmeContext, net, discoveredEid);
             }
 
             try
             {
-                if (!sensorConfig.thresholds.empty())
+                // Create both temperature and status sensors for this EID
+                for (const auto& sensorConfig : sensorConfigs)
                 {
-                    // Create temperature sensor
-                    auto thresholds = sensorConfig.thresholds; // Make a copy
-                    std::shared_ptr<NVMeSensor> sensorPtr =
-                        std::make_shared<NVMeSensor>(
-                            objectServer, io, dbusConnection,
-                            sensorConfig.sensorName, std::move(thresholds),
-                            sensorConfig.interfacePath, discoveredEid);
+                    if (!sensorConfig.thresholds.empty())
+                    {
+                        // Create temperature sensor (has thresholds)
+                        auto thresholds =
+                            sensorConfig.thresholds; // Make a copy
+                        std::shared_ptr<NVMeSensor> sensorPtr =
+                            std::make_shared<NVMeSensor>(
+                                objectServer, io, dbusConnection,
+                                sensorConfig.sensorName, std::move(thresholds),
+                                sensorConfig.interfacePath, discoveredEid);
 
-                    context->addSensor<NVMeSensor>(sensorPtr);
-                }
-                else
-                {
-                    // Create status sensor
-                    std::shared_ptr<NVMeStatusSensor> statusSensorPtr =
-                        std::make_shared<NVMeStatusSensor>(
-                            objectServer, io, dbusConnection,
-                            sensorConfig.sensorName, sensorConfig.interfacePath,
-                            discoveredEid);
+                        context->addSensor<NVMeSensor>(sensorPtr);
+                    }
+                    else
+                    {
+                        // Create status sensor (no thresholds)
+                        std::shared_ptr<NVMeStatusSensor> statusSensorPtr =
+                            std::make_shared<NVMeStatusSensor>(
+                                objectServer, io, dbusConnection,
+                                sensorConfig.sensorName,
+                                sensorConfig.interfacePath, discoveredEid);
 
-                    context->addSensor<NVMeStatusSensor>(statusSensorPtr);
+                        context->addSensor<NVMeStatusSensor>(statusSensorPtr);
+                    }
                 }
 
                 lg2::debug(
-                    "polling nvme devices for sensor: {SENSOR} eid: {EID}",
-                    "SENSOR", sensorConfig.sensorName, "EID",
-                    static_cast<int>(discoveredEid));
+                    "polling nvme devices for eid: {EID} with {COUNT} sensors",
+                    "EID", static_cast<int>(discoveredEid), "COUNT",
+                    sensorConfigs.size());
                 context->pollNVMeDevices();
             }
             catch (const std::invalid_argument& ex)
             {
-                lg2::error("Failed to add sensor for {PATH} {ERROR}", "PATH",
-                           sensorConfig.interfacePath, "ERROR", ex.what());
+                lg2::error("Failed to add sensors for eid {EID} {ERROR}", "EID",
+                           discoveredEid, "ERROR", ex.what());
             }
         });
     }
 
     lg2::debug(
         "NVMe sensor discovery initiated for {COUNT} sensor configurations.",
-        "COUNT", pendingSensors.size());
+        "COUNT", sensorsByEid.size());
 }
 
 void createSensors(boost::asio::io_context& io,
@@ -385,7 +395,7 @@ static void interfaceRemoved(sdbusplus::message_t& message, NVMEMap& contexts)
 
     message.read(path, interfaces);
 
-    for (auto& [_, context] : contexts)
+    for (auto& [eid, context] : contexts)
     {
         // Check for temperature sensors
         std::optional<std::shared_ptr<NVMeSensor>> sensor =

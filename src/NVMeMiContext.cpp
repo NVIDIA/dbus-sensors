@@ -54,94 +54,56 @@ void NVMeMiContext::setupPipes(FileHandle reqPipe, FileHandle respPipe,
 
 void NVMeMiContext::readAndProcessNVMeSensor()
 {
-    if (pollCursor != sensors.end())
-    {
-        auto& sensorVariant = *pollCursor++;
+    bool shouldSendCommand = false;
 
-        std::visit([weakSelf{weak_from_this()}](auto& sensor) {
+    for (auto& sensorVariant : sensors)
+    {
+        std::visit([&shouldSendCommand](auto& sensor) {
             using SensorType = std::decay_t<decltype(sensor)>;
 
             if constexpr (std::is_same_v<SensorType,
                                          std::shared_ptr<NVMeSensor>>)
             {
-                // Handle temperature sensor
+                // Check temperature sensor conditions
                 if (!sensor->readingStateGood())
                 {
                     sensor->markAvailable(false);
                     sensor->updateValue(
                         std::numeric_limits<double>::quiet_NaN());
-                    if (auto self = weakSelf.lock())
-                    {
-                        self->readAndProcessNVMeSensor();
-                    }
                     return;
                 }
 
-                /* Potentially defer sampling the sensor if it is in error */
-                if (!sensor->sample())
+                if (sensor->sample())
                 {
-                    if (auto self = weakSelf.lock())
-                    {
-                        self->readAndProcessNVMeSensor();
-                    }
-                    return;
-                }
-
-                // Send temperature sensor command
-                if (auto self = weakSelf.lock())
-                {
-                    self->sendNVMeCommand(
-                        NVME_LOG_LID_SMART, "temperature", sensor,
-                        [weakSelf](std::shared_ptr<NVMeSensor>& sensor,
-                                   void* data, size_t len) {
-                        if (auto self = weakSelf.lock())
-                        {
-                            self->processResponse(sensor, data, len);
-                        }
-                    });
+                    shouldSendCommand = true;
                 }
             }
             else if constexpr (std::is_same_v<
                                    SensorType,
                                    std::shared_ptr<NVMeStatusSensor>>)
             {
-                if (!sensor->sample())
+                // Check status sensor conditions
+                if (sensor->sample())
                 {
-                    if (auto self = weakSelf.lock())
-                    {
-                        self->readAndProcessNVMeSensor();
-                    }
-                    return;
-                }
-
-                // Send status sensor command
-                if (auto self = weakSelf.lock())
-                {
-                    self->sendNVMeCommand(
-                        NVME_LOG_LID_SMART, "status", sensor,
-                        [weakSelf](std::shared_ptr<NVMeStatusSensor>& sensor,
-                                   void* data, size_t len) {
-                        if (auto self = weakSelf.lock())
-                        {
-                            self->processResponse(sensor, data, len);
-                        }
-                    });
+                    shouldSendCommand = true;
                 }
             }
         }, sensorVariant);
-
-        return;
     }
 
-    // Reset cursor and start next polling cycle
-    pollCursor = sensors.end();
-    this->pollNVMeDevices();
+    // Send unified command if any sensor is ready
+    if (shouldSendCommand)
+    {
+        sendNVMeMICommand();
+    }
+    else
+    {
+        pollNVMeDevices();
+    }
 }
 
 void NVMeMiContext::pollNVMeDevices()
 {
-    pollCursor = sensors.begin();
-
     scanTimer.expires_after(std::chrono::seconds(1));
     scanTimer.async_wait([weakSelf{weak_from_this()}](
                              const boost::system::error_code errorCode) {
@@ -174,31 +136,20 @@ void NVMeMiContext::close()
     responseStream.close();
 }
 
-template void
-    NVMeMiContext::processResponse(std::shared_ptr<NVMeSensor>& sensor,
-                                   void* msg, size_t len);
-template void
-    NVMeMiContext::processResponse(std::shared_ptr<NVMeStatusSensor>& sensor,
-                                   void* msg, size_t len);
-
-template <typename SensorType, typename ProcessFunc>
-void NVMeMiContext::sendNVMeCommand(uint8_t command,
-                                    const std::string& sensorType,
-                                    std::shared_ptr<SensorType> sensor,
-                                    ProcessFunc processFunc)
+void NVMeMiContext::sendNVMeMICommand()
 {
     std::array<uint8_t, 4> cmdArray{};
-    cmdArray[0] = command;
+    cmdArray[0] = NVME_LOG_LID_SMART;
     cmdArray[1] = 0; // nsid
 
     /* Issue the request */
     boost::asio::async_write(
         requestStream, boost::asio::buffer(cmdArray.data(), cmdArray.size()),
-        [cmdArray, sensorType](boost::system::error_code ec, std::size_t) {
+        [cmdArray](boost::system::error_code ec, std::size_t) {
         if (ec)
         {
-            lg2::error("Got error writing {SENSOR} query: {ERROR}", "SENSOR",
-                       sensorType, "ERROR", ec.message().c_str());
+            lg2::error("Got error writing NVMe-MI command: {ERROR}", "ERROR",
+                       ec.message().c_str());
         }
     });
 
@@ -206,14 +157,15 @@ void NVMeMiContext::sendNVMeCommand(uint8_t command,
     response->prepare(1);
 
     /* Gather the response and dispatch for parsing */
-    boost::asio::async_read(responseStream, *response,
-                            [response, lengthRead = false, actualLength = 0u,
-                             sensorType](const boost::system::error_code& ec,
-                                         std::size_t n) mutable -> std::size_t {
+    boost::asio::async_read(
+        responseStream, *response,
+        [response, lengthRead = false,
+         actualLength = 0u](const boost::system::error_code& ec,
+                            std::size_t n) mutable -> std::size_t {
         if (ec)
         {
-            lg2::error("Got error reading NVMe-MI {SENSOR} command: {ERROR}",
-                       "SENSOR", sensorType, "ERROR", ec.message().c_str());
+            lg2::error("Got error reading unified NVMe-MI command: {ERROR}",
+                       "ERROR", ec.message().c_str());
             return static_cast<std::size_t>(0);
         }
 
@@ -238,13 +190,12 @@ void NVMeMiContext::sendNVMeCommand(uint8_t command,
 
         return static_cast<std::size_t>(4 - n); // Need more length bytes
     },
-                            [weakSelf{weak_from_this()}, sensor, response,
-                             processFunc](const boost::system::error_code& ec,
-                                          std::size_t length) mutable {
+        [weakSelf{weak_from_this()}, response](
+            const boost::system::error_code& ec, std::size_t length) mutable {
         if (ec)
         {
-            lg2::error("Got error reading NVMe-MI command: {ERROR}", "ERROR",
-                       ec.message().c_str());
+            lg2::error("Got error reading unified NVMe-MI command: {ERROR}",
+                       "ERROR", ec.message().c_str());
             return;
         }
 
@@ -261,11 +212,8 @@ void NVMeMiContext::sendNVMeCommand(uint8_t command,
             std::vector<char> data(response->size());
             is.read(data.data(), data.size());
 
-            /* Update the sensor using the provided process function */
-            processFunc(sensor, data.data(), data.size());
-
-            /* Continue with next sensor */
-            self->readAndProcessNVMeSensor();
+            /* Update all sensors with the same response data */
+            self->processResponse(data.data(), data.size());
         }
     });
 }
@@ -278,58 +226,56 @@ static double getTemperatureReading(nvme_smart_log* log)
     return static_cast<double>(temp) - 273.15;
 }
 
-template <typename SensorType>
-void NVMeMiContext::processResponse(std::shared_ptr<SensorType>& sensor,
-                                    void* msg, size_t len)
+void NVMeMiContext::processResponse(void* msg, size_t len)
 {
-    if constexpr (std::is_same_v<SensorType, NVMeSensor>)
+    if (msg == nullptr || len < sizeof(nvme_smart_log))
     {
-        // Handle temperature sensor response
-        if (msg == nullptr)
-        {
-            sensor->incrementError();
-            return;
-        }
-
-        double value = getTemperatureReading(static_cast<nvme_smart_log*>(msg));
-        lg2::debug("reading value: {VALUE} eid: {EID}", "VALUE", value, "EID",
-                   static_cast<int>(sensor->eid));
-        if (!std::isfinite(value))
-        {
-            sensor->incrementError();
-            return;
-        }
-
-        sensor->updateValue(value);
+        lg2::error("Invalid response data for unified processing");
+        return;
     }
-    else if constexpr (std::is_same_v<SensorType, NVMeStatusSensor>)
+
+    nvme_smart_log* smart_log = static_cast<nvme_smart_log*>(msg);
+
+    // Process all sensors in this context
+    for (auto& sensorVariant : sensors)
     {
-        // Handle status sensor response
-        if (msg == nullptr || len < sizeof(nvme_smart_log))
-        {
-            return;
-        }
+        std::visit([this, smart_log](auto& sensor) {
+            using SensorType = std::decay_t<decltype(sensor)>;
 
-        nvme_smart_log* smart_log = static_cast<nvme_smart_log*>(msg);
+            if constexpr (std::is_same_v<SensorType,
+                                         std::shared_ptr<NVMeSensor>>)
+            {
+                // Update temperature sensor
+                double value = getTemperatureReading(smart_log);
+                if (std::isfinite(value))
+                {
+                    sensor->updateValue(value);
+                }
+                else
+                {
+                    sensor->incrementError();
+                }
+            }
+            else if constexpr (std::is_same_v<
+                                   SensorType,
+                                   std::shared_ptr<NVMeStatusSensor>>)
+            {
+                // Update status sensor
+                bool present = true;
+                bool functional = true;
+                bool fault = false;
 
-        // Extract status information from SMART log
-        bool present = true;    // If we got a response, drive is present
-        bool functional = true; // Assume functional unless we detect issues
-        bool fault = false;     // Assume no fault unless we detect issues
+                // Check for critical warnings in the health status
+                if (smart_log->critical_warning != 0)
+                {
+                    fault = true;
+                    functional = false;
+                }
 
-        // Check for critical warnings in the health status
-        if (smart_log->critical_warning != 0)
-        {
-            std::cout << "critical_warning: " << smart_log->critical_warning
-                      << "\n";
-            fault = true;
-            functional = false;
-        }
-
-        lg2::info(
-            "esent: {PRESENT} functional: {FUNCTIONAL} fault: {FAULT} eid: {EID}",
-            "PRESENT", present, "FUNCTIONAL", functional, "FAULT", fault, "EID",
-            static_cast<int>(sensor->eid));
-        sensor->updateStatus(present, functional, fault);
+                sensor->updateStatus(present, functional, fault);
+            }
+        }, sensorVariant);
     }
+    // Schedule next polling cycle after updating both sensors
+    pollNVMeDevices();
 }

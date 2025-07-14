@@ -28,10 +28,8 @@
 // Initialize static member
 nvme_root_t NVMeMiManager::nvmeRoot = nullptr;
 
-ContextCommInfo::ContextCommInfo(boost::asio::io_context& io, uint8_t eid,
-                                 const std::string& sensorName) :
-    eid(eid),
-    sensorName(sensorName)
+ContextCommInfo::ContextCommInfo(boost::asio::io_context& io, uint8_t eid) :
+    eid(eid)
 {
     (void)io; // Suppress unused parameter warning
 }
@@ -59,18 +57,27 @@ NVMeMiManager::~NVMeMiManager()
 }
 
 void NVMeMiManager::addContext(std::shared_ptr<NVMeMiContext> context, int net,
-                               uint8_t eid, const std::string& sensorName)
+                               uint8_t eid)
 {
-    auto commInfo = std::make_unique<ContextCommInfo>(io, eid, sensorName);
+    auto commInfo = std::make_unique<ContextCommInfo>(io, eid);
     commInfo->context = context;
+    auto& ep = commInfo->nvmeEp;
 
-    commInfo->nvmeEp = nvme_mi_open_mctp(nvmeRoot, net, eid);
-    if (!commInfo->nvmeEp)
+    ep = nvme_mi_open_mctp(nvmeRoot, net, eid);
+    if (!ep)
     {
         std::cerr << "Failed to create MCTP endpoint for eid: "
                   << static_cast<int>(eid) << std::endl;
+        return;
     }
 
+    if (!scanControllers(eid, ep))
+    {
+        lg2::error("Failed to scan controllers for eid: {EID}", "EID", eid);
+        nvme_mi_close(ep);
+        ep = nullptr;
+        return;
+    }
     // Create pipes for communication
     std::array<int, 2> requestPipeFds{};
     std::array<int, 2> responsePipeFds{};
@@ -95,16 +102,15 @@ void NVMeMiManager::addContext(std::shared_ptr<NVMeMiContext> context, int net,
         boost::asio::posix::stream_descriptor(io, requestPipeFds[1]),
         boost::asio::posix::stream_descriptor(io, responsePipeFds[0]));
 
-    contexts[sensorName] = std::move(commInfo);
+    contexts[eid] = std::move(commInfo);
 
-    lg2::info("Added context for sensor: {SENSOR} with eid: {EID}", "SENSOR",
-              sensorName, "EID", static_cast<int>(eid));
+    lg2::info("Added context for eid: {EID}", "EID", static_cast<int>(eid));
 }
 
-void NVMeMiManager::removeContext(const std::string& sensorName)
+void NVMeMiManager::removeContext(uint8_t eid)
 {
     std::lock_guard<std::mutex> lock(contextsMutex);
-    contexts.erase(sensorName);
+    contexts.erase(eid);
 }
 
 void NVMeMiManager::start()
@@ -145,7 +151,7 @@ void NVMeMiManager::communicationThread()
         std::lock_guard<std::mutex> lock(contextsMutex);
 
         // Process each context
-        for (auto& [sensorName, commInfo] : contexts)
+        for (auto& [eid, commInfo] : contexts)
         {
             if (commInfo->nvmeEp)
             {
@@ -173,36 +179,31 @@ void NVMeMiManager::processContextCommand(ContextCommInfo& commInfo)
     if (pollResult > 0 && (pfd.revents & POLLIN))
     {
         // Process the command
-        ssize_t rc = processMiCommand(
-            commInfo.nvmeEp, commInfo.context->getRequestPipe(),
-            commInfo.context->getResponsePipe(), commInfo.eid);
+        ssize_t rc = processMiCommand(commInfo.context->getRequestPipe(),
+                                      commInfo.context->getResponsePipe(),
+                                      commInfo.eid);
         if (rc < 0)
         {
-            std::cerr << "Error processing command for sensor: "
-                      << commInfo.sensorName
-                      << " eid: " << static_cast<int>(commInfo.eid)
-                      << " error: " << rc << std::endl;
+            std::cerr << "Error processing command for eid: "
+                      << static_cast<int>(commInfo.eid) << " error: " << rc
+                      << std::endl;
         }
     }
 }
 
-ssize_t NVMeMiManager::processMiCommand(nvme_mi_ep_t& nvmeEp, FileHandle& in,
-                                        FileHandle& out, uint8_t eid)
+ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
+                                        uint8_t eid)
 {
     std::vector<uint8_t> resp{};
     ssize_t rc = 0;
 
     // Get controllers for this EID from the map
     auto& ctrlList = controllersByEid[eid];
-
-    // Scan for controllers if not already done for this EID
-    if (controllersByEid[eid].empty())
+    if (ctrlList.empty())
     {
-        if (!scanControllersForEid(eid, nvmeEp))
-        {
-            lg2::error("Failed to scan controllers for eid: {EID}", "EID", eid);
-            return -ENODEV;
-        }
+        std::cerr << "No controllers found for eid: " << static_cast<int>(eid)
+                  << std::endl;
+        return -ENODEV;
     }
 
     std::array<uint8_t, sizeof(uint32_t)> req{};
@@ -260,15 +261,34 @@ ssize_t NVMeMiManager::processMiCommand(nvme_mi_ep_t& nvmeEp, FileHandle& in,
     return 0;
 }
 
-bool NVMeMiManager::scanControllersForEid(uint8_t eid, nvme_mi_ep_t& nvmeEp)
+bool NVMeMiManager::scanControllers(uint8_t eid, nvme_mi_ep_t& nvmeEp)
 {
     lg2::debug("Scanning MI controllers for eid: {EID}", "EID", eid);
-    // Scan for controllers
-    int scanRc = nvme_mi_scan_ep(nvmeEp, true);
-    if (scanRc != 0)
+    // Scan for controllers with retry logic
+    int rc = 0;
+    const int maxRetries = 3;
+    for (int attempt = 1; attempt <= maxRetries; ++attempt)
     {
-        lg2::error("Failed to scan NVMe-MI endpoint: {ERR} eid: {EID}", "ERR",
-                   std::strerror(errno), "EID", eid);
+        rc = nvme_mi_scan_ep(nvmeEp, true);
+        if (rc == 0)
+        {
+            break; // Success, exit retry loop
+        }
+
+        if (attempt < maxRetries)
+        {
+            lg2::warning(
+                "Scan attempt {ATTEMPT} failed for eid {EID}, retrying...",
+                "ATTEMPT", attempt, "EID", eid);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+
+    if (rc != 0)
+    {
+        lg2::error(
+            "Failed to scan NVMe-MI endpoint after {RETRIES} attempts: {ERR} eid: {EID}",
+            "RETRIES", maxRetries, "ERR", std::strerror(errno), "EID", eid);
         return false;
     }
 

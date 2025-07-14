@@ -37,10 +37,8 @@ struct ContextCommInfo
     std::shared_ptr<NVMeMiContext> context;
     nvme_mi_ep_t nvmeEp;
     uint8_t eid;
-    std::string sensorName;
 
-    ContextCommInfo(boost::asio::io_context& io, uint8_t eid,
-                    const std::string& sensorName);
+    ContextCommInfo(boost::asio::io_context& io, uint8_t eid);
     ~ContextCommInfo();
 };
 
@@ -52,21 +50,20 @@ class NVMeMiManager
 
     // Add a context to be managed
     void addContext(std::shared_ptr<NVMeMiContext> context, int net,
-                    uint8_t eid, const std::string& sensorName);
+                    uint8_t eid);
 
-    void removeContext(const std::string& sensorName);
+    void removeContext(uint8_t eid);
     void start();
     void stop();
 
   private:
     void communicationThread();
     void processContextCommand(ContextCommInfo& commInfo);
-    ssize_t processMiCommand(nvme_mi_ep_t& nvmeEp, FileHandle& in,
-                             FileHandle& out, uint8_t eid);
-    bool scanControllersForEid(uint8_t eid, nvme_mi_ep_t& nvmeEp);
+    ssize_t processMiCommand(FileHandle& in, FileHandle& out, uint8_t eid);
+    bool scanControllers(uint8_t eid, nvme_mi_ep_t& nvmeEp);
 
     boost::asio::io_context& io;
-    std::map<std::string, std::unique_ptr<ContextCommInfo>> contexts;
+    std::map<uint8_t, std::unique_ptr<ContextCommInfo>> contexts;
     std::map<uint8_t, std::vector<nvme_mi_ctrl_t>> controllersByEid;
     std::jthread commThread;
     bool running{false};

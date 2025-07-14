@@ -32,8 +32,7 @@ using SensorVariant = std::variant<std::shared_ptr<NVMeSensor>,
 class NVMeContext
 {
   public:
-    NVMeContext(boost::asio::io_context& io, int eid) :
-        scanTimer(io), eid(eid), pollCursor(sensors.end())
+    NVMeContext(boost::asio::io_context& io, int eid) : scanTimer(io), eid(eid)
     {}
 
     virtual ~NVMeContext()
@@ -85,19 +84,8 @@ class NVMeContext
             return;
         }
 
-        if (pollCursor == sensors.end())
-        {
-            sensors.erase(found);
-            return;
-        }
-
-        if (*pollCursor != *found)
-        {
-            sensors.erase(found);
-            return;
-        }
-
-        pollCursor = sensors.erase(found);
+        // Remove the sensor
+        sensors.erase(found);
     }
 
     virtual void close()
@@ -113,10 +101,9 @@ class NVMeContext
     boost::asio::steady_timer scanTimer;
     uint8_t eid;
     std::list<SensorVariant> sensors;
-    std::list<SensorVariant>::iterator pollCursor;
 };
 
 using NVMEMap =
-    boost::container::flat_map<std::string, std::shared_ptr<NVMeContext>>;
+    boost::container::flat_map<uint8_t, std::shared_ptr<NVMeContext>>;
 
 NVMEMap& getNVMEMap();
