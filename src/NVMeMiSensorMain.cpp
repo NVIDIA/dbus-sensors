@@ -91,48 +91,18 @@ static std::optional<std::string>
 static void discoverMctpEndpoint(
     uint8_t expectedEid,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
-    std::function<void(uint8_t eid, const std::vector<uint8_t>& address)>
-        onMctpFound)
+    std::function<void(uint8_t eid, int net)> onMctpFound)
 {
-    // handle Address properties
-    auto handleAddressProperties = [onMctpFound](int eid) {
-        return
-            [onMctpFound, eid](
-                const boost::system::error_code ec,
-                const std::map<std::string, std::variant<uint32_t, std::string,
-                                                         std::vector<uint8_t>>>&
-                    properties) mutable {
-            std::vector<uint8_t> address;
-
-            if (ec)
-            {
-                lg2::error("Failed to get Address properties: {ERR} eid: {EID}",
-                           "ERR", ec.message(), "EID", eid);
-                return;
-            }
-            auto addrIt = properties.find("Address");
-            if (addrIt != properties.end())
-            {
-                if (std::holds_alternative<std::vector<uint8_t>>(
-                        addrIt->second))
-                {
-                    address = std::get<std::vector<uint8_t>>(addrIt->second);
-                    onMctpFound(static_cast<uint8_t>(eid), address);
-                }
-            }
-        };
-    };
-
     // handle MCTP endpoint properties
-    auto handleEidProperties = [&dbusConnection, handleAddressProperties](
-                                   uint8_t eid, const std::string& owner,
-                                   const std::string& path) {
-        return
-            [&dbusConnection, eid, owner, path, handleAddressProperties](
-                const boost::system::error_code ec,
-                const std::map<std::string, std::variant<uint32_t, std::string,
-                                                         std::vector<uint8_t>>>&
-                    properties) mutable {
+    auto handleEidProperties =
+        [&dbusConnection, onMctpFound](uint8_t eid, const std::string& owner,
+                                       const std::string& path) {
+        return [&dbusConnection, eid, owner, path, onMctpFound](
+                   const boost::system::error_code ec,
+                   const std::map<std::string,
+                                  std::variant<uint8_t, uint32_t, uint64_t,
+                                               std::vector<uint8_t>>>&
+                       properties) mutable {
             if (ec)
             {
                 lg2::error(
@@ -146,11 +116,28 @@ static void discoverMctpEndpoint(
             {
                 return;
             }
-            auto currentEid = std::get<uint32_t>(eidIt->second);
-            if (currentEid != static_cast<uint32_t>(eid))
+
+            uint8_t currentEid;
+            if (std::holds_alternative<uint8_t>(eidIt->second))
+            {
+                currentEid = std::get<uint8_t>(eidIt->second);
+            }
+            else
             {
                 return;
             }
+
+            if (currentEid != eid)
+            {
+                return;
+            }
+            auto netIt = properties.find("NetworkId");
+            if (netIt == properties.end())
+            {
+                return;
+            }
+            auto net = std::get<uint32_t>(netIt->second);
+
             auto typeIt = properties.find("SupportedMessageTypes");
             if (typeIt != properties.end())
             {
@@ -160,7 +147,8 @@ static void discoverMctpEndpoint(
                     auto type = std::get<std::vector<uint8_t>>(typeIt->second);
 
                     // Find NVMeMI message type
-                    auto it = std::find(type.begin(), type.end(), 4);
+                    auto it = std::find(type.begin(), type.end(),
+                                        NVME_MI_MSGTYPE_NVME & 0x7F);
                     if (it == type.end())
                     {
                         lg2::debug("non-NVMeMI device: {EID}", "EID", eid);
@@ -168,24 +156,22 @@ static void discoverMctpEndpoint(
                     }
                 }
             }
-            dbusConnection->async_method_call(
-                handleAddressProperties(eid), owner, path,
-                "org.freedesktop.DBus.Properties", "GetAll",
-                "xyz.openbmc_project.Common.UnixSocket");
+            onMctpFound(static_cast<uint8_t>(eid), net);
         };
     };
 
+    const char* mctpEndpointInterface = "xyz.openbmc_project.MCTP.Endpoint";
     // handle MCTP endpoint discovery
-    auto handleMctpDiscovery = [&dbusConnection, handleEidProperties,
-                                expectedEid](const boost::system::error_code ec,
-                                             const GetSubTreeType& ret) {
+    auto handleMctpDiscovery =
+        [&dbusConnection, handleEidProperties, expectedEid,
+         mctpEndpointInterface](const boost::system::error_code ec,
+                                const GetSubTreeType& ret) {
         if (ec || ret.empty())
         {
             lg2::error("no MCTP endpoints found: {ERR} eid: {EID}", "ERR",
                        ec.message(), "EID", expectedEid);
             return;
         }
-        const char* mctpEndpointInterface = "xyz.openbmc_project.MCTP.Endpoint";
 
         for (const auto& [path, objects] : ret)
         {
@@ -205,7 +191,8 @@ static void discoverMctpEndpoint(
     dbusConnection->async_method_call(
         handleMctpDiscovery, mapper::busName, mapper::path, mapper::interface,
         mapper::subtree, "/", 0,
-        std::vector<std::string>{"xyz.openbmc_project.MCTP.Endpoint"});
+        std::vector<std::string>{mctpEndpointInterface,
+                                 "au.com.codeconstruct.MCTP.Endpoint1"});
 }
 
 static std::shared_ptr<NVMeContext>
@@ -304,10 +291,9 @@ static void handleSensorConfigurations(
     // Start MCTP discovery for each sensor configuration
     for (const auto& sensorConfig : pendingSensors)
     {
-        discoverMctpEndpoint(
-            sensorConfig.eid, dbusConnection,
-            [&io, &objectServer, &dbusConnection, sensorConfig](
-                uint8_t discoveredEid, const std::vector<uint8_t>& address) {
+        discoverMctpEndpoint(sensorConfig.eid, dbusConnection,
+                             [&io, &objectServer, &dbusConnection,
+                              sensorConfig](uint8_t discoveredEid, int net) {
             // Check if discovered EID matches expected EID
             if (discoveredEid != sensorConfig.eid)
             {
@@ -323,8 +309,8 @@ static void handleSensorConfigurations(
             auto nvmeContext = std::static_pointer_cast<NVMeMiContext>(context);
             if (commManager)
             {
-                commManager->addContext(nvmeContext, discoveredEid,
-                                        sensorConfig.sensorName, address);
+                commManager->addContext(nvmeContext, net, discoveredEid,
+                                        sensorConfig.sensorName);
             }
 
             try

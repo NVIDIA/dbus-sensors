@@ -34,7 +34,6 @@ ContextCommInfo::ContextCommInfo(boost::asio::io_context& io, uint8_t eid,
     sensorName(sensorName)
 {
     (void)io; // Suppress unused parameter warning
-    // Pipes and streams are now created and managed by the context
 }
 
 ContextCommInfo::~ContextCommInfo()
@@ -59,17 +58,13 @@ NVMeMiManager::~NVMeMiManager()
     stop();
 }
 
-void NVMeMiManager::addContext(std::shared_ptr<NVMeMiContext> context,
-                               uint8_t eid, const std::string& sensorName,
-                               const std::vector<uint8_t>& address)
+void NVMeMiManager::addContext(std::shared_ptr<NVMeMiContext> context, int net,
+                               uint8_t eid, const std::string& sensorName)
 {
-    // std::lock_guard<std::mutex> lock(contextsMutex);
     auto commInfo = std::make_unique<ContextCommInfo>(io, eid, sensorName);
     commInfo->context = context;
 
-    std::string sockNameStr(address.begin(), address.end());
-    commInfo->nvmeEp = nvme_mi_open_libmctp(nvmeRoot, 0, sockNameStr.data(),
-                                            eid);
+    commInfo->nvmeEp = nvme_mi_open_mctp(nvmeRoot, net, eid);
     if (!commInfo->nvmeEp)
     {
         std::cerr << "Failed to create MCTP endpoint for eid: "

@@ -51,9 +51,8 @@ class NVMeMiManager
     ~NVMeMiManager();
 
     // Add a context to be managed
-    void addContext(std::shared_ptr<NVMeMiContext> context, uint8_t eid,
-                    const std::string& sensorName,
-                    const std::vector<uint8_t>& address);
+    void addContext(std::shared_ptr<NVMeMiContext> context, int net,
+                    uint8_t eid, const std::string& sensorName);
 
     void removeContext(const std::string& sensorName);
     void start();
