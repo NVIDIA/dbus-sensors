@@ -57,10 +57,12 @@ MCTPDDevice::MCTPDDevice(
 
 void MCTPDDevice::onDiscoveryMatchRule()
 {
+    std::string interfacePath = std::string(mctpdControlPath) + "/interfaces/" +
+                                this->interface;
     const auto matchRule =
         sdbusplus::bus::match::rules::type::signal() +
-        sdbusplus::bus::match::rules::path(mctpdControlPath) +
-        sdbusplus::bus::match::rules::interface(mctpdEndpointControlInterface) +
+        sdbusplus::bus::match::rules::path(interfacePath) +
+        sdbusplus::bus::match::rules::interface(mctpdControlInterface) +
         sdbusplus::bus::match::rules::member("DiscoveryNotify");
 
     discoveryNotifyMatch = std::make_unique<sdbusplus::bus::match_t>(
@@ -77,7 +79,8 @@ void MCTPDDevice::onDiscoveryMatchRule()
         }
     });
 
-    info("DiscoveryNotify match registered.");
+    info("DiscoveryNotify match registered for interface {INTERFACE}.",
+         "INTERFACE", this->interface);
 
     discoveryCheckTimer = std::make_unique<boost::asio::steady_timer>(
         connection->get_io_context());
@@ -101,9 +104,8 @@ void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& msg)
     pendingEID = eid;
 
     info(
-        "First DiscoveryNotify for EID '{EID}' => scheduling discovery in ~5s.",
-        "EID", static_cast<int>(eid));
-
+        "First DiscoveryNotify for EID '{EID}' on interface '{INTERFACE}' => scheduling discovery in ~5s.",
+        "EID", static_cast<int>(eid), "INTERFACE", this->interface);
     /* Broad logic: This  bumps up discovery notify handler timer for
     another 5s. This is done to ensure that a flood of discovery notifies do
     not cause us to repeatedly perform rediscovery. Upon a timer expiry, the
