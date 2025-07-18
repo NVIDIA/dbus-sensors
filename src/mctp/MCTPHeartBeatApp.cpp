@@ -51,6 +51,10 @@ class MCTPHeartbeatService;
 // Now we can declare our global pointer
 static std::shared_ptr<MCTPHeartbeatService> gHeartbeatService = nullptr;
 
+// Retry configuration
+static constexpr int maxRetries = 5;
+static constexpr int retryDelaySec = 1;
+
 // Signal handler forward declaration
 void signalHandler(int signum);
 
@@ -240,7 +244,7 @@ static int mctpQueryVdmCommand(int sd, const struct sockaddr_mctp* reqAddr,
     {
         if (waitRc == -ETIMEDOUT)
         {
-            lg2::error("receive timed out from");
+            lg2::error("received time out from EID {EID}", "EID", reqAddr->smctp_addr.s_addr);
         }
         return waitRc;
     }
@@ -263,6 +267,33 @@ static int mctpQueryVdmCommand(int sd, const struct sockaddr_mctp* reqAddr,
 
     return 0;
 }
+
+/* Wrapper for mctpQueryVdmCommand with retry logic */
+static int mctpQueryVdmCommandWithRetry(int sd, const struct sockaddr_mctp* reqAddr,
+                                        bool extAddr, const void* req, size_t reqLen,
+                                        std::vector<uint8_t>& resp,
+                                        struct sockaddr_mctp* respAddr)
+{
+    for (int attempt = 1; attempt <= maxRetries; ++attempt)
+    {
+        int rc = mctpQueryVdmCommand(sd, reqAddr, extAddr, req, reqLen, resp, respAddr);
+        if (rc == 0)
+        {
+            return 0;
+        }
+        
+        if (attempt < maxRetries)
+        {
+            lg2::info("Retrying command (attempt {ATTEMPT}/{MAX})", 
+                      "ATTEMPT", attempt + 1, "MAX", maxRetries);
+            sleep(retryDelaySec);
+        }
+    }
+    
+    lg2::error("Command failed after {MAX} attempts", "MAX", maxRetries);
+    return -1;
+}
+
 /*
  * Send Restart Notification:
  * AP firmware sends this message to indicate restart notification.
@@ -287,7 +318,7 @@ int vdmRestartNotification(int fd, uint8_t tid)
     reqAddr.smctp_tag = MCTP_TAG_OWNER;
 
     /* Send and Receive the MCTP-VDM command using mctpQueryVdmCommand */
-    rc = mctpQueryVdmCommand(fd, &reqAddr,
+    rc = mctpQueryVdmCommandWithRetry(fd, &reqAddr,
                              false, /* don't use extended addressing */
                              &cmd, sizeof(cmd), resp, &respAddr);
 
@@ -326,7 +357,7 @@ int vdmBootCompleteV2(int fd, uint8_t tid, uint8_t valid, uint8_t slot)
     reqAddr.smctp_tag = MCTP_TAG_OWNER;
 
     /* Send and Receive the MCTP-VDM command using mctpQueryVdmCommand */
-    rc = mctpQueryVdmCommand(fd, &reqAddr,
+    rc = mctpQueryVdmCommandWithRetry(fd, &reqAddr,
                              false, /* don't use extended addressing */
                              &cmd, sizeof(cmd), resp, &respAddr);
 
@@ -368,7 +399,7 @@ int vdmSetHeartbeatEnable(int fd, uint8_t tid, int enable)
     reqAddr.smctp_tag = MCTP_TAG_OWNER;
 
     /* Send and Receive the MCTP-VDM command using mctpQueryVdmCommand */
-    rc = mctpQueryVdmCommand(fd, &reqAddr,
+    rc = mctpQueryVdmCommandWithRetry(fd, &reqAddr,
                              false, /* don't use extended addressing */
                              &cmd, sizeof(cmd), resp, &respAddr);
 
@@ -409,7 +440,7 @@ int vdmSendHeartbeat(int fd, uint8_t tid)
     reqAddr.smctp_tag = MCTP_TAG_OWNER;
 
     /* Send and Receive the MCTP-VDM command using mctpQueryVdmCommand */
-    rc = mctpQueryVdmCommand(fd, &reqAddr,
+    rc = mctpQueryVdmCommandWithRetry(fd, &reqAddr,
                              false, /* don't use extended addressing */
                              &cmd, sizeof(cmd), resp, &respAddr);
 
