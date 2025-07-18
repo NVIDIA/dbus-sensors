@@ -121,8 +121,6 @@ class WriteProtect : public std::enable_shared_from_this<WriteProtect>
 
     void setLine(const std::string& lineLabel, bool value);
 
-    int readLine(const std::string& lineLabel, bool activeLow);
-
     void releaseLine(const std::string& lineLabel);
 
     // dbus connection.

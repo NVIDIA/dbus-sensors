@@ -74,18 +74,6 @@ void WriteProtect::setLine(const std::string& lineLabel, bool value)
                                     value);
 }
 
-int WriteProtect::readLine(const std::string& lineLabel, bool activeLow)
-{
-    if (gpioLines.find(lineLabel) == gpioLines.end())
-    {
-        bool globalWriteProtected = std::filesystem::exists(writeProtectFile);
-        addLine(lineLabel,
-                activeLow ? !globalWriteProtected : globalWriteProtected);
-    }
-    gpioLines[lineLabel].set_config(::gpiod::line_request::DIRECTION_AS_IS, 0);
-    return gpioLines[lineLabel].get_value();
-}
-
 void WriteProtect::releaseLine(const std::string& lineLabel)
 {
     if (gpioLines.find(lineLabel) != gpioLines.end())
@@ -133,21 +121,7 @@ bool WriteProtect::readWriteProtect()
     for (auto& obj : objIfaces)
     {
         auto& config = obj.second.config;
-        int lineValue = 0;
-        try
-        {
-            lineValue = readLine(config.gpioLine, config.activeLow);
-        }
-        catch (std::exception& e)
-        {
-            std::cerr << "Failed gpio line read "
-                      << std::string(config.gpioLine)
-                      << " error is: " << e.what() << std::endl;
-            continue;
-        }
-        bool value = static_cast<bool>(lineValue);
-
-        config.writeprotected = config.activeLow ? !value : value;
+        // Use the stored writeprotected value instead of reading GPIO
         if (!config.writeprotected)
         {
             globalWriteProtected = false;
