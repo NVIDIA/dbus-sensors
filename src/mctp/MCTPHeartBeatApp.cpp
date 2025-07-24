@@ -551,7 +551,7 @@ class MCTPHeartbeatService
         sigaction(SIGTERM, &sa, nullptr);  // NOLINT(misc-include-cleaner)
 
         // Send boot complete v2 command first
-        if (vdmBootCompleteV2(fd, targetEid, 1, 0) != 0)
+        if (vdmBootCompleteV2(fd, targetEid, 0, 0) != 0)
         {
             lg2::error("Failed to send boot complete v2");
             return;
