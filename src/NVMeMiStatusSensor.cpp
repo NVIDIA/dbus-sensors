@@ -17,14 +17,22 @@
 
 #include "NVMeMiStatusSensor.hpp"
 
+#include "Utils.hpp"
+
 #include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus.hpp>
+#include <sdbusplus/server/object.hpp>
+#include <xyz/openbmc_project/Association/Definitions/server.hpp>
+#include <xyz/openbmc_project/Inventory/Item/server.hpp>
+#include <xyz/openbmc_project/State/Decorator/OperationalStatus/common.hpp>
+#include <xyz/openbmc_project/State/Decorator/OperationalStatus/server.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>

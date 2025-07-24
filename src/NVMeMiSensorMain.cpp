@@ -24,6 +24,8 @@
 #include "Utils.hpp"
 #include "VariantVisitors.hpp"
 
+#include <nvme/mi.h>
+
 #include <boost/asio/error.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
@@ -40,11 +42,10 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -91,13 +92,13 @@ static std::optional<std::string>
 static void discoverMctpEndpoint(
     uint8_t expectedEid,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
-    std::function<void(uint8_t eid, int net)> onMctpFound)
+    const std::function<void(uint8_t eid, int net)>& onMctpFound)
 {
     // handle MCTP endpoint properties
-    auto handleEidProperties =
-        [&dbusConnection, onMctpFound](uint8_t eid, const std::string& owner,
-                                       const std::string& path) {
-        return [&dbusConnection, eid, owner, path, onMctpFound](
+    auto handleEidProperties = [&onMctpFound](uint8_t eid,
+                                              const std::string& owner,
+                                              const std::string& path) {
+        return [eid, owner, path, &onMctpFound](
                    const boost::system::error_code ec,
                    const std::map<std::string,
                                   std::variant<uint8_t, uint32_t, uint64_t,
@@ -117,7 +118,7 @@ static void discoverMctpEndpoint(
                 return;
             }
 
-            uint8_t currentEid;
+            uint8_t currentEid = 0;
             if (std::holds_alternative<uint8_t>(eidIt->second))
             {
                 currentEid = std::get<uint8_t>(eidIt->second);
@@ -263,8 +264,8 @@ static void handleSensorConfigurations(
                            *sensorName);
             }
 
-            pendingSensors.push_back(
-                {interfacePath, *sensorName, eid, std::move(sensorThresholds)});
+            pendingSensors.emplace_back(interfacePath, *sensorName, eid,
+                                        std::move(sensorThresholds));
         }
 
         auto statusSensorBase =
@@ -282,8 +283,8 @@ static void handleSensorConfigurations(
                 continue;
             }
 
-            pendingSensors.push_back({interfacePath, *sensorName, eid,
-                                      std::vector<thresholds::Threshold>{}});
+            pendingSensors.emplace_back(interfacePath, *sensorName, eid,
+                                        std::vector<thresholds::Threshold>{});
         }
     }
 
@@ -315,7 +316,13 @@ static void handleSensorConfigurations(
             auto nvmeContext = std::static_pointer_cast<NVMeMiContext>(context);
             if (commManager)
             {
-                commManager->addContext(nvmeContext, net, discoveredEid);
+                if (!commManager->addContext(nvmeContext, net, discoveredEid))
+                {
+                    lg2::error(
+                        "Failed to add context in NVMeMiManager for eid: {EID}",
+                        "EID", discoveredEid);
+                    return;
+                }
             }
 
             try

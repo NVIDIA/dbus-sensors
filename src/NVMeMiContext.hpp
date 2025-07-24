@@ -25,7 +25,9 @@
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/write.hpp>
 
-class NVMeMiContext : public NVMeContext, public std::enable_shared_from_this<NVMeMiContext>
+class NVMeMiContext :
+    public NVMeContext,
+    public std::enable_shared_from_this<NVMeMiContext>
 {
   public:
     NVMeMiContext(boost::asio::io_context& io, uint8_t eid);
@@ -35,9 +37,9 @@ class NVMeMiContext : public NVMeContext, public std::enable_shared_from_this<NV
     void readAndProcessNVMeSensor() override;
     void processResponse(void* msg, size_t len);
 
-    void setupPipes(FileHandle requestPipe, FileHandle responsePipe,
-                    boost::asio::posix::stream_descriptor requestStream,
-                    boost::asio::posix::stream_descriptor responseStream);
+    void setupPipes(FileHandle reqPipe, FileHandle respPipe,
+                    boost::asio::posix::stream_descriptor reqStream,
+                    boost::asio::posix::stream_descriptor respStream);
 
     // Get pipes for communication manager
     FileHandle& getRequestPipe()
@@ -52,8 +54,6 @@ class NVMeMiContext : public NVMeContext, public std::enable_shared_from_this<NV
   private:
     void sendNVMeMICommand();
 
-  private:
-    boost::asio::io_context& io;
     uint8_t eid{0};
 
     // Communication pipes

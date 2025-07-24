@@ -63,7 +63,6 @@ class NVMeStatusSensor :
     std::string configurationPath;
 
   private:
-    const unsigned int scanDelayTicks = 5;
     sdbusplus::asio::object_server& objServer;
     unsigned int scanDelay{0};
     std::shared_ptr<sdbusplus::asio::dbus_interface> driveInterface;

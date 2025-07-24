@@ -31,11 +31,13 @@
 #include <thread>
 #include <vector>
 
+constexpr int maxRetryCount = 3;
+
 // Structure to hold context task info
 struct ContextCommInfo
 {
     std::shared_ptr<NVMeMiContext> context;
-    nvme_mi_ep_t nvmeEp;
+    nvme_mi_ep_t nvmeEp{};
     uint8_t eid;
 
     ContextCommInfo(boost::asio::io_context& io, uint8_t eid);
@@ -45,11 +47,11 @@ struct ContextCommInfo
 class NVMeMiManager
 {
   public:
-    NVMeMiManager(boost::asio::io_context& io);
+    explicit NVMeMiManager(boost::asio::io_context& io);
     ~NVMeMiManager();
 
     // Add a context to be managed
-    void addContext(std::shared_ptr<NVMeMiContext> context, int net,
+    bool addContext(const std::shared_ptr<NVMeMiContext>& context, int net,
                     uint8_t eid);
 
     void removeContext(uint8_t eid);
@@ -68,6 +70,7 @@ class NVMeMiManager
     std::jthread commThread;
     bool running{false};
     std::mutex contextsMutex;
+    int retryCount{0};
 
     // Static NVMe root for all contexts
     static nvme_root_t nvmeRoot;
