@@ -128,6 +128,7 @@ void NVMeMiContext::pollNVMeDevices()
         {
             lg2::error("Error in NVMe-Mi context: {ERROR}", "ERROR",
                        errorCode.message().c_str());
+
             return;
         }
 
@@ -256,12 +257,20 @@ void NVMeMiContext::processResponse(void* msg, size_t len)
 {
     if (msg == nullptr || len < sizeof(nvme_smart_log))
     {
-        lg2::error(
-            "Invalid response data for processing length: {LEN} eid: {EID}",
-            "LEN", len, "EID", eid);
-        pollNVMeDevices();
+        consecutiveFailures++;
+        lg2::warning("Consecutive failures for eid: {EID}: {FAILURES}/{MAX}",
+                     "EID", eid, "FAILURES", consecutiveFailures, "MAX",
+                     maxConsecutiveFailures);
+
+        if (consecutiveFailures < maxConsecutiveFailures)
+        {
+            pollNVMeDevices();
+        }
         return;
     }
+
+    // Reset failure counter on successful response
+    consecutiveFailures = 0;
 
     nvme_smart_log* smartLog = static_cast<nvme_smart_log*>(msg);
 

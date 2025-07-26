@@ -92,13 +92,13 @@ static std::optional<std::string>
 static void discoverMctpEndpoint(
     uint8_t expectedEid,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
-    const std::function<void(uint8_t eid, int net)>& onMctpFound)
+    const std::function<void(uint8_t eid, int net)> onMctpFound)
 {
     // handle MCTP endpoint properties
-    auto handleEidProperties = [&onMctpFound](uint8_t eid,
-                                              const std::string& owner,
-                                              const std::string& path) {
-        return [eid, owner, path, &onMctpFound](
+    auto handleEidProperties = [onMctpFound](uint8_t eid,
+                                             const std::string& owner,
+                                             const std::string& path) {
+        return [eid, owner, path, onMctpFound](
                    const boost::system::error_code ec,
                    const std::map<std::string,
                                   std::variant<uint8_t, uint32_t, uint64_t,

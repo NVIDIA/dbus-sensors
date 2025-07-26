@@ -117,10 +117,6 @@ bool NVMeMiManager::addContext(const std::shared_ptr<NVMeMiContext>& context,
 
     contexts[eid] = std::move(commInfo);
 
-    // Scan for controllers with the first attempt
-    // don't retry during MCTP dbus lookup
-    scanControllers(eid, ep);
-
     lg2::info("Added context for eid: {EID}", "EID", static_cast<int>(eid));
     return true;
 }
@@ -257,6 +253,8 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
                 if (scanControllers(eid, it->second->nvmeEp))
                 {
                     ctrlList = controllersByEid[eid];
+                    // delay to allow next command to be processed by drive
+                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
                 }
             }
         }
@@ -283,6 +281,8 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
 
     if (rc != 0)
     {
+        lg2::error("smartlog command error: {ERR} for eid: {EID}", "ERR", rc,
+                   "EID", static_cast<int>(eid));
         return handleError(0);
     }
 
@@ -310,7 +310,7 @@ bool NVMeMiManager::scanControllers(uint8_t eid, nvme_mi_ep_t& nvmeEp)
     // Scan for controllers with retry logic
     int rc = 0;
     rc = nvme_mi_scan_ep(nvmeEp, true);
-    if (rc != 0 || retryCount++ < maxRetryCount)
+    if (rc != 0)
     {
         lg2::error(
             "Failed to scan NVMe-MI endpoint after {RETRIES} attempts: {ERR} eid: {EID}",
