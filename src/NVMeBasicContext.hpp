@@ -15,6 +15,7 @@ class NVMeBasicContext : public NVMeContext
   public:
     NVMeBasicContext(boost::asio::io_context& io, int rootBus);
     ~NVMeBasicContext() override = default;
+    void close() override;
     void pollNVMeDevices() override;
     void readAndProcessNVMeSensor() override;
     void processResponse(std::shared_ptr<NVMeSensor>& sensor, void* msg,

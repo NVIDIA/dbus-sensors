@@ -152,6 +152,10 @@ HwmonTempSensor::~HwmonTempSensor()
         objServer.remove_interface(iface);
     }
     objServer.remove_interface(sensorInterface);
+    if (areaIface)
+    {
+        objServer.remove_interface(areaIface);
+    }
     objServer.remove_interface(association);
 }
 

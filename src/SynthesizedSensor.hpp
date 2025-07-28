@@ -37,6 +37,7 @@ struct SynthesizedSensor :
     std::enable_shared_from_this<SynthesizedSensor>
 {
     operandMap sensorOperands;
+    boost::container::flat_map<std::string, double> powerReadings;
 
     SynthesizedSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                       const std::string& name,
@@ -55,7 +56,6 @@ struct SynthesizedSensor :
 
     std::vector<sdbusplus::bus::match_t> matches;
     double inletTemp = std::numeric_limits<double>::quiet_NaN();
-    boost::container::flat_map<std::string, double> powerReadings;
     sdbusplus::asio::object_server& objServer;
     std::chrono::time_point<std::chrono::steady_clock> lastTime;
     static double getTotalCFM();
