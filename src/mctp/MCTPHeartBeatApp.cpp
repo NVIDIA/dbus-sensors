@@ -1,5 +1,12 @@
 #include "MCTPHeartBeatApp.hpp"
 
+// Include Boost headers first to avoid conflicts with linux/if.h and net/if.h
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
+
+// Prevent net/if.h from being included again to avoid symbol conflicts
+#define _NET_IF_H 1
+
 #include <linux/mctp.h>
 #include <sys/socket.h>
 #include <sys/time.h> // NOLINT(misc-include-cleaner)
@@ -8,8 +15,6 @@
 #include <time.h> // NOLINT(modernize-deprecated-headers)
 #include <unistd.h>
 
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/steady_timer.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus/match.hpp>
