@@ -8,7 +8,8 @@
 #define BASE_H
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 #include <stdbool.h>
@@ -28,14 +29,16 @@ extern "C" {
 
 /** @brief NSM completion codes
  */
-enum nsm_completion_codes {
+enum nsm_completion_codes
+{
     NSM_SUCCESS = 0x00,
     NSM_ERROR = 0x01,
 };
 
 /** @brief NSM Software Error codes
  */
-enum nsm_sw_codes {
+enum nsm_sw_codes
+{
     NSM_SW_SUCCESS = 0x00,
     NSM_SW_ERROR = 0x01,
     NSM_SW_ERROR_DATA = 0x02,
@@ -48,27 +51,29 @@ enum nsm_sw_codes {
  *
  *  The different message types supported by the NSM specification.
  */
-typedef enum {
-    NSM_RESPONSE = 0,          //!< NSM response message
+typedef enum
+{
+    NSM_RESPONSE = 0,             //!< NSM response message
     NSM_EVENT_ACKNOWLEDGMENT = 1, //!< NSM event acknowledgement
-    NSM_REQUEST = 2,          //!< NSM request message
-    NSM_EVENT = 3,            //!< NSM event message
+    NSM_REQUEST = 2,              //!< NSM request message
+    NSM_EVENT = 3,                //!< NSM event message
 } NsmMessageType;
 
 /** @struct nsm_msg_hdr
  *
  * Structure representing NSM message header fields
  */
-struct nsm_msg_hdr {
-    uint16_t pci_vendor_id; //!< PCI defined vendor ID for NVIDIA (0x10DE)
+struct nsm_msg_hdr
+{
+    uint16_t pci_vendor_id;  //!< PCI defined vendor ID for NVIDIA (0x10DE)
 
-    uint8_t instance_id : 5; //!< Instance ID
-    uint8_t reserved : 1;    //!< Reserved
-    uint8_t datagram : 1;    //!< Datagram bit
-    uint8_t request : 1;     //!< Request bit
+    uint8_t instance_id:5;   //!< Instance ID
+    uint8_t reserved:1;      //!< Reserved
+    uint8_t datagram:1;      //!< Datagram bit
+    uint8_t request:1;       //!< Request bit
 
-    uint8_t ocp_version : 4; //!< OCP version
-    uint8_t ocp_type : 4;    //!< OCP type
+    uint8_t ocp_version:4;   //!< OCP version
+    uint8_t ocp_type:4;      //!< OCP type
 
     uint8_t nvidia_msg_type; //!< NVIDIA Message Type
 } __attribute__((packed));
@@ -77,7 +82,8 @@ struct nsm_msg_hdr {
  *
  * Structure representing NSM message
  */
-struct nsm_msg {
+struct nsm_msg
+{
     struct nsm_msg_hdr hdr; //!< NSM message header
     uint8_t payload[1];     //!< &payload[0] is the beginning of the payload
 } __attribute__((packed));
@@ -87,7 +93,8 @@ struct nsm_msg {
  *  The information needed to prepare NSM header and this is passed to the
  *  pack_nsm_header and unpack_nsm_header API.
  */
-struct nsm_header_info {
+struct nsm_header_info
+{
     uint8_t nsm_msg_type;
     uint8_t instance_id;
     uint8_t nvidia_msg_type;
@@ -103,8 +110,8 @@ struct nsm_header_info {
  * @note   Caller is responsible for alloc and dealloc of msg
  *         and hdr params
  */
-uint8_t unpack_nsm_header(const struct nsm_msg_hdr *msg,
-                          struct nsm_header_info *hdr);
+uint8_t unpack_nsm_header(const struct nsm_msg_hdr* msg,
+                          struct nsm_header_info* hdr);
 
 #ifdef __cplusplus
 }

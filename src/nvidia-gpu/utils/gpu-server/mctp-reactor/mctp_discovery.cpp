@@ -7,8 +7,7 @@ namespace gpuserver
 {
 
 MctpDiscovery::MctpDiscovery(sdbusplus::bus::bus& bus,
-                             const std::string& socketPath) :
-    bus(bus)
+                             const std::string& socketPath) : bus(bus)
 {
     lg2::info("Initializing MCTP Discovery service");
 
@@ -132,9 +131,9 @@ void MctpDiscovery::processEndpoint(const std::string& path,
             lg2::info(
                 "Registering endpoint EID {EID} Type={TYPE} Protocol={PROTO}",
                 "EID", eid, "TYPE", socketType, "PROTO", socketProtocol);
-            if (gpuserver_mctp_add_endpoint(
-                    ctx, MCTP_ENDPOINT_ADDED, eid, socketType, socketProtocol,
-                    address.data(), address.size()) < 0)
+            if (gpuserver_mctp_add_endpoint(ctx, MCTP_ENDPOINT_ADDED, eid,
+                                            socketType, socketProtocol,
+                                            address.data(), address.size()) < 0)
             {
                 lg2::error("Failed to register endpoint {EID} at {PATH}", "EID",
                            eid, "PATH", path);

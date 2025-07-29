@@ -3,7 +3,7 @@
  * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  */
 
-//NOLINTBEGIN
+// NOLINTBEGIN
 #pragma once
 
 #include "request.hpp"
@@ -77,4 +77,4 @@ class TimeOutTracker
 };
 
 } // namespace nsm
-//NOLINTEND
+// NOLINTEND

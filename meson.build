@@ -41,22 +41,22 @@ boost = dependency('boost', version: '>=1.83.0', include_type: 'system')
 sdbusplus = dependency('sdbusplus', include_type: 'system')
 phosphor_logging_dep = dependency('phosphor-logging')
 
-nvidia_tal =dependency('nvidia-tal', required : true)
+nvidia_tal = dependency('nvidia-tal', required: true)
 default_deps = [
     boost,
     nlohmann_json_dep,
     phosphor_logging_dep,
     sdbusplus,
     uring,
-    nvidia_tal
+    nvidia_tal,
 ]
 
 if get_option('satellite').enabled()
-    add_project_arguments('-DAUTO_GEN_SENSOR_HEADER', language : 'cpp')
+    add_project_arguments('-DAUTO_GEN_SENSOR_HEADER', language: 'cpp')
 endif
 
 if get_option('shmem').enabled()
-  add_project_arguments('-DNVIDIA_SHMEM', language : 'cpp')
+    add_project_arguments('-DNVIDIA_SHMEM', language: 'cpp')
 endif
 
 subdir('service_files')

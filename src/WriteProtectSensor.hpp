@@ -64,8 +64,7 @@ class WriteProtect : public std::enable_shared_from_this<WriteProtect>
     explicit WriteProtect(
         const std::shared_ptr<sdbusplus::asio::connection>& bus,
         const std::shared_ptr<sdbusplus::asio::object_server>& objectServer) :
-        bus(bus),
-        objectServerPtr(objectServer), timer(bus->get_io_context()),
+        bus(bus), objectServerPtr(objectServer), timer(bus->get_io_context()),
         writeProtectFile(write_protect::storefile)
     {}
 

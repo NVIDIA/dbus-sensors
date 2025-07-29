@@ -36,8 +36,7 @@ using namespace boost::asio::experimental::awaitable_operators;
 
 MctpRequester::MctpRequester(boost::asio::io_context& ctx, uint8_t msgType,
                              bool verbose) :
-    verbose(verbose),
-    ctx(ctx), socket(ctx), flag(MSG_PEEK | MSG_TRUNC)
+    verbose(verbose), ctx(ctx), socket(ctx), flag(MSG_PEEK | MSG_TRUNC)
 {
     auto rc = mctp_transport_af_mctp_init(&afMctp, msgType);
     if (rc < 0)

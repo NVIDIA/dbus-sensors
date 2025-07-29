@@ -3,7 +3,7 @@
  * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  */
 
-//NOLINTBEGIN
+// NOLINTBEGIN
 #include "utils.hpp"
 
 #include <string.h>
@@ -45,4 +45,4 @@ void printBuffer(bool isTx, const uint8_t* ptr, size_t bufferLen, uint8_t tag,
 }
 
 } // namespace utils
-//NOLINTEND
+// NOLINTEND

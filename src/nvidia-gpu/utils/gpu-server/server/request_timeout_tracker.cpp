@@ -3,7 +3,7 @@
  * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  */
 
-//NOLINTBEGIN
+// NOLINTBEGIN
 #include "request_timeout_tracker.hpp"
 
 #include <phosphor-logging/lg2.hpp>
@@ -124,4 +124,4 @@ void DeviceRequestTimeOutTracker::logTimeOutFailure()
     lg2::error("******logTimeOutFailure: EID={EID}*****", "EID", eid);
 }
 } // namespace nsm
-//NOLINTEND
+// NOLINTEND

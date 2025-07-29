@@ -19,7 +19,8 @@
 class GpuClientIT
 {
   public:
-    struct TestCase {
+    struct TestCase
+    {
         int index;
         std::vector<uint8_t> input;
         std::vector<uint8_t> expected;
@@ -130,7 +131,7 @@ class GpuClientIT
 
     // Compare response with expected output
     bool compareResponse(const std::vector<uint8_t>& response,
-                        const TestCase& testCase)
+                         const TestCase& testCase)
     {
         if (response.size() != testCase.expected.size())
         {
@@ -143,16 +144,17 @@ class GpuClientIT
         {
             // Skip comparison for don't care positions
             if (std::find(testCase.dontCarePositions.begin(),
-                         testCase.dontCarePositions.end(),
-                         i) != testCase.dontCarePositions.end())
+                          testCase.dontCarePositions.end(),
+                          i) != testCase.dontCarePositions.end())
             {
                 continue;
             }
 
             if (response[i] != testCase.expected[i])
             {
-                std::cout << "Mismatch at position " << i << ". Expected: "
-                          << std::hex << std::setw(2) << std::setfill('0')
+                std::cout << "Mismatch at position " << i
+                          << ". Expected: " << std::hex << std::setw(2)
+                          << std::setfill('0')
                           << static_cast<int>(testCase.expected[i])
                           << ", Got: " << static_cast<int>(response[i])
                           << std::dec << std::endl;
@@ -170,8 +172,8 @@ class GpuClientIT
 
         // Send message
         ssize_t sent = gpuserver_send_msg(ctx, GPUSERVER_API_PASSTHROUGH_EID,
-                                         eid, testCase.input.data(),
-                                         testCase.input.size());
+                                          eid, testCase.input.data(),
+                                          testCase.input.size());
         if (sent < 0)
         {
             std::cout << "❌ Failed: Error sending message: " << strerror(-sent)
@@ -192,8 +194,7 @@ class GpuClientIT
 
         // Receive response
         std::vector<uint8_t> response(1024);
-        ssize_t respLen =
-            gpuserver_recv(ctx, response.data(), response.size());
+        ssize_t respLen = gpuserver_recv(ctx, response.data(), response.size());
         if (respLen <= 0)
         {
             std::cout << "❌ Failed: Error receiving response: "
@@ -223,13 +224,13 @@ class GpuClientIT
     void run(const std::string& csvPath)
     {
         loadTestCases(csvPath);
-        
+
         for (auto& testCase : testCases)
         {
             executeTestCase(testCase);
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-        
+
         printResults();
     }
 
@@ -268,7 +269,8 @@ class GpuClientIT
         std::cout << "\nSummary:" << std::endl;
         std::cout << "Total Tests: " << totalTests << std::endl;
         std::cout << "Passed: " << passedTests << " (" << std::fixed
-                  << std::setprecision(2) << passPercentage << "%)" << std::endl;
+                  << std::setprecision(2) << passPercentage << "%)"
+                  << std::endl;
         std::cout << "Failed: " << (totalTests - passedTests) << " ("
                   << (100.0 - passPercentage) << "%)" << std::endl;
     }

@@ -56,8 +56,7 @@ IpmbSensor::IpmbSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
                        sdbusplus::asio::object_server& objectServer,
                        uint8_t deviceAddress, uint8_t channelAddress,
                        const float pollRate) :
-    deviceAddress(deviceAddress),
-    channelAddress(channelAddress),
+    deviceAddress(deviceAddress), channelAddress(channelAddress),
     sensorPollMs(static_cast<int>(pollRate * 1000)), dbusConnection(conn),
     objectServer(objectServer), waitTimer(io)
 {
@@ -110,8 +109,7 @@ void IpmbSensor::runInitCmd()
                 std::cerr << "Error setting init command for device: "
                           << "\n";
             }
-        },
-            "xyz.openbmc_project.Ipmi.Channel.Ipmb",
+        }, "xyz.openbmc_project.Ipmi.Channel.Ipmb",
             "/xyz/openbmc_project/Ipmi/Channel/Ipmb", "org.openbmc.Ipmb",
             "sendRequest", commandAddress, netfn, lun, *initCommand, initData);
     }
@@ -360,8 +358,7 @@ void createSensors(
                 sensor->init();
             }
         }
-    },
-        entityManagerName, "/xyz/openbmc_project/inventory",
+    }, entityManagerName, "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 }
 

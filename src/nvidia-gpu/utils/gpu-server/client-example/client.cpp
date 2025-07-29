@@ -63,10 +63,10 @@ class GpuClient
                                       0xff}); // Type-3: Get Temperature
 
             // Send message with API headers using the provided EID
-            ssize_t sent =
-                gpuserver_send_msg(ctx, GPUSERVER_API_PASSTHROUGH_EID,
-                                       eid, // Use EID from constructor
-                                       msg.data(), msg.size());
+            ssize_t sent = gpuserver_send_msg(ctx,
+                                              GPUSERVER_API_PASSTHROUGH_EID,
+                                              eid, // Use EID from constructor
+                                              msg.data(), msg.size());
             if (sent < 0)
             {
                 std::cerr << "Error sending message: " << strerror(-sent)
@@ -86,7 +86,7 @@ class GpuClient
             // Receive response
             std::vector<uint8_t> response(1024);
             ssize_t respLen = gpuserver_recv(ctx, response.data(),
-                                                 response.size());
+                                             response.size());
             if (respLen < 0)
             {
                 std::cerr << "Error receiving response: " << strerror(-respLen)

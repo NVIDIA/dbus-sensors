@@ -5,9 +5,9 @@
 
 #include <bits/fs_dir.h>
 
-#include <boost/system/detail/errc.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/system/detail/errc.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus.hpp>
@@ -48,30 +48,31 @@ MCTPDDevice::MCTPDDevice(
     const std::string& interface, const std::vector<uint8_t>& physaddr,
     std::optional<std::uint8_t> staticEID,
     std::optional<std::uint8_t> bridgePoolStartEid) :
-    connection(connection),
-    interface(interface), physaddr(physaddr), staticEID(staticEID),
-    bridgePoolStartEid(bridgePoolStartEid)
+    connection(connection), interface(interface), physaddr(physaddr),
+    staticEID(staticEID), bridgePoolStartEid(bridgePoolStartEid)
 {}
 
 void MCTPDDevice::onDiscoveryMatchRule()
 {
-    const auto matchRule = sdbusplus::bus::match::rules::type::signal() +
-                           sdbusplus::bus::match::rules::path(mctpdControlPath) +
-                           sdbusplus::bus::match::rules::interface(mctpdEndpointControlInterface) +
-                           sdbusplus::bus::match::rules::member("DiscoveryNotify");
+    const auto matchRule =
+        sdbusplus::bus::match::rules::type::signal() +
+        sdbusplus::bus::match::rules::path(mctpdControlPath) +
+        sdbusplus::bus::match::rules::interface(mctpdEndpointControlInterface) +
+        sdbusplus::bus::match::rules::member("DiscoveryNotify");
 
     discoveryNotifyMatch = std::make_unique<sdbusplus::bus::match_t>(
         *connection, matchRule,
         [weakThis{weak_from_this()}](sdbusplus::message_t& msg) {
-            if (auto self = weakThis.lock())
-            {
-                self->onDiscoveryNotify(msg);
-            }
-            else
-            {
-                error("MCTPDDevice instance destroyed during DiscoveryNotify handling.");
-            }
-        });
+        if (auto self = weakThis.lock())
+        {
+            self->onDiscoveryNotify(msg);
+        }
+        else
+        {
+            error(
+                "MCTPDDevice instance destroyed during DiscoveryNotify handling.");
+        }
+    });
 
     info("DiscoveryNotify match registered.");
 
@@ -87,16 +88,18 @@ void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& msg)
 
     if (discoveryNeeded)
     {
-       info("Ignoring DiscoveryNotify for EID '{EID}' (already have a pending discovery).",
-        "EID", static_cast<int>(eid));
+        info(
+            "Ignoring DiscoveryNotify for EID '{EID}' (already have a pending discovery).",
+            "EID", static_cast<int>(eid));
         return;
     }
 
     discoveryNeeded = true;
     pendingEID = eid;
 
-    info("First DiscoveryNotify for EID '{EID}' => scheduling discovery in ~5s.",
-     "EID", static_cast<int>(eid));
+    info(
+        "First DiscoveryNotify for EID '{EID}' => scheduling discovery in ~5s.",
+        "EID", static_cast<int>(eid));
 
     /* Broad logic: This  bumps up discovery notify handler timer for
     another 5s. This is done to ensure that a flood of discovery notifies do
@@ -111,18 +114,18 @@ void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& msg)
     discoveryCheckTimer->expires_after(5s);
     discoveryCheckTimer->async_wait(
         [weakThis = weak_from_this()](const boost::system::error_code& ecWait) {
-            if (ecWait == boost::asio::error::operation_aborted)
-            {
-                return;
-            }
-            if (auto self = weakThis.lock())
-            {
-                // Call performDiscovery(), then reset flags
-                self->performDiscovery();
-                self->discoveryNeeded = false;
-                self->pendingEID.reset();
-            }
-        });
+        if (ecWait == boost::asio::error::operation_aborted)
+        {
+            return;
+        }
+        if (auto self = weakThis.lock())
+        {
+            // Call performDiscovery(), then reset flags
+            self->performDiscovery();
+            self->discoveryNeeded = false;
+            self->pendingEID.reset();
+        }
+    });
 }
 
 void MCTPDDevice::performDiscovery()
@@ -422,8 +425,7 @@ void MCTPDEndpoint::remove()
                   "MCTP_ENDPOINT", self->describe());
             return;
         }
-    },
-        mctpdBusName, objpath.str, mctpdEndpointControlInterface, "Remove");
+    }, mctpdBusName, objpath.str, mctpdEndpointControlInterface, "Remove");
 }
 
 void MCTPDEndpoint::removed()
@@ -734,7 +736,8 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
     auto mBus = iface.find("Bus");
     auto mChipselect = iface.find("ChipSelect");
     auto mStaticEndpointID = iface.find("StaticEndpointID");
-    if (mChipselect == iface.end() || mBus == iface.end() || mName == iface.end())
+    if (mChipselect == iface.end() || mBus == iface.end() ||
+        mName == iface.end())
     {
         throw std::invalid_argument(
             "Configuration object violates MCTPSPIDevice schema");
@@ -749,10 +752,12 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
         throw std::invalid_argument("Bad bus index");
     }
 
-    auto sChipselect = std::visit(VariantToStringVisitor(), mChipselect->second);
+    auto sChipselect = std::visit(VariantToStringVisitor(),
+                                  mChipselect->second);
     int chipselect{};
-    auto [cptr, cec] = std::from_chars(sChipselect.data(), sChipselect.data() + sChipselect.size(),
-    chipselect);
+    auto [cptr, cec] = std::from_chars(sChipselect.data(),
+                                       sChipselect.data() + sChipselect.size(),
+                                       chipselect);
     if (cec != std::errc{})
     {
         throw std::invalid_argument("Bad chip select");

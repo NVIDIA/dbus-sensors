@@ -9,7 +9,8 @@
 #define MCTP_H
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 #include <stddef.h>
@@ -21,7 +22,8 @@ typedef uint8_t mctp_eid_t;
 #define MCTP_TAG_NSM 3
 #define MCTP_MSG_TAG_REQ (MCTP_TAG_NSM | 1 << 3)
 
-typedef enum nsm_requester_error_codes {
+typedef enum nsm_requester_error_codes
+{
     NSM_REQUESTER_SUCCESS = 0,
     NSM_REQUESTER_NOT_NSM_MSG = -2,
     NSM_REQUESTER_NOT_RESP_MSG = -3,
@@ -34,10 +36,10 @@ typedef enum nsm_requester_error_codes {
 } nsm_requester_rc_t;
 
 nsm_requester_rc_t nsm_recv(mctp_eid_t eid, int mctp_fd, uint8_t instance_id,
-                            uint8_t **nsm_resp_msg, size_t *resp_msg_len);
+                            uint8_t** nsm_resp_msg, size_t* resp_msg_len);
 nsm_requester_rc_t nsm_recv_any(mctp_eid_t eid, int mctp_fd,
-                                uint8_t **nsm_resp_msg, size_t *resp_msg_len,
-                                uint8_t *tag);
+                                uint8_t** nsm_resp_msg, size_t* resp_msg_len,
+                                uint8_t* tag);
 
 #ifdef __cplusplus
 }

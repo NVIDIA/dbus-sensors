@@ -3,7 +3,7 @@
  * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  */
 
-//NOLINTBEGIN
+// NOLINTBEGIN
 #pragma once
 
 #include "config.h"
@@ -12,11 +12,11 @@
 #include "mctp.h"
 
 #include "coroutine.hpp"
-#include "types.hpp"
 #include "instance_id.hpp"
-#include "socket_manager.hpp"
 #include "request.hpp"
 #include "request_timeout_tracker.hpp"
+#include "socket_manager.hpp"
+#include "types.hpp"
 
 #include <function2/function2.hpp>
 #include <phosphor-logging/lg2.hpp>
@@ -87,25 +87,23 @@ class Handler
         uint8_t numRetries = static_cast<uint8_t>(NUMBER_OF_REQUEST_RETRIES),
         std::chrono::milliseconds responseTimeOut =
             std::chrono::milliseconds(RESPONSE_TIME_OUT)) :
-        event(event),
-        instanceIdDb(instanceIdDb), sockManager(sockManager),
+        event(event), instanceIdDb(instanceIdDb), sockManager(sockManager),
         instanceIdExpiryInterval(instanceIdExpiryInterval),
         numRetries(numRetries), responseTimeOut(responseTimeOut),
         socketHandler(nullptr)
     {}
 
     int registerRequestImpl(
-        uint8_t tag, eid_t eid,
-        std::vector<uint8_t>&& requestMsg, ResponseHandler&& responseHandler,
+        uint8_t tag, eid_t eid, std::vector<uint8_t>&& requestMsg,
+        ResponseHandler&& responseHandler,
         std::unordered_map<eid_t, RequestQueue>& handlers,
         std::unordered_map<eid_t, std::unique_ptr<sdbusplus::Timer>>&
             timerToFree,
         std::chrono::milliseconds responseTimeOut,
         std::chrono::seconds instanceIdExpiryInterval)
     {
-        auto instanceIdExpiryCallBack = [eid, &handlers,
-                                         &timerToFree, instanceIdExpiryInterval,
-                                         this](void) {
+        auto instanceIdExpiryCallBack = [eid, &handlers, &timerToFree,
+                                         instanceIdExpiryInterval, this](void) {
             if (handlers.contains(eid) && !handlers[eid].empty())
             {
                 auto& [request, responseHandler, timerInstance,
@@ -196,9 +194,8 @@ class Handler
                         ResponseHandler&& responseHandler)
     {
         return registerRequestImpl(
-            tag, eid, std::move(requestMsg),
-            std::move(responseHandler), handlers, timerToFree, responseTimeOut,
-            instanceIdExpiryInterval);
+            tag, eid, std::move(requestMsg), std::move(responseHandler),
+            handlers, timerToFree, responseTimeOut, instanceIdExpiryInterval);
     }
 
     int runRegisteredRequest(eid_t eid,
@@ -468,8 +465,7 @@ struct SendRecvNsmMsg
     SendRecvNsmMsg(RequesterHandler& handler, eid_t eid,
                    std::vector<uint8_t>& request, const nsm_msg** responseMsg,
                    size_t* responseLen) :
-        handler(handler),
-        eid(eid), request(request), responseMsg(responseMsg),
+        handler(handler), eid(eid), request(request), responseMsg(responseMsg),
         responseLen(responseLen), rc(NSM_ERROR)
     {}
 
@@ -493,4 +489,4 @@ struct SendRecvNsmMsg
 };
 
 } // namespace requester
-//NOLINTEND
+// NOLINTEND

@@ -1,6 +1,12 @@
 #include "MCTPHeartBeatApp.hpp"
 
+#include <linux/mctp.h>
+#include <sys/socket.h>
+#include <sys/time.h> // NOLINT(misc-include-cleaner)
+#include <sys/types.h>
 #include <systemd/sd-event.h>
+#include <time.h> // NOLINT(modernize-deprecated-headers)
+#include <unistd.h>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -8,22 +14,15 @@
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus/match.hpp>
 
-#include <linux/mctp.h>
-#include <csignal>  // NOLINT(modernize-deprecated-headers)
-#include <sys/socket.h>
-#include <sys/time.h>  // NOLINT(misc-include-cleaner)
-#include <sys/types.h>
-#include <ctime>  // NOLINT(modernize-deprecated-headers)
-#include <time.h>  // NOLINT(modernize-deprecated-headers)
-#include <unistd.h>
-
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <csignal> // NOLINT(modernize-deprecated-headers)
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime> // NOLINT(modernize-deprecated-headers)
 #include <exception>
 #include <functional>
 #include <iomanip>
@@ -64,7 +63,7 @@ static void printHex(const char* msg, const uint8_t* data, int len)
     {
         return;
     }
-    
+
     std::string output = std::string(msg) + " : ";
     if (data != nullptr)
     {
@@ -111,7 +110,8 @@ static int waitFdTimeout(int fd, short events, uint64_t timeoutUsec)
         return rc;
     }
 
-    rc = sd_event_add_time_relative(ev, nullptr, CLOCK_MONOTONIC, timeoutUsec, 0,  // NOLINT(misc-include-cleaner)
+    rc = sd_event_add_time_relative(ev, nullptr, CLOCK_MONOTONIC, timeoutUsec,
+                                    0, // NOLINT(misc-include-cleaner)
                                     cbExitLoopTimeout, nullptr);
     if (rc < 0)
     {
@@ -139,8 +139,8 @@ static int waitFdTimeout(int fd, short events, uint64_t timeoutUsec)
 static int readMessage(int sd, std::vector<uint8_t>& retBuf,
                        sockaddr_mctp* retAddr)
 {
-    ssize_t len =
-        recvfrom(sd, nullptr, 0, MSG_PEEK | MSG_TRUNC, nullptr, nullptr);
+    ssize_t len = recvfrom(sd, nullptr, 0, MSG_PEEK | MSG_TRUNC, nullptr,
+                           nullptr);
     if (len < 0)
     {
         lg2::error("readMessage returned error: {ERROR}", "ERROR",
@@ -161,8 +161,10 @@ static int readMessage(int sd, std::vector<uint8_t>& retBuf,
     {
         socklen_t addrlen = sizeof(sockaddr_mctp);
         memset(retAddr, 0x0, addrlen);
-        len = recvfrom(sd, retBuf.data(), retBuf.size(), MSG_TRUNC,
-                       reinterpret_cast<struct sockaddr*>(retAddr), &addrlen);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        len = recvfrom(
+            sd, retBuf.data(), retBuf.size(), MSG_TRUNC,
+            reinterpret_cast<struct sockaddr*>(retAddr),
+            &addrlen); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     }
     else
     {
@@ -222,9 +224,9 @@ static int mctpQueryVdmCommand(int sd, const struct sockaddr_mctp* reqAddr,
     }
 
     printHex("TX", static_cast<const uint8_t*>(req), reqLen);
-    ssize_t rc =
-        sendto(sd, req, reqLen, 0,
-              reinterpret_cast<const struct sockaddr*>(reqAddr), reqAddrLen);  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    ssize_t rc = sendto(
+        sd, req, reqLen, 0, reinterpret_cast<const struct sockaddr*>(reqAddr),
+        reqAddrLen); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
     if (rc < 0)
     {
         lg2::error("sendto failed: {ERROR}", "ERROR", strerror(errno));
@@ -244,7 +246,8 @@ static int mctpQueryVdmCommand(int sd, const struct sockaddr_mctp* reqAddr,
     {
         if (waitRc == -ETIMEDOUT)
         {
-            lg2::error("received time out from EID {EID}", "EID", reqAddr->smctp_addr.s_addr);
+            lg2::error("received time out from EID {EID}", "EID",
+                       reqAddr->smctp_addr.s_addr);
         }
         return waitRc;
     }
@@ -269,27 +272,27 @@ static int mctpQueryVdmCommand(int sd, const struct sockaddr_mctp* reqAddr,
 }
 
 /* Wrapper for mctpQueryVdmCommand with retry logic */
-static int mctpQueryVdmCommandWithRetry(int sd, const struct sockaddr_mctp* reqAddr,
-                                        bool extAddr, const void* req, size_t reqLen,
-                                        std::vector<uint8_t>& resp,
-                                        struct sockaddr_mctp* respAddr)
+static int mctpQueryVdmCommandWithRetry(
+    int sd, const struct sockaddr_mctp* reqAddr, bool extAddr, const void* req,
+    size_t reqLen, std::vector<uint8_t>& resp, struct sockaddr_mctp* respAddr)
 {
     for (int attempt = 1; attempt <= maxRetries; ++attempt)
     {
-        int rc = mctpQueryVdmCommand(sd, reqAddr, extAddr, req, reqLen, resp, respAddr);
+        int rc = mctpQueryVdmCommand(sd, reqAddr, extAddr, req, reqLen, resp,
+                                     respAddr);
         if (rc == 0)
         {
             return 0;
         }
-        
+
         if (attempt < maxRetries)
         {
-            lg2::info("Retrying command (attempt {ATTEMPT}/{MAX})", 
-                      "ATTEMPT", attempt + 1, "MAX", maxRetries);
+            lg2::info("Retrying command (attempt {ATTEMPT}/{MAX})", "ATTEMPT",
+                      attempt + 1, "MAX", maxRetries);
             sleep(retryDelaySec);
         }
     }
-    
+
     lg2::error("Command failed after {MAX} attempts", "MAX", maxRetries);
     return -1;
 }
@@ -304,8 +307,8 @@ int vdmRestartNotification(int fd, uint8_t tid)
     std::vector<uint8_t> resp;
     int rc = -1;
     MctpVendorCmdRestartnoti cmd{};
-    struct sockaddr_mctp reqAddr {};
-    struct sockaddr_mctp respAddr {};
+    struct sockaddr_mctp reqAddr{};
+    struct sockaddr_mctp respAddr{};
 
     /* Encode the VDM headers for Restart notification */
     mctpEncodeVendorCmdRestartnoti(&cmd);
@@ -319,8 +322,8 @@ int vdmRestartNotification(int fd, uint8_t tid)
 
     /* Send and Receive the MCTP-VDM command using mctpQueryVdmCommand */
     rc = mctpQueryVdmCommandWithRetry(fd, &reqAddr,
-                             false, /* don't use extended addressing */
-                             &cmd, sizeof(cmd), resp, &respAddr);
+                                      false, /* don't use extended addressing */
+                                      &cmd, sizeof(cmd), resp, &respAddr);
 
     if (rc == 0 && !resp.empty())
     {
@@ -341,8 +344,8 @@ int vdmBootCompleteV2(int fd, uint8_t tid, uint8_t valid, uint8_t slot)
     std::vector<uint8_t> resp;
     int rc = -1;
     MctpVendorCmdBootcompleteV2 cmd{};
-    struct sockaddr_mctp reqAddr {};
-    struct sockaddr_mctp respAddr {};
+    struct sockaddr_mctp reqAddr{};
+    struct sockaddr_mctp respAddr{};
 
     /* Encode the VDM headers for Boot Complete V2 */
     mctpEncodeVendorCmdBootcmpltV2(&cmd);
@@ -358,8 +361,8 @@ int vdmBootCompleteV2(int fd, uint8_t tid, uint8_t valid, uint8_t slot)
 
     /* Send and Receive the MCTP-VDM command using mctpQueryVdmCommand */
     rc = mctpQueryVdmCommandWithRetry(fd, &reqAddr,
-                             false, /* don't use extended addressing */
-                             &cmd, sizeof(cmd), resp, &respAddr);
+                                      false, /* don't use extended addressing */
+                                      &cmd, sizeof(cmd), resp, &respAddr);
 
     if (rc == 0 && !resp.empty())
     {
@@ -382,8 +385,8 @@ int vdmSetHeartbeatEnable(int fd, uint8_t tid, int enable)
     std::vector<uint8_t> resp;
     int rc = -1;
     MctpVendorCmdHbenable cmd{};
-    struct sockaddr_mctp reqAddr {};
-    struct sockaddr_mctp respAddr {};
+    struct sockaddr_mctp reqAddr{};
+    struct sockaddr_mctp respAddr{};
 
     /* Encode the VDM headers for Heartbeat enable/disable */
     mctpEncodeVendorCmdHbenable(&cmd);
@@ -400,8 +403,8 @@ int vdmSetHeartbeatEnable(int fd, uint8_t tid, int enable)
 
     /* Send and Receive the MCTP-VDM command using mctpQueryVdmCommand */
     rc = mctpQueryVdmCommandWithRetry(fd, &reqAddr,
-                             false, /* don't use extended addressing */
-                             &cmd, sizeof(cmd), resp, &respAddr);
+                                      false, /* don't use extended addressing */
+                                      &cmd, sizeof(cmd), resp, &respAddr);
 
     if (rc == 0 && !resp.empty())
     {
@@ -425,8 +428,8 @@ int vdmSendHeartbeat(int fd, uint8_t tid)
 {
     std::vector<uint8_t> resp;
     int rc = -1;
-    struct sockaddr_mctp reqAddr {};
-    struct sockaddr_mctp respAddr {};
+    struct sockaddr_mctp reqAddr{};
+    struct sockaddr_mctp respAddr{};
     MctpVendorCmdHbenvent cmd{};
 
     /* Encode the VDM headers for Heartbeat command */
@@ -441,8 +444,8 @@ int vdmSendHeartbeat(int fd, uint8_t tid)
 
     /* Send and Receive the MCTP-VDM command using mctpQueryVdmCommand */
     rc = mctpQueryVdmCommandWithRetry(fd, &reqAddr,
-                             false, /* don't use extended addressing */
-                             &cmd, sizeof(cmd), resp, &respAddr);
+                                      false, /* don't use extended addressing */
+                                      &cmd, sizeof(cmd), resp, &respAddr);
 
     if (rc == 0 && !resp.empty())
     {
@@ -477,15 +480,18 @@ class MCTPHeartbeatService
             return -1;
         }
 
-        struct sockaddr_mctp addr {};
+        struct sockaddr_mctp addr{};
         addr.smctp_family = AF_MCTP;
         addr.smctp_network = MCTP_NET_ANY;
         addr.smctp_addr.s_addr = MCTP_ADDR_ANY;
         addr.smctp_type = mctpVendorMsgType;
         addr.smctp_tag = MCTP_TAG_OWNER;
 
-        if (bind(sockFd, reinterpret_cast<struct sockaddr*>(&addr),  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                 sizeof(addr)) < 0)
+        if (bind(
+                sockFd,
+                reinterpret_cast<struct sockaddr*>(
+                    &addr), // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+                sizeof(addr)) < 0)
         {
             lg2::error("AF_MCTP socket bind failed: {ERROR}", "ERROR",
                        strerror(errno));
@@ -494,12 +500,14 @@ class MCTPHeartbeatService
         }
 
         /* Set socket timeout */
-        struct timeval timeout {};  // NOLINT(misc-include-cleaner)
-        timeout.tv_sec = 5; // 5 seconds timeout
+        struct timeval timeout{}; // NOLINT(misc-include-cleaner)
+        timeout.tv_sec = 5;       // 5 seconds timeout
         timeout.tv_usec = 0;
 
-        if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO,  // NOLINT(misc-include-cleaner)
-                       reinterpret_cast<char*>(&timeout), sizeof(timeout)) < 0)  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (setsockopt(sockFd, SOL_SOCKET,
+                       SO_RCVTIMEO, // NOLINT(misc-include-cleaner)
+                       reinterpret_cast<char*>(&timeout), sizeof(timeout)) <
+            0) // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
         {
             lg2::error("AF_MCTP socket setsockopt failed: {ERROR}", "ERROR",
                        strerror(errno));
@@ -509,8 +517,8 @@ class MCTPHeartbeatService
 
         /* Enable extended addressing */
         int val = 1;
-        if (setsockopt(sockFd, SOL_MCTP, MCTP_OPT_ADDR_EXT, &val,
-                       sizeof(val)) < 0)
+        if (setsockopt(sockFd, SOL_MCTP, MCTP_OPT_ADDR_EXT, &val, sizeof(val)) <
+            0)
         {
             lg2::error(
                 "Kernel does not support MCTP extended addressing: {ERROR}",
@@ -544,11 +552,11 @@ class MCTPHeartbeatService
     void run()
     {
         // Setup signal handler
-        struct sigaction sa {};  // NOLINT(misc-include-cleaner)
-        sa.sa_handler = signalHandler;  // NOLINT(misc-include-cleaner)
-        sigemptyset(&sa.sa_mask);  // NOLINT(misc-include-cleaner)
+        struct sigaction sa{};            // NOLINT(misc-include-cleaner)
+        sa.sa_handler = signalHandler;    // NOLINT(misc-include-cleaner)
+        sigemptyset(&sa.sa_mask);         // NOLINT(misc-include-cleaner)
         sa.sa_flags = 0;
-        sigaction(SIGTERM, &sa, nullptr);  // NOLINT(misc-include-cleaner)
+        sigaction(SIGTERM, &sa, nullptr); // NOLINT(misc-include-cleaner)
 
         // Send boot complete v2 command first
         if (vdmBootCompleteV2(fd, targetEid, 0, 0) != 0)
@@ -659,10 +667,9 @@ void signalHandler(int signum)
     }
 }
 
-static void
-    addedSPIEndpoint(const std::shared_ptr<sdbusplus::asio::connection>&
-                         systemBus,
-                     uint8_t eid, boost::asio::io_context& io)
+static void addedSPIEndpoint(
+    const std::shared_ptr<sdbusplus::asio::connection>& systemBus, uint8_t eid,
+    boost::asio::io_context& io)
 {
     // Add this line to mark systemBus as used and avoid the unused parameter
     // warning
@@ -677,8 +684,7 @@ static void
         {
             lg2::info("Creating new MCTPHeartbeatService for EID {EID}", "EID",
                       eid);
-            gHeartbeatService =
-                std::make_shared<MCTPHeartbeatService>(io, eid);
+            gHeartbeatService = std::make_shared<MCTPHeartbeatService>(io, eid);
         }
         else
         {
@@ -703,17 +709,15 @@ static void
 
 // Function to check if an endpoint exists and initialize heartbeat if it does
 static void checkExistingEndpoint(
-    const std::shared_ptr<sdbusplus::asio::connection>& systemBus,
-    uint8_t eid, boost::asio::io_context& io)
+    const std::shared_ptr<sdbusplus::asio::connection>& systemBus, uint8_t eid,
+    boost::asio::io_context& io)
 {
     // Create the object path string properly
-    std::string objpath =
-        "/au/com/codeconstruct/mctp1/networks/1/endpoints/" +
-        std::to_string(eid);
+    std::string objpath = "/au/com/codeconstruct/mctp1/networks/1/endpoints/" +
+                          std::to_string(eid);
     systemBus->async_method_call(
-        [systemBus, eid, &io,
-         objpath](const boost::system::error_code& ec,
-                  const std::variant<std::string>& value) {
+        [systemBus, eid, &io, objpath](const boost::system::error_code& ec,
+                                       const std::variant<std::string>& value) {
         (void)value;
         if (ec)
         {
@@ -759,15 +763,14 @@ int main()
             rules::interfacesAddedAtPath(path);
 
         // Fix the match object creation - update to use gIo instead of io
-        auto interfacesAddedMatch =
-            match(*systemBus, interfacesAddedMatchSpec,
-                  [systemBus, eid](auto&) {
+        auto interfacesAddedMatch = match(*systemBus, interfacesAddedMatchSpec,
+                                          [systemBus, eid](auto&) {
             lg2::info("interfacesAddedMatch for SPI endpoint {EID}", "EID",
                       eid);
             addedSPIEndpoint(systemBus, eid, gIo);
         });
-        auto interfacesRemovedMatch = match(
-            *systemBus, interfacesRemovedMatchSpec, [](auto&) {
+        auto interfacesRemovedMatch =
+            match(*systemBus, interfacesRemovedMatchSpec, [](auto&) {
             lg2::info("interfacesRemovedMatch for SPI endpoint");
             if (gHeartbeatService)
             {
@@ -776,11 +779,11 @@ int main()
         });
 
         // Setup signal handler for process termination
-        struct sigaction sa {};  // NOLINT(misc-include-cleaner)
-        sa.sa_handler = signalHandler;  // NOLINT(misc-include-cleaner)
-        sigemptyset(&sa.sa_mask);  // NOLINT(misc-include-cleaner)
+        struct sigaction sa{};            // NOLINT(misc-include-cleaner)
+        sa.sa_handler = signalHandler;    // NOLINT(misc-include-cleaner)
+        sigemptyset(&sa.sa_mask);         // NOLINT(misc-include-cleaner)
         sa.sa_flags = 0;
-        sigaction(SIGTERM, &sa, nullptr);  // NOLINT(misc-include-cleaner)
+        sigaction(SIGTERM, &sa, nullptr); // NOLINT(misc-include-cleaner)
 
         // to keep service running
         // Need to keep the service alive unless SIGTERM is received

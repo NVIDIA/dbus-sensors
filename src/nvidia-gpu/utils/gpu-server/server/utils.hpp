@@ -3,14 +3,16 @@
  * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
  */
 
-//NOLINTBEGIN
+// NOLINTBEGIN
 #pragma once
 
 #include "base.h"
+
 #include "types.hpp"
 
-#include <phosphor-logging/lg2.hpp>
 #include <unistd.h> // for close()
+
+#include <phosphor-logging/lg2.hpp>
 
 #include <string>
 #include <vector>
@@ -84,4 +86,4 @@ void printBuffer(bool isTx, const uint8_t* buffer, size_t bufferLen,
                  uint8_t tag, eid_t eid);
 
 } // namespace utils
-//NOLINTEND
+// NOLINTEND

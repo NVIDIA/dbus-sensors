@@ -42,9 +42,9 @@ gpuserver_ctx* gpuserver_connect(const char* socket_path)
     return ctx;
 }
 
-ssize_t gpuserver_send_msg(gpuserver_ctx* ctx,
-                               gpuserver_api_type api_type, uint32_t device_id,
-                               const uint8_t* payload, size_t payload_len)
+ssize_t gpuserver_send_msg(gpuserver_ctx* ctx, gpuserver_api_type api_type,
+                           uint32_t device_id, const uint8_t* payload,
+                           size_t payload_len)
 {
     if (!ctx || !payload)
     {
@@ -79,8 +79,7 @@ ssize_t gpuserver_send_msg(gpuserver_ctx* ctx,
     return result;
 }
 
-ssize_t gpuserver_recv(gpuserver_ctx* ctx, uint8_t* resp_buf,
-                           size_t resp_len)
+ssize_t gpuserver_recv(gpuserver_ctx* ctx, uint8_t* resp_buf, size_t resp_len)
 {
     if (!ctx || !resp_buf)
     {

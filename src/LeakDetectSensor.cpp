@@ -525,8 +525,7 @@ void LeakDetectSensor::executeShutdown()
                       << "\n";
             return;
         }
-    },
-        "xyz.openbmc_project.State.Chassis",
+    }, "xyz.openbmc_project.State.Chassis",
         "/xyz/openbmc_project/state/chassis0",
         "org.freedesktop.DBus.Properties", "Set",
         "xyz.openbmc_project.State.Chassis", "RequestedPowerTransition",
@@ -563,8 +562,7 @@ void LeakDetectSensor::blinkFaultLed()
                       << ec.message() << "\n";
             return;
         }
-    },
-        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+    }, ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
         ledInterface, "State", ledActionOff);
 
     // LED parameters such as Duty and Period must be set before enabling the
@@ -577,8 +575,7 @@ void LeakDetectSensor::blinkFaultLed()
                       << "\n";
             return;
         }
-    },
-        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+    }, ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
         ledInterface, "DutyOn", dutyOn);
 
     dbusConnection->async_method_call(
@@ -589,8 +586,7 @@ void LeakDetectSensor::blinkFaultLed()
                       << ec.message() << "\n";
             return;
         }
-    },
-        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+    }, ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
         ledInterface, "Period", period);
 
     dbusConnection->async_method_call(
@@ -601,8 +597,7 @@ void LeakDetectSensor::blinkFaultLed()
                       << ec.message() << "\n";
             return;
         }
-    },
-        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+    }, ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
         ledInterface, "State", ledActionBlink);
 }
 
@@ -622,8 +617,7 @@ void LeakDetectSensor::persistThreshold(double newThreshold)
                       << "\n";
             return;
         }
-    },
-        entityManagerName, configurationPath, "org.freedesktop.DBus.Properties",
+    }, entityManagerName, configurationPath, "org.freedesktop.DBus.Properties",
         "Set", "xyz.openbmc_project.Configuration.VoltageLeakDetector",
         "LeakThresholdVolts", threshold);
 }

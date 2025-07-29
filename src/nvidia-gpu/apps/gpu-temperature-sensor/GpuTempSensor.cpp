@@ -33,8 +33,7 @@ static std::string makeDBusNameValid(const std::string& name)
 GpuTempSensor::GpuTempSensor(sdbusplus::bus::bus& bus, mctp_eid_t eid,
                              uint8_t sensorId, const std::string& name,
                              const std::string& chassisPath, bool verbose) :
-    eid(eid),
-    sensorId(sensorId), verbose(verbose)
+    eid(eid), sensorId(sensorId), verbose(verbose)
 
 {
     auto sensorPath = "/xyz/openbmc_project/sensors/temperature/"s +

@@ -13,12 +13,10 @@
 namespace gpuserver
 {
 
-Manager::Manager(
-    sdeventplus::Event& event, const std::string& socketPath,
-    requester::Handler<requester::Request>& reqHandler,
-    mctp::EndpointManager& endpointManager, bool verbose) :
-    event(event),
-    socketPath(socketPath), reqHandler(reqHandler),
+Manager::Manager(sdeventplus::Event& event, const std::string& socketPath,
+                 requester::Handler<requester::Request>& reqHandler,
+                 mctp::EndpointManager& endpointManager, bool verbose) :
+    event(event), socketPath(socketPath), reqHandler(reqHandler),
     endpointManager(endpointManager), verbose(verbose)
 {
     cleanupSocket();
@@ -103,7 +101,7 @@ void Manager::initServerSocket()
 }
 
 void Manager::handleClientConnection(IO& io [[maybe_unused]], int fd,
-                                              uint32_t revents)
+                                     uint32_t revents)
 {
     if (!(revents & EPOLLIN))
     {

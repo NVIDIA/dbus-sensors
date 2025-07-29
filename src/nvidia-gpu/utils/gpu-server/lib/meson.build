@@ -2,18 +2,20 @@ add_languages('c', required: true)
 
 gpuserver_lib = static_library(
     'gpuserver',
-    ['mctp.c',
-     'base.c',
-     'instance-id.c',
-     'gpuserver.c',
-     'gpuserver_mctp_discovery.c'],
+    [
+        'mctp.c',
+        'base.c',
+        'instance-id.c',
+        'gpuserver.c',
+        'gpuserver_mctp_discovery.c',
+    ],
     install: true,
-    install_dir: get_option('libdir')
+    install_dir: get_option('libdir'),
 )
 
 gpuserver_lib_dep = declare_dependency(
     link_with: gpuserver_lib,
-    include_directories: include_directories('.')
+    include_directories: include_directories('.'),
 )
 
 # Install headers

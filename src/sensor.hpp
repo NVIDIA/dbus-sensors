@@ -16,10 +16,10 @@
 #include <cerrno>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
-#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>

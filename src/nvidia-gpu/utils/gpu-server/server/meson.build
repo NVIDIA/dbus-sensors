@@ -17,11 +17,7 @@ gpuserverd_dependencies = [
     gpuserver_lib_dep,
 ]
 
-gpuserverd_includes = include_directories(
-    '.',
-    '..',
-    '../lib'
-)
+gpuserverd_includes = include_directories('.', '..', '../lib')
 
 executable(
     'gpuserverd',
@@ -29,5 +25,5 @@ executable(
     dependencies: gpuserverd_dependencies,
     include_directories: gpuserverd_includes,
     install: true,
-    install_dir: get_option('bindir')
+    install_dir: get_option('bindir'),
 )

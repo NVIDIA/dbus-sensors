@@ -40,9 +40,8 @@ struct mctp_endpoint_msg
  * @param address_len Length of address bytes
  * @return 0 on success, negative on error
  */
-int gpuserver_mctp_add_endpoint(gpuserver_ctx* ctx,
-                                mctp_endpoint_event event, uint8_t eid,
-                                uint8_t type, uint8_t protocol,
+int gpuserver_mctp_add_endpoint(gpuserver_ctx* ctx, mctp_endpoint_event event,
+                                uint8_t eid, uint8_t type, uint8_t protocol,
                                 const uint8_t* address, size_t address_len);
 
 #ifdef __cplusplus

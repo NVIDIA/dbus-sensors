@@ -76,8 +76,7 @@ class GPIOPresence : public std::enable_shared_from_this<GPIOPresence>
   public:
     explicit GPIOPresence(
         const std::shared_ptr<sdbusplus::asio::connection>& bus) :
-        bus(bus),
-        timer(bus->get_io_context())
+        bus(bus), timer(bus->get_io_context())
     {}
 
     // Add a dbus object to the reference list.

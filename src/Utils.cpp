@@ -879,8 +879,7 @@ void addEventLog(const std::shared_ptr<sdbusplus::asio::connection>& conn,
             std::cerr << "Failed to log event due to " << ec.message() << "\n";
             return;
         }
-    },
-        "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
+    }, "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
         "xyz.openbmc_project.Logging.Create", "Create", messageId, severity,
         addData);
 }

@@ -205,8 +205,8 @@ class MCTPDEndpoint :
         const std::shared_ptr<MCTPDDevice>& dev,
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
         sdbusplus::message::object_path objpath, int network, uint8_t eid) :
-        dev(dev),
-        connection(connection), objpath(std::move(objpath)), mctp{network, eid}
+        dev(dev), connection(connection), objpath(std::move(objpath)),
+        mctp{network, eid}
     {}
     MCTPDEndpoint& McptdEndpoint(const MCTPDEndpoint& other) = delete;
     MCTPDEndpoint(MCTPDEndpoint&& other) noexcept = default;
@@ -379,8 +379,8 @@ class SPIMCTPDDevice : public MCTPDDevice
     SPIMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection, int bus,
         int chipselect, std::optional<uint8_t> staticEID = std::nullopt) :
-        MCTPDDevice(connection, interfaceFromBusCs(bus, chipselect), std::vector<uint8_t>{}, staticEID,
-                    std::nullopt)
+        MCTPDDevice(connection, interfaceFromBusCs(bus, chipselect),
+                    std::vector<uint8_t>{}, staticEID, std::nullopt)
     {}
     ~SPIMCTPDDevice() override = default;
 

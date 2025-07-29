@@ -67,11 +67,8 @@ class Handler
      */
     explicit Handler(sdeventplus::Event& event,
                      requester::Handler<requester::Request>& handler,
-                     Manager& manager,
-                     bool verbose) :
-        handler(handler),
-        manager(manager), event(event),
-        verbose(verbose)
+                     Manager& manager, bool verbose) :
+        handler(handler), manager(manager), event(event), verbose(verbose)
     {}
 
     virtual int registerMctpEndpoint(eid_t eid, int type, int protocol,

@@ -19,7 +19,7 @@ struct mctp_transport_af_mctp {
 
 #ifndef container_of
 #define container_of(ptr, type, member)                                        \
-	(type *)((char *)(ptr)-offsetof(type, member))
+	(type *)((char *)(ptr) - offsetof(type, member))
 #endif
 
 int mctp_transport_af_mctp_send_msg(struct mctp_transport *transport,

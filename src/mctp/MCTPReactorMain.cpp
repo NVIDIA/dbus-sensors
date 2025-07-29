@@ -265,9 +265,9 @@ int main()
     });
 
     boost::asio::post(io, [reactor, systemBus]() {
-      auto gsc = std::make_shared<GetSensorConfiguration>(
-          systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
-      gsc->getConfiguration({"MCTPSPIDevice"});
+        auto gsc = std::make_shared<GetSensorConfiguration>(
+            systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
+        gsc->getConfiguration({"MCTPSPIDevice"});
     });
 
     io.run();

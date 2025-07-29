@@ -30,7 +30,10 @@ unit_files = [
     ['boot-progress', 'xyz.openbmc_project.bootprogress.service'],
     ['satellite', 'xyz.openbmc_project.satellitesensor.service'],
     ['leak-detect', 'xyz.openbmc_project.leakdetectsensor.service'],
-    ['discrete-leak-detect', 'xyz.openbmc_project.discreteleakdetectsensor.service'],
+    [
+        'discrete-leak-detect',
+        'xyz.openbmc_project.discreteleakdetectsensor.service',
+    ],
     ['write-protect', 'xyz.openbmc_project.writeprotectsensor.service'],
 ]
 

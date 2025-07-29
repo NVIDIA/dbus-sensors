@@ -176,8 +176,7 @@ void WriteProtect::createWriteProtectIf(const std::string& parentChassisId,
         sdbusplus::vtable::property_::emits_change,
         [this](const auto& newStatus, const auto&) {
         return setWriteProtect(newStatus);
-    },
-        [this](const auto&) { return readWriteProtect(); });
+    }, [this](const auto&) { return readWriteProtect(); });
 
     settingsIfPtr->initialize();
 

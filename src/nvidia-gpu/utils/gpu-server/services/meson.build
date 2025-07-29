@@ -1,7 +1,4 @@
-unit_files = [
-    'gpuserver-mctp-reactor.service',
-    'gpuserverd.service',
-]
+unit_files = ['gpuserver-mctp-reactor.service', 'gpuserverd.service']
 
 foreach unit : unit_files
 

@@ -27,11 +27,7 @@ thresholds_dep = declare_dependency(
 
 utils_a = static_library(
     'utils_a',
-    [
-        'FileHandle.cpp',
-        'SensorPaths.cpp',
-        'Utils.cpp',
-    ],
+    ['FileHandle.cpp', 'SensorPaths.cpp', 'Utils.cpp'],
     dependencies: default_deps,
 )
 
@@ -43,9 +39,7 @@ utils_dep = declare_dependency(
 
 devicemgmt_a = static_library(
     'devicemgmt_a',
-    [
-        'DeviceMgmt.cpp',
-    ],
+    ['DeviceMgmt.cpp'],
     dependencies: default_deps,
 )
 
@@ -81,12 +75,7 @@ if get_option('adc').allowed()
         'adcsensor',
         'ADCSensor.cpp',
         'ADCSensorMain.cpp',
-        dependencies: [
-            default_deps,
-            gpiodcxx,
-            thresholds_dep,
-            utils_dep,
-        ],
+        dependencies: [default_deps, gpiodcxx, thresholds_dep, utils_dep],
         install: true,
     )
 endif
@@ -112,14 +101,9 @@ if get_option('boot-progress').allowed()
     executable(
         'bootprogress',
         'BootProgressSensor.cpp',
-        dependencies: [
-            default_deps,
-            utils_dep,
-        ],
+        dependencies: [default_deps, utils_dep],
         implicit_include_directories: false,
-        include_directories: [
-            '../include'
-        ] + peci_incdirs,
+        include_directories: ['../include'] + peci_incdirs,
         install: true,
     )
 endif
@@ -128,11 +112,7 @@ if get_option('exit-air').allowed()
     executable(
         'exitairtempsensor',
         'ExitAirTempSensor.cpp',
-        dependencies: [
-            default_deps,
-            thresholds_dep,
-            utils_dep,
-        ],
+        dependencies: [default_deps, thresholds_dep, utils_dep],
         install: true,
     )
 endif
@@ -141,11 +121,7 @@ if get_option('synth').allowed()
     executable(
         'synthesizedsensor',
         'SynthesizedSensor.cpp',
-        dependencies: [
-            default_deps,
-            thresholds_dep,
-            utils_dep,
-        ],
+        dependencies: [default_deps, thresholds_dep, utils_dep],
         install: true,
     )
 endif
@@ -156,13 +132,7 @@ if get_option('fan').allowed()
         'FanMain.cpp',
         'TachSensor.cpp',
         'PwmSensor.cpp',
-        dependencies: [
-            default_deps,
-            gpiodcxx,
-            i2c,
-            thresholds_dep,
-            utils_dep,
-        ],
+        dependencies: [default_deps, gpiodcxx, i2c, thresholds_dep, utils_dep],
         install: true,
     )
 endif
@@ -172,13 +142,8 @@ if get_option('hwmon-temp').allowed()
         'hwmontempsensor',
         'HwmonTempMain.cpp',
         'HwmonTempSensor.cpp',
-        dependencies: [
-            default_deps,
-            devicemgmt_dep,
-            thresholds_dep,
-            utils_dep,
-        ],
-        include_directories: '../include',        
+        dependencies: [default_deps, devicemgmt_dep, thresholds_dep, utils_dep],
+        include_directories: '../include',
         install: true,
     )
 endif
@@ -188,11 +153,7 @@ if get_option('plx-temp').allowed()
         'plxtempsensor',
         'PLXTempMain.cpp',
         'PLXTempSensor.cpp',
-        dependencies: [
-            default_deps,
-            thresholds_dep,
-            utils_dep,
-        ],
+        dependencies: [default_deps, thresholds_dep, utils_dep],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
@@ -204,12 +165,7 @@ if get_option('intrusion').allowed()
         'intrusionsensor',
         'ChassisIntrusionSensor.cpp',
         'IntrusionSensorMain.cpp',
-        dependencies: [
-            default_deps,
-            gpiodcxx,
-            i2c,
-            utils_dep,
-        ],
+        dependencies: [default_deps, gpiodcxx, i2c, utils_dep],
         install: true,
     )
 endif
@@ -220,11 +176,7 @@ if get_option('ipmb').allowed()
         'IpmbSensorMain.cpp',
         'IpmbSensor.cpp',
         'IpmbSDRSensor.cpp',
-        dependencies: [
-            default_deps,
-            thresholds_dep,
-            utils_dep,
-        ],
+        dependencies: [default_deps, thresholds_dep, utils_dep],
         install: true,
     )
 endif
@@ -237,12 +189,7 @@ if get_option('mcu').allowed()
     executable(
         'mcutempsensor',
         'MCUTempSensor.cpp',
-        dependencies: [
-            default_deps,
-            i2c,
-            thresholds_dep,
-            utils_dep,
-        ],
+        dependencies: [default_deps, i2c, thresholds_dep, utils_dep],
         install: true,
     )
 endif
@@ -283,11 +230,7 @@ if get_option('external').allowed()
         'externalsensor',
         'ExternalSensor.cpp',
         'ExternalSensorMain.cpp',
-        dependencies: [
-            default_deps,
-            thresholds_dep,
-            utils_dep,
-        ],
+        dependencies: [default_deps, thresholds_dep, utils_dep],
         install: true,
     )
 endif
@@ -297,11 +240,7 @@ if get_option('procstatus').allowed()
         'processorstatus',
         'ProcessorStatus.cpp',
         'ProcessorStatusMain.cpp',
-        dependencies: [
-            default_deps,
-            gpiodcxx,
-            utils_dep,
-        ],
+        dependencies: [default_deps, gpiodcxx, utils_dep],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
@@ -312,13 +251,9 @@ if get_option('nvmeu2').allowed()
     executable(
         'nvmestatus',
         'NVMeStatus.cpp',
-'NVMeMIStatus.cpp',
+        'NVMeMIStatus.cpp',
         'NVMeStatusMain.cpp',
-        dependencies: [
-            default_deps,
-            i2c,
-            utils_dep,
-        ],
+        dependencies: [default_deps, i2c, utils_dep],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
@@ -329,11 +264,7 @@ if get_option('ipmbstatus').allowed()
     executable(
         'ipmbstatus',
         'IpmbStatus.cpp',
-        dependencies: [
-            default_deps,
-            thresholds_dep,
-            utils_dep,
-        ],
+        dependencies: [default_deps, thresholds_dep, utils_dep],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
@@ -344,12 +275,9 @@ if get_option('system').allowed()
     executable(
         'watchdogsensor',
         'WatchdogSensor.cpp',
-	'SELSensor.cpp',
+        'SELSensor.cpp',
         'SystemSensorMain.cpp',
-        dependencies: [
-            default_deps,
-            utils_dep,
-        ],
+        dependencies: [default_deps, utils_dep],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
@@ -361,10 +289,7 @@ if get_option('gpu').allowed()
         'gpustatus',
         'GPUStatus.cpp',
         'GPUStatusMain.cpp',
-        dependencies: [
-            default_deps,
-            utils_dep,
-        ],
+        dependencies: [default_deps, utils_dep],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
@@ -376,10 +301,7 @@ if get_option('psuredundancy').allowed()
         'psuredundancy',
         'PSURedundancy.cpp',
         'PSURedundancyMain.cpp',
-        dependencies: [
-            default_deps,
-            utils_dep,
-        ],
+        dependencies: [default_deps, utils_dep],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
@@ -390,14 +312,9 @@ if get_option('satellite').enabled()
     executable(
         'satellitesensor',
         'SatelliteSensor.cpp',
-        dependencies: [
-            default_deps,
-            i2c,
-            thresholds_dep,
-            utils_dep,
-        ],
+        dependencies: [default_deps, i2c, thresholds_dep, utils_dep],
         implicit_include_directories: false,
-        include_directories: include_directories(['../include','../src']),
+        include_directories: include_directories(['../include', '../src']),
         install: true,
     )
 endif
@@ -412,7 +329,7 @@ if get_option('leak-detect').allowed()
             gpiodcxx,
             thresholds_dep,
             utils_dep,
-            devicemgmt_dep
+            devicemgmt_dep,
         ],
         install: true,
     )
@@ -423,11 +340,8 @@ if get_option('discrete-leak-detect').allowed()
         'discreteleakdetectsensor',
         'DiscreteLeakDetectSensor.cpp',
         'DiscreteLeakDetectSensorMain.cpp',
-        dependencies: [
-            default_deps,
-            utils_dep,            
-        ],
-        include_directories: '../include',        
+        dependencies: [default_deps, utils_dep],
+        include_directories: '../include',
         install: true,
     )
 endif
@@ -437,14 +351,10 @@ if get_option('presence-detect').enabled()
         'presence-detect',
         'GPIOPresenceSensor.cpp',
         'GPIOPresenceSensorMain.cpp',
-        dependencies: [
-            sdbusplus,
-            gpiodcxx,
-            uring,
-        ],
+        dependencies: [sdbusplus, gpiodcxx, uring],
         implicit_include_directories: false,
         include_directories: '../include',
-        install: true
+        install: true,
     )
 endif
 
@@ -453,13 +363,9 @@ if get_option('write-protect').enabled()
         'writeprotectsensor',
         'WriteProtectSensor.cpp',
         'WriteProtectSensorMain.cpp',
-        dependencies: [
-            sdbusplus,
-            gpiodcxx,
-            uring,
-        ],
+        dependencies: [sdbusplus, gpiodcxx, uring],
         implicit_include_directories: false,
         include_directories: '../include',
-        install: true
+        install: true,
     )
 endif

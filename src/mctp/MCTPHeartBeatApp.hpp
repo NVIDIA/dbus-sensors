@@ -1,5 +1,4 @@
-#ifndef MCTP_HEARTBEAT_APP_HPP
-#define MCTP_HEARTBEAT_APP_HPP
+#pragma once
 
 #include <endian.h>
 
@@ -51,9 +50,8 @@ struct MctpVendorMsgHdr
     uint8_t msgVersion;
 } __attribute__((__packed__));
 
-static inline void
-    encodeVendorCmdHeader(MctpVendorMsgHdr* mctpVdrHdr, uint8_t rqDgramInst,
-                          uint8_t cmdCode)
+static inline void encodeVendorCmdHeader(MctpVendorMsgHdr* mctpVdrHdr,
+                                         uint8_t rqDgramInst, uint8_t cmdCode)
 {
     mctpVdrHdr->iana = htobe32(mctpVdmHdrIana);
     mctpVdrHdr->rqDgramInst = rqDgramInst;
@@ -65,8 +63,8 @@ static inline void
 struct MctpVendorCmdBootcompleteV2
 {
     MctpVendorMsgHdr vdrMsgHdr;
-    uint8_t slot : 2;
-    uint8_t valid : 6;
+    uint8_t slot:2;
+    uint8_t valid:6;
     uint8_t rvsd1;
     uint8_t rvsd2;
 } __attribute__((__packed__));
@@ -137,5 +135,3 @@ inline bool mctpEncodeVendorCmdHbenable(MctpVendorCmdHbenable* cmd)
                           mctpVendorCmdEnableHeartbeat);
     return true;
 }
-
-#endif

@@ -46,9 +46,9 @@ gpuserver_ctx* gpuserver_connect(const char* socket_path);
  * @param payload_len Length of message to send
  * @return Number of bytes sent, negative on error
  */
-ssize_t gpuserver_send_msg(gpuserver_ctx* ctx,
-                               gpuserver_api_type api_type, uint32_t device_id,
-                               const uint8_t* payload, size_t payload_len);
+ssize_t gpuserver_send_msg(gpuserver_ctx* ctx, gpuserver_api_type api_type,
+                           uint32_t device_id, const uint8_t* payload,
+                           size_t payload_len);
 
 /**
  * @brief Receive a response from the daemon
@@ -57,8 +57,7 @@ ssize_t gpuserver_send_msg(gpuserver_ctx* ctx,
  * @param resp_len Size of response buffer
  * @return Number of bytes received, negative on error
  */
-ssize_t gpuserver_recv(gpuserver_ctx* ctx, uint8_t* resp_buf,
-                           size_t resp_len);
+ssize_t gpuserver_recv(gpuserver_ctx* ctx, uint8_t* resp_buf, size_t resp_len);
 
 /**
  * @brief Get the file descriptor for polling

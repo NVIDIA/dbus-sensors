@@ -3,12 +3,12 @@
  * All rights reserved. SPDX-License-Identifier: Apache-2.0
  */
 
-//NOLINTBEGIN
+// NOLINTBEGIN
 #include "instance_id.hpp"
+#include "manager.hpp"
 #include "mctp_endpoint_manager.hpp"
 #include "socket_handler.hpp"
 #include "socket_manager.hpp"
-#include "manager.hpp"
 
 #include <err.h>
 #include <getopt.h>
@@ -83,12 +83,12 @@ int main(int argc, char** argv)
 
 #ifdef MCTP_IN_KERNEL
         // Initialize socket handler
-        mctp_socket::InKernelHandler sockHandler(
-            event, reqHandler, sockManager, verbose);
+        mctp_socket::InKernelHandler sockHandler(event, reqHandler, sockManager,
+                                                 verbose);
 #else
         // Initialize socket handler
-        mctp_socket::DaemonHandler sockHandler(event, reqHandler,
-                                               sockManager, verbose);
+        mctp_socket::DaemonHandler sockHandler(event, reqHandler, sockManager,
+                                               verbose);
 #endif
 
         reqHandler.setSocketHandler(&sockHandler);
@@ -96,8 +96,8 @@ int main(int argc, char** argv)
         mctp::EndpointManager endpointManager(sockHandler, verbose);
 
         // Initialize gpuserver manager
-        gpuserver::Manager mgr(
-            event, socketPath, reqHandler, endpointManager, verbose);
+        gpuserver::Manager mgr(event, socketPath, reqHandler, endpointManager,
+                               verbose);
 
         if (verbose)
             lg2::info("GPUSERVER daemodaemon initialized, entering main loop");
@@ -110,4 +110,4 @@ int main(int argc, char** argv)
         return -1;
     }
 }
-//NOLINTEND
+// NOLINTEND

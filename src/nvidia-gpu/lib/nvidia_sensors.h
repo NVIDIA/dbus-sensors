@@ -102,9 +102,9 @@ int ocp_ami_oem_nvidia_encode_query_device_identification_req(
  *  @return nsm_completion_codes
  */
 int ocp_ami_oem_nvidia_encode_query_device_identification_resp(
-    uint8_t instance, uint8_t cc, uint16_t reason_code,
-    uint8_t device_identification, uint8_t device_instance,
-    struct ocp_ami_msg* msg);
+	uint8_t instance, uint8_t cc, uint16_t reason_code,
+	uint8_t device_identification, uint8_t device_instance,
+	struct ocp_ami_msg *msg);
 
 /** @brief Decode a Query device identification response message
  *

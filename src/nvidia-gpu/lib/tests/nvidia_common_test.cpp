@@ -13,7 +13,7 @@ TEST(NvidiaCommonPackTest, PackHeader)
 	struct ocp_ami_binding_pci_vid_info hdr;
 	struct ocp_ami_binding_pci_vid_info *hdr_ptr = NULL;
 
-	struct ocp_ami_binding_pci_vid msg {};
+	struct ocp_ami_binding_pci_vid msg{};
 
 	hdr.ocp_ami_msg_type = OCP_AMI_REQUEST;
 	hdr.instance_id = 0x04;

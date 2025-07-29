@@ -19,9 +19,7 @@ if not gtest_dep.found() or not gmock_dep.found()
     endif
 endif
 
-ut_deps_list = [
-    gtest_dep,
-]
+ut_deps_list = [gtest_dep]
 
 ut_deps_list += default_deps
 
@@ -46,11 +44,7 @@ test(
         '../src/IpmbSDRSensor.cpp',
         'test_IpmbSensor.cpp',
         dependencies: ut_deps_list,
-        link_with: [
-            utils_a,
-            thresholds_a,
-            devicemgmt_a
-        ],
+        link_with: [utils_a, thresholds_a, devicemgmt_a],
         implicit_include_directories: false,
         include_directories: '../src',
     ),
@@ -63,10 +57,10 @@ test(
         'test_MCTPReactor.cpp',
         '../src/mctp/MCTPReactor.cpp',
         '../src/mctp/MCTPEndpoint.cpp',
-        dependencies: [ gmock_dep, ut_deps_list, utils_dep ],
+        dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
-        include_directories: '../src/mctp'
-    )
+        include_directories: '../src/mctp',
+    ),
 )
 
 test(
@@ -75,8 +69,8 @@ test(
         'test_MCTPEndpoint',
         'test_MCTPEndpoint.cpp',
         '../src/mctp/MCTPEndpoint.cpp',
-        dependencies: [ gmock_dep, ut_deps_list, utils_dep ],
+        dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
-        include_directories: '../src/mctp'
-    )
+        include_directories: '../src/mctp',
+    ),
 )

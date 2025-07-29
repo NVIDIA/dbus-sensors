@@ -17,7 +17,7 @@ TEST(PackMessage, goodPathTest)
 
 	uint16_t pci_vendor_id{ 0x10de };
 
-	struct ocp_ami_binding_pci_vid msg {};
+	struct ocp_ami_binding_pci_vid msg{};
 
 	auto rc = ocp_ami_pack_header(pci_vendor_id, &hdr, &msg);
 	EXPECT_EQ(rc, OCP_AMI_SUCCESS);
@@ -37,7 +37,7 @@ TEST(PackMessage, badPathTest)
 	struct ocp_ami_binding_pci_vid_info hdr;
 	struct ocp_ami_binding_pci_vid_info *hdr_ptr = NULL;
 
-	struct ocp_ami_binding_pci_vid msg {};
+	struct ocp_ami_binding_pci_vid msg{};
 	uint16_t pci_vendor_id{};
 
 	// header information pointer is NULL

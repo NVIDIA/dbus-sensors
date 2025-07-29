@@ -13,7 +13,7 @@ class EndpointManager
 {
   public:
     explicit EndpointManager(mctp_socket::Handler& sockHandler,
-                    bool verbose = false);
+                             bool verbose = false);
 
     int registerEndpoint(uint8_t eid, uint8_t type, uint8_t protocol,
                          const std::vector<uint8_t>& address);

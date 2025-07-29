@@ -8,11 +8,13 @@
 #define INSTANCE_ID_H
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 #include "base.h"
 #include "mctp.h"
+
 #include <stdint.h>
 
 typedef uint8_t instance_id_t;
@@ -30,7 +32,7 @@ struct instance_db;
  * 		 is not NULL. Returns -ENOMEM if memory couldn't be allocated.
  *		 Returns the errno if the database couldn't be opened.
  * */
-int instance_db_init(struct instance_db **ctx, const char *dbpath);
+int instance_db_init(struct instance_db** ctx, const char* dbpath);
 
 /**
  * @brief Instantiates an instance ID database object for the default database
@@ -43,7 +45,7 @@ int instance_db_init(struct instance_db **ctx, const char *dbpath);
  * 		 is not NULL. Returns -ENOMEM if memory couldn't be allocated.
  * 		 Returns the errno if the database couldn't be opened.
  * */
-int instance_db_init_default(struct instance_db **ctx);
+int instance_db_init_default(struct instance_db** ctx);
 
 /**
  * @brief Destroys an instance ID database object
@@ -53,7 +55,7 @@ int instance_db_init_default(struct instance_db **ctx);
  * @return int - Returns 0 on success or if *ctx is NULL. No specific errors are
  *		 specified.
  * */
-int instance_db_destroy(struct instance_db *ctx);
+int instance_db_destroy(struct instance_db* ctx);
 
 /**
  * @brief Allocates an instance ID for a destination TID from the instance ID
@@ -69,8 +71,8 @@ int instance_db_destroy(struct instance_db *ctx);
  *		 if a successive call may succeed. Returns -EPROTO if the
  *		 operation has entered an undefined state.
  */
-int instance_id_alloc(struct instance_db *ctx, mctp_eid_t eid,
-		      instance_id_t *iid);
+int instance_id_alloc(struct instance_db* ctx, mctp_eid_t eid,
+                      instance_id_t* iid);
 
 /**
  * @brief Frees an instance ID previously allocated by instance_id_alloc
@@ -85,8 +87,8 @@ int instance_id_alloc(struct instance_db *ctx, mctp_eid_t eid,
  * 		 succeed. Returns -EPROTO if the operation has entered an
  *		 undefined state.
  */
-int instance_id_free(struct instance_db *ctx, mctp_eid_t eid,
-		     instance_id_t iid);
+int instance_id_free(struct instance_db* ctx, mctp_eid_t eid,
+                     instance_id_t iid);
 
 #endif /* __STDC_HOSTED__*/
 

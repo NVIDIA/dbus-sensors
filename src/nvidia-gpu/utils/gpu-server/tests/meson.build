@@ -1,4 +1,4 @@
-gtest = dependency('gtest', main : true)
+gtest = dependency('gtest', main: true)
 if not gtest.found()
     gtest_proj = import('cmake').subproject('googletest', required: false)
     if gtest_proj.found()
@@ -21,39 +21,36 @@ endif
 test_instance_id = executable(
     'test_instance_id',
     'test_instance_id.cpp',
-    dependencies : [gtest],
-    link_with : [gpuserver_lib],
-    include_directories : [
+    dependencies: [gtest],
+    link_with: [gpuserver_lib],
+    include_directories: [
         include_directories('../lib'),
-        include_directories('../server')
-    ]
+        include_directories('../server'),
+    ],
 )
 
 test_base = executable(
     'test_base',
     'test_base.cpp',
-    dependencies : [gtest],
-    link_with : [gpuserver_lib],
-    include_directories : [
+    dependencies: [gtest],
+    link_with: [gpuserver_lib],
+    include_directories: [
         include_directories('../lib'),
-        include_directories('../server')
-    ]
+        include_directories('../server'),
+    ],
 )
 
 test_utils = executable(
     'test_utils',
     'test_utils.cpp',
-    dependencies : [
-        gtest,
-        gpuserver_lib_dep
-    ],
-    include_directories : [
+    dependencies: [gtest, gpuserver_lib_dep],
+    include_directories: [
         include_directories('../lib'),
-        include_directories('../server')
-    ]
+        include_directories('../server'),
+    ],
 )
 
 # Register tests
 test('instance_id_tests', test_instance_id)
 test('base_tests', test_base)
-test('utils_tests', test_utils) 
+test('utils_tests', test_utils)

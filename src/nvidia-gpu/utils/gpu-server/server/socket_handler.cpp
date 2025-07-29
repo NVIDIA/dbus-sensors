@@ -106,8 +106,7 @@ SocketInfo DaemonHandler::initSocket([[maybe_unused]] eid_t eid, int type,
     }
 
     // /* Initiate a connection to the socket */
-    struct sockaddr_un addr
-    {};
+    struct sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
     memcpy(addr.sun_path, pathName.data(), pathName.size());
     rc = connect(sockFd, reinterpret_cast<struct sockaddr*>(&addr),
@@ -183,8 +182,7 @@ void DaemonHandler::handleReceivedMsg(IO& io, int fd, uint32_t revents)
 
     // This structure contains the parameter information for the response
     // message.
-    struct msghdr msg
-    {};
+    struct msghdr msg{};
 
     int returnCode = 0;
     ssize_t peekedLength = recv(fd, nullptr, 0, MSG_PEEK | MSG_TRUNC);

@@ -1,11 +1,9 @@
-gpusensor_sources = files(
-        'GpuMain.cpp',
-)
+gpusensor_sources = files('GpuMain.cpp')
 
 libgpusensor_sources = files(
-        'GpuSensorTask.cpp',
-        'GpuTempSensor.cpp',
-        'MctpRequester.cpp',
+    'GpuSensorTask.cpp',
+    'GpuTempSensor.cpp',
+    'MctpRequester.cpp',
 )
 
 libgpusensor_include_dir = include_directories('.', is_system: true)
@@ -13,10 +11,7 @@ libgpusensor_include_dir = include_directories('.', is_system: true)
 libgpusensor = static_library(
     'libgpusensor',
     libgpusensor_sources,
-    dependencies: [
-        libocpami_dep,
-        default_deps,
-    ],
+    dependencies: [libocpami_dep, default_deps],
     implicit_include_directories: false,
     include_directories: [libgpusensor_include_dir],
     gnu_symbol_visibility: 'default',
@@ -31,10 +26,6 @@ libgpusensor_dep = declare_dependency(
 executable(
     'gpusensor',
     gpusensor_sources,
-    dependencies: [
-        libgpusensor_dep,
-        libocpami_dep,
-        default_deps,
-    ],
-    install: true
+    dependencies: [libgpusensor_dep, libocpami_dep, default_deps],
+    install: true,
 )

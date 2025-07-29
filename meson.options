@@ -1,31 +1,181 @@
-option('adc', type: 'feature', value: 'enabled', description: 'Enable ADC sensor.',)
-option('intel-cpu', type: 'feature', value: 'enabled', description: 'Enable CPU sensor.',)
-option('exit-air', type: 'feature', value: 'enabled', description: 'Enable exit air sensor.',)
-option('synth', type: 'feature', value: 'disabled', description: 'Enable synthesized sensor.',)
-option('fan', type: 'feature', value: 'enabled', description: 'Enable fan sensor.',)
-option('presence-detect', type: 'feature', value: 'enabled', description: 'Enable presence detect.',)
-option('hwmon-temp', type: 'feature', value: 'enabled', description: 'Enable HWMON temperature sensor.',)
-option('plx-temp', type: 'feature', value: 'disabled', description: 'Enable PLX temperature sensor.',)
-option('intrusion', type: 'feature', value: 'enabled', description: 'Enable intrusion sensor.',)
-option('ipmb', type: 'feature', value: 'enabled', description: 'Enable IPMB sensor.',)
-option('mctp', type: 'feature', value: 'enabled', description: 'Enable MCTP endpoint management')
-option('mctpheartbeat', type: 'feature', value: 'enabled', description: 'Enable MCTP Reactor service.')
-option('mcu', type: 'feature', value: 'enabled', description: 'Enable MCU sensor.',)
-option('nvme', type: 'feature', value: 'enabled', description: 'Enable NVMe sensor.',)
-option('psu', type: 'feature', value: 'enabled', description: 'Enable PSU sensor.',)
-option('external', type: 'feature', value: 'enabled', description: 'Enable External sensor.',)
-option('procstatus', type: 'feature', value: 'enabled', description: 'Enable processor status sensor.',)
-option('ipmbstatus', type: 'feature', value: 'enabled', description: 'Enable ipmb status sensor.',)
-option('nvmeu2', type: 'feature', value: 'enabled', description: 'Enable nvme u2 status sensor.',)
-option('system', type: 'feature', value: 'disabled', description: 'Enable system sensor like watchdog2 status sensor.',)
-option('gpu', type: 'feature', value: 'disabled', description: 'Enable GPU Status sensor.',)
-option('psuredundancy', type: 'feature', value: 'disabled', description: 'Enable PSU Rednundancy status sensor.',)
-option('tests', type: 'feature', value: 'enabled', description: 'Build tests.',)
-option('validate-unsecure-feature', type : 'feature', value : 'disabled', description : 'Enables unsecure features required by validation. Note: mustbe turned off for production images.',)
-option('insecure-sensor-override', type : 'feature', value : 'disabled', description : 'Enables Sensor override feature without any check.',)
-option('boot-progress', type: 'feature', value: 'disabled', description: 'Enable boot progress sensor.',)
-option('satellite', type: 'feature', value: 'disabled', description: 'Enable Satellite sensor.',)
-option('leak-detect', type: 'feature', value: 'disabled', description: 'Enable Leak Detect sensor.',)
-option('discrete-leak-detect', type: 'feature', value: 'disabled', description: 'Enable Discrete Leak Detect sensor.',)
-option('write-protect', type: 'feature', value: 'disabled', description: 'Enable Write Protect.',)
-option('shmem', type: 'feature', value: 'enabled', description: 'Use NVIDIA Shared-Memory IPC.',)
+option(
+    'adc',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable ADC sensor.',
+)
+option(
+    'intel-cpu',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable CPU sensor.',
+)
+option(
+    'exit-air',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable exit air sensor.',
+)
+option(
+    'synth',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable synthesized sensor.',
+)
+option(
+    'fan',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable fan sensor.',
+)
+option(
+    'presence-detect',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable presence detect.',
+)
+option(
+    'hwmon-temp',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable HWMON temperature sensor.',
+)
+option(
+    'plx-temp',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable PLX temperature sensor.',
+)
+option(
+    'intrusion',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable intrusion sensor.',
+)
+option(
+    'ipmb',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable IPMB sensor.',
+)
+option(
+    'mctp',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable MCTP endpoint management',
+)
+option(
+    'mctpheartbeat',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable MCTP Reactor service.',
+)
+option(
+    'mcu',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable MCU sensor.',
+)
+option(
+    'nvme',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable NVMe sensor.',
+)
+option(
+    'psu',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable PSU sensor.',
+)
+option(
+    'external',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable External sensor.',
+)
+option(
+    'procstatus',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable processor status sensor.',
+)
+option(
+    'ipmbstatus',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable ipmb status sensor.',
+)
+option(
+    'nvmeu2',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable nvme u2 status sensor.',
+)
+option(
+    'system',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable system sensor like watchdog2 status sensor.',
+)
+option(
+    'gpu',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable GPU Status sensor.',
+)
+option(
+    'psuredundancy',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable PSU Rednundancy status sensor.',
+)
+option('tests', type: 'feature', value: 'enabled', description: 'Build tests.')
+option(
+    'validate-unsecure-feature',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enables unsecure features required by validation. Note: mustbe turned off for production images.',
+)
+option(
+    'insecure-sensor-override',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enables Sensor override feature without any check.',
+)
+option(
+    'boot-progress',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable boot progress sensor.',
+)
+option(
+    'satellite',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable Satellite sensor.',
+)
+option(
+    'leak-detect',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable Leak Detect sensor.',
+)
+option(
+    'discrete-leak-detect',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable Discrete Leak Detect sensor.',
+)
+option(
+    'write-protect',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable Write Protect.',
+)
+option(
+    'shmem',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Use NVIDIA Shared-Memory IPC.',
+)

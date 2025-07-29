@@ -8,8 +8,7 @@ namespace mctp
 
 EndpointManager::EndpointManager(mctp_socket::Handler& sockHandler,
                                  bool verbose) :
-    sockHandler(sockHandler),
-    verbose(verbose)
+    sockHandler(sockHandler), verbose(verbose)
 {
     if (verbose)
     {

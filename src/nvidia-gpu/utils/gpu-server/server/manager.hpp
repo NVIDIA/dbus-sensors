@@ -23,8 +23,8 @@ class Manager
 {
   public:
     Manager(sdeventplus::Event& event, const std::string& socketPath,
-                     requester::Handler<requester::Request>& reqHandler,
-                     mctp::EndpointManager& endpointManager, bool verbose);
+            requester::Handler<requester::Request>& reqHandler,
+            mctp::EndpointManager& endpointManager, bool verbose);
     ~Manager();
 
   private:

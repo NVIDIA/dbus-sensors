@@ -224,8 +224,7 @@ void SynthesizedSensor::setupMatches()
                 }
             }
         }
-    },
-        mapper::busName, mapper::path, mapper::interface, mapper::subtree,
+    }, mapper::busName, mapper::path, mapper::interface, mapper::subtree,
         "/xyz/openbmc_project/sensors/power", 0,
         std::array<const char*, 1>{sensorValueInterface});
 }

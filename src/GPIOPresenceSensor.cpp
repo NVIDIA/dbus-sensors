@@ -218,8 +218,7 @@ void GPIOPresence::startGPIOEventMonitor(boost::asio::io_context& gpioContext)
 
             [self(shared_from_this()), gpioLine{config.gpioLine}](bool state) {
             self->updatePresence(gpioLine, state);
-        },
-            gpioContext);
+        }, gpioContext);
     }
 }
 } // namespace gpio_presence_sensing
