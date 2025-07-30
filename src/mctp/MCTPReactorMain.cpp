@@ -140,7 +140,8 @@ static void removeInventory(const std::shared_ptr<MCTPReactor>& reactor,
         msg.unpack<sdbusplus::message::object_path, std::set<std::string>>();
     try
     {
-        if (I2CMCTPDDevice::match(removed))
+        if (I2CMCTPDDevice::match(removed) || USBMCTPDDevice::match(removed) ||
+            SPIMCTPDDevice::match(removed))
         {
             reactor->unmanageMCTPDevice(path.str);
         }

@@ -187,13 +187,13 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
     auto device = devices.deviceFor(path);
     if (!device)
     {
-        debug("Unrecognised inventory item: {INVENTORY_PATH}", "INVENTORY_PATH",
-              path);
+        warning("Unrecognised inventory item: {INVENTORY_PATH}",
+                "INVENTORY_PATH", path);
         return;
     }
 
-    debug("MCTP device inventory removed at '{INVENTORY_PATH}'",
-          "INVENTORY_PATH", path);
+    info("MCTP device inventory removed at '{INVENTORY_PATH}'",
+         "INVENTORY_PATH", path);
 
     deferred.erase(device);
 
@@ -201,8 +201,8 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
     // of removal so we don't defer its setup
     devices.remove(device);
 
-    debug("Stopping management of MCTP device at [ {MCTP_DEVICE} ]",
-          "MCTP_DEVICE", device->describe());
+    warning("Stopping management of MCTP device at [ {MCTP_DEVICE} ]",
+            "MCTP_DEVICE", device->describe());
 
     device->remove();
 }
