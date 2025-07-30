@@ -65,3 +65,7 @@ subdir('src')
 if not get_option('tests').disabled()
     subdir('tests')
 endif
+
+if get_option('nvidia-gpu').allowed()
+    subdir('src/nvidia-gpu')
+endif

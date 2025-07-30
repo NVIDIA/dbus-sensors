@@ -89,6 +89,12 @@ option(
     description: 'Enable PSU sensor.',
 )
 option(
+    'nvidia-gpu',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable GPU sensor.',
+)
+option(
     'external',
     type: 'feature',
     value: 'enabled',
@@ -117,12 +123,6 @@ option(
     type: 'feature',
     value: 'disabled',
     description: 'Enable system sensor like watchdog2 status sensor.',
-)
-option(
-    'gpu',
-    type: 'feature',
-    value: 'disabled',
-    description: 'Enable GPU Status sensor.',
 )
 option(
     'psuredundancy',

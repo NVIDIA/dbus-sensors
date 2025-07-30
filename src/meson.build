@@ -284,18 +284,6 @@ if get_option('system').allowed()
     )
 endif
 
-if get_option('gpu').allowed()
-    executable(
-        'gpustatus',
-        'GPUStatus.cpp',
-        'GPUStatusMain.cpp',
-        dependencies: [default_deps, utils_dep],
-        implicit_include_directories: false,
-        include_directories: '../include',
-        install: true,
-    )
-endif
-
 if get_option('psuredundancy').allowed()
     executable(
         'psuredundancy',

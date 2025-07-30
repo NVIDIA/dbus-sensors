@@ -1,6 +1,0 @@
-WarningsAsErrors: '
--cppcoreguidelines-avoid-reference-coroutine-parameters,
--cppcoreguidelines-pro-type-reinterpret-cast
-'
-
-InheritParentConfig: true
