@@ -269,7 +269,8 @@ class MCTPDDevice :
                 const std::string& interface,
                 const std::vector<uint8_t>& physaddr,
                 std::optional<std::uint8_t> staticEID,
-                std::optional<std::uint8_t> bridgePoolStartEid);
+                std::optional<std::uint8_t> bridgePoolStartEid,
+                const std::optional<std::vector<uint8_t>>& ignoreEids);
     MCTPDDevice(const MCTPDDevice& other) = delete;
     MCTPDDevice(MCTPDDevice&& other) = delete;
     ~MCTPDDevice() override = default;
@@ -293,6 +294,7 @@ class MCTPDDevice :
     const std::vector<uint8_t> physaddr;
     const std::optional<std::uint8_t> staticEID;
     const std::optional<std::uint8_t> bridgePoolStartEid;
+    const std::optional<std::vector<uint8_t>> ignoreEids;
     std::shared_ptr<MCTPDEndpoint> endpoint;
     std::unique_ptr<sdbusplus::bus::match_t> removeMatch;
     std::unique_ptr<sdbusplus::bus::match_t> discoveryNotifyMatch;
@@ -332,7 +334,7 @@ class I2CMCTPDDevice : public MCTPDDevice
         uint8_t physaddr, std::optional<uint8_t> staticEID = std::nullopt,
         std::optional<uint8_t> bridgePoolStartEid = std::nullopt) :
         MCTPDDevice(connection, interfaceFromBus(bus), {physaddr}, staticEID,
-                    bridgePoolStartEid)
+                    bridgePoolStartEid, std::nullopt)
     {}
     ~I2CMCTPDDevice() override = default;
 
@@ -356,9 +358,10 @@ class USBMCTPDDevice : public MCTPDDevice
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
         const std::string& interface, const std::vector<uint8_t>& physaddr,
         std::optional<uint8_t> staticEID = std::nullopt,
-        std::optional<uint8_t> bridgePoolStartEid = std::nullopt) :
+        std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
+        const std::optional<std::vector<uint8_t>>& ignoreEids = std::nullopt) :
         MCTPDDevice(connection, interface, physaddr, staticEID,
-                    bridgePoolStartEid)
+                    bridgePoolStartEid, ignoreEids)
     {}
     ~USBMCTPDDevice() override = default;
 
@@ -380,7 +383,8 @@ class SPIMCTPDDevice : public MCTPDDevice
         const std::shared_ptr<sdbusplus::asio::connection>& connection, int bus,
         int chipselect, std::optional<uint8_t> staticEID = std::nullopt) :
         MCTPDDevice(connection, interfaceFromBusCs(bus, chipselect),
-                    std::vector<uint8_t>{}, staticEID, std::nullopt)
+                    std::vector<uint8_t>{}, staticEID, std::nullopt,
+                    std::nullopt)
     {}
     ~SPIMCTPDDevice() override = default;
 

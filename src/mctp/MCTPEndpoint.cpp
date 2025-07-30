@@ -27,6 +27,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -47,9 +48,11 @@ MCTPDDevice::MCTPDDevice(
     const std::shared_ptr<sdbusplus::asio::connection>& connection,
     const std::string& interface, const std::vector<uint8_t>& physaddr,
     std::optional<std::uint8_t> staticEID,
-    std::optional<std::uint8_t> bridgePoolStartEid) :
+    std::optional<std::uint8_t> bridgePoolStartEid,
+    const std::optional<std::vector<uint8_t>>& ignoreEids) :
     connection(connection), interface(interface), physaddr(physaddr),
-    staticEID(staticEID), bridgePoolStartEid(bridgePoolStartEid)
+    staticEID(staticEID), bridgePoolStartEid(bridgePoolStartEid),
+    ignoreEids(ignoreEids)
 {}
 
 void MCTPDDevice::onDiscoveryMatchRule()
@@ -242,7 +245,8 @@ void MCTPDDevice::setup(
             mctpdControlInterface, "AssignEndpointStatic", physaddr,
             staticEID.value(),
             static_cast<uint8_t>(bridgePoolStartEid.value_or(
-                static_cast<uint8_t>(staticEID.value() + 1))));
+                static_cast<uint8_t>(staticEID.value() + 1))),
+            ignoreEids.value_or(std::vector<uint8_t>{}));
     }
     else
     {
@@ -615,6 +619,7 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     auto mInterface = iface.find("Interface");
     auto mStaticEndpointID = iface.find("StaticEndpointID");
     auto mbridgePoolStartEid = iface.find("BridgePoolStartEID");
+    auto mIgnoreEids = iface.find("IgnoreEIDs");
     if (mType == iface.end())
     {
         throw std::invalid_argument(
@@ -679,13 +684,81 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
         bridgePoolStartEid = parsedbridgePoolStartEid;
     }
 
+    std::optional<std::vector<std::uint8_t>> ignoreEids{};
+    if (mIgnoreEids == iface.end())
+    {
+        info(
+            "Info: Key 'IgnoreEIDs' is not provided for USB device {USB_DEVICE}; skipping related processing.",
+            "USB_DEVICE", interface);
+    }
+    else
+    {
+        try
+        {
+            auto ignoreEidsStr = std::visit(VariantToStringVisitor(),
+                                            mIgnoreEids->second);
+            if (!ignoreEidsStr.empty())
+            {
+                ignoreEids = std::vector<std::uint8_t>{};
+                std::stringstream ss(ignoreEidsStr);
+                std::string token;
+                while (std::getline(ss, token, ','))
+                {
+                    token.erase(0, token.find_first_not_of(" \t"));
+                    token.erase(token.find_last_not_of(" \t") + 1);
+                    if (!token.empty())
+                    {
+                        try
+                        {
+                            int64_t intVal = std::stoll(token);
+                            if (intVal >= 0 && intVal <= 255)
+                            {
+                                ignoreEids->push_back(
+                                    static_cast<uint8_t>(intVal));
+                            }
+                            else
+                            {
+                                warning(
+                                    "IgnoreEIDs entry out of range (0-255): {EID}",
+                                    "EID", intVal);
+                            }
+                        }
+                        catch (const std::exception& e)
+                        {
+                            warning(
+                                "Invalid IgnoreEIDs entry: '{VALUE}' - {ERROR}",
+                                "VALUE", token, "ERROR", e.what());
+                        }
+                    }
+                }
+                info(
+                    "Successfully parsed {COUNT} IgnoreEIDs entries for USB device {USB_DEVICE}",
+                    "COUNT", ignoreEids->size(), "USB_DEVICE", interface);
+            }
+            else
+            {
+                info(
+                    "IgnoreEIDs string is empty, no entries to parse for USB device {USB_DEVICE}",
+                    "USB_DEVICE", interface);
+                ignoreEids = std::nullopt;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            warning(
+                "Failed to parse IgnoreEIDs: {ERROR} for USB device {USB_DEVICE}",
+                "ERROR", e.what(), "USB_DEVICE", interface);
+            ignoreEids = std::nullopt;
+        }
+    }
+
     try
     {
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
-            return std::make_shared<USBMCTPDDevice>(connection, interface,
-                                                    address, staticEID.value(),
-                                                    bridgePoolStartEid.value());
+            return std::make_shared<USBMCTPDDevice>(
+                connection, interface, address, staticEID.value(),
+                bridgePoolStartEid.value(), ignoreEids);
         }
         return std::make_shared<USBMCTPDDevice>(connection, interface, address);
     }
