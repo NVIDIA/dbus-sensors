@@ -246,9 +246,7 @@ void MCTPDDevice::setup(
             mctpdControlPath + std::string("/interfaces/") + interface,
             mctpdControlInterface, "AssignEndpointStatic", physaddr,
             staticEID.value(),
-            static_cast<uint8_t>(bridgePoolStartEid.value_or(
-                static_cast<uint8_t>(staticEID.value() + 1))),
-            ignoreEids.value_or(std::vector<uint8_t>{}));
+            static_cast<uint8_t>(bridgePoolStartEid.value_or(0)));
     }
     else
     {
@@ -566,6 +564,11 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
                                                     staticEID.value(),
                                                     bridgePoolStartEid.value());
         }
+        if (staticEID.has_value())
+        {
+            return std::make_shared<I2CMCTPDDevice>(connection, bus, address,
+                                                    staticEID.value());
+        }
         return std::make_shared<I2CMCTPDDevice>(connection, bus, address);
     }
     catch (const MCTPException& ex)
@@ -761,6 +764,11 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
             return std::make_shared<USBMCTPDDevice>(
                 connection, interface, address, staticEID.value(),
                 bridgePoolStartEid.value(), ignoreEids);
+        }
+        if (staticEID.has_value())
+        {
+            return std::make_shared<USBMCTPDDevice>(connection, interface,
+                                                    address, staticEID.value());
         }
         return std::make_shared<USBMCTPDDevice>(connection, interface, address);
     }
