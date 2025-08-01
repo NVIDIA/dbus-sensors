@@ -45,6 +45,7 @@
 #include <cstdint>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -184,20 +185,26 @@ int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, uint8_t length)
         return -1;
     }
 
-    struct i2c_msg msgs[2] = {{
-                                  // write offset
-                                  .addr = addr,
-                                  .flags = 0,
-                                  .len = 2,
-                                  .buf = cmd.data(),
-                              },
-                              {// read data from the offset
-                               .addr = addr,
-                               .flags = I2C_M_RD,
-                               .len = length,
-                               .buf = (uint8_t*)&data}};
+    // clang-format off
+    std::array<struct i2c_msg, 2> msgs = {{
+                                              {
+                                                  // write offset
+                                                  .addr = addr,
+                                                  .flags = 0,
+                                                  .len = 2,
+                                                  .buf = cmd.data(),
+                                              },
+                                              {
+                                                  // read data from the offset
+                                                  .addr = addr,
+                                                  .flags = I2C_M_RD,
+                                                  .len = length,
+                                                  .buf = (uint8_t*)&data
+                                              }
+                                          }};
+    // clang-format on
 
-    struct i2c_rdwr_ioctl_data args = {msgs, 2};
+    struct i2c_rdwr_ioctl_data args = {msgs.data(), 2};
 
     // handle two bytes offset
     if (offset > 255)
@@ -237,10 +244,7 @@ int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, uint8_t length)
         close(fd);
         return -1;
     }
-    else
-    {
-        *reading = data;
-    }
+    *reading = data;
     close(fd);
     return 0;
 }
@@ -425,7 +429,7 @@ void createSensors(
                 std::string powerSate = loadVariant<std::string>(entry.second,
                                                                  "PowerState");
 
-                PowerState pwrState;
+                PowerState pwrState = PowerState::always;
                 setReadState(powerSate, pwrState);
 
                 double minVal = loadVariant<double>(entry.second, "MinValue");

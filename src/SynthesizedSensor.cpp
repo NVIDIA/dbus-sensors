@@ -33,6 +33,7 @@
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
+#include <tal.hpp>
 
 #include <array>
 #include <chrono>
@@ -332,7 +333,7 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
                         else if (paramStr != "-" && paramStr != "+")
                         {
                             summationSensor->sensorOperands.emplace(
-                                std::move(paramStr), std::move(mathSign));
+                                std::move(paramStr), mathSign);
                         }
                     }
                 }

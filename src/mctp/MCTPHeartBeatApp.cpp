@@ -1,18 +1,22 @@
+// NOLINTBEGIN
 #include "MCTPHeartBeatApp.hpp"
+
+#include <asm-generic/socket.h>
+#include <bits/time.h>
 
 // Include Boost headers first to avoid conflicts with linux/if.h and net/if.h
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 
 // Prevent net/if.h from being included again to avoid symbol conflicts
-#define _NET_IF_H 1
+#define NET_IF_H 1
 
 #include <linux/mctp.h>
 #include <sys/socket.h>
-#include <sys/time.h> // NOLINT(misc-include-cleaner)
+#include <sys/time.h>
 #include <sys/types.h>
 #include <systemd/sd-event.h>
-#include <time.h> // NOLINT(modernize-deprecated-headers)
+#include <time.h>
 #include <unistd.h>
 
 #include <phosphor-logging/lg2.hpp>
@@ -22,12 +26,12 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <csignal> // NOLINT(modernize-deprecated-headers)
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ctime> // NOLINT(modernize-deprecated-headers)
+#include <ctime>
 #include <exception>
 #include <functional>
 #include <iomanip>
@@ -116,8 +120,7 @@ static int waitFdTimeout(int fd, short events, uint64_t timeoutUsec)
     }
 
     rc = sd_event_add_time_relative(ev, nullptr, CLOCK_MONOTONIC, timeoutUsec,
-                                    0, // NOLINT(misc-include-cleaner)
-                                    cbExitLoopTimeout, nullptr);
+                                    0, cbExitLoopTimeout, nullptr);
     if (rc < 0)
     {
         sd_event_unref(ev);
@@ -166,10 +169,8 @@ static int readMessage(int sd, std::vector<uint8_t>& retBuf,
     {
         socklen_t addrlen = sizeof(sockaddr_mctp);
         memset(retAddr, 0x0, addrlen);
-        len = recvfrom(
-            sd, retBuf.data(), retBuf.size(), MSG_TRUNC,
-            reinterpret_cast<struct sockaddr*>(retAddr),
-            &addrlen); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        len = recvfrom(sd, retBuf.data(), retBuf.size(), MSG_TRUNC,
+                       reinterpret_cast<struct sockaddr*>(retAddr), &addrlen);
     }
     else
     {
@@ -229,9 +230,9 @@ static int mctpQueryVdmCommand(int sd, const struct sockaddr_mctp* reqAddr,
     }
 
     printHex("TX", static_cast<const uint8_t*>(req), reqLen);
-    ssize_t rc = sendto(
-        sd, req, reqLen, 0, reinterpret_cast<const struct sockaddr*>(reqAddr),
-        reqAddrLen); // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    ssize_t rc = sendto(sd, req, reqLen, 0,
+                        reinterpret_cast<const struct sockaddr*>(reqAddr),
+                        reqAddrLen);
     if (rc < 0)
     {
         lg2::error("sendto failed: {ERROR}", "ERROR", strerror(errno));
@@ -492,11 +493,8 @@ class MCTPHeartbeatService
         addr.smctp_type = mctpVendorMsgType;
         addr.smctp_tag = MCTP_TAG_OWNER;
 
-        if (bind(
-                sockFd,
-                reinterpret_cast<struct sockaddr*>(
-                    &addr), // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
-                sizeof(addr)) < 0)
+        if (bind(sockFd, reinterpret_cast<struct sockaddr*>(&addr),
+                 sizeof(addr)) < 0)
         {
             lg2::error("AF_MCTP socket bind failed: {ERROR}", "ERROR",
                        strerror(errno));
@@ -505,14 +503,12 @@ class MCTPHeartbeatService
         }
 
         /* Set socket timeout */
-        struct timeval timeout{}; // NOLINT(misc-include-cleaner)
-        timeout.tv_sec = 5;       // 5 seconds timeout
+        struct timeval timeout{};
+        timeout.tv_sec = 5; // 5 seconds timeout
         timeout.tv_usec = 0;
 
-        if (setsockopt(sockFd, SOL_SOCKET,
-                       SO_RCVTIMEO, // NOLINT(misc-include-cleaner)
-                       reinterpret_cast<char*>(&timeout), sizeof(timeout)) <
-            0) // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+        if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO,
+                       reinterpret_cast<char*>(&timeout), sizeof(timeout)) < 0)
         {
             lg2::error("AF_MCTP socket setsockopt failed: {ERROR}", "ERROR",
                        strerror(errno));
@@ -557,11 +553,11 @@ class MCTPHeartbeatService
     void run()
     {
         // Setup signal handler
-        struct sigaction sa{};            // NOLINT(misc-include-cleaner)
-        sa.sa_handler = signalHandler;    // NOLINT(misc-include-cleaner)
-        sigemptyset(&sa.sa_mask);         // NOLINT(misc-include-cleaner)
+        struct sigaction sa{};
+        sa.sa_handler = signalHandler;
+        sigemptyset(&sa.sa_mask);
         sa.sa_flags = 0;
-        sigaction(SIGTERM, &sa, nullptr); // NOLINT(misc-include-cleaner)
+        sigaction(SIGTERM, &sa, nullptr);
 
         // Send boot complete v2 command first
         if (vdmBootCompleteV2(fd, targetEid, 0, 0) != 0)
@@ -784,11 +780,11 @@ int main()
         });
 
         // Setup signal handler for process termination
-        struct sigaction sa{};            // NOLINT(misc-include-cleaner)
-        sa.sa_handler = signalHandler;    // NOLINT(misc-include-cleaner)
-        sigemptyset(&sa.sa_mask);         // NOLINT(misc-include-cleaner)
+        struct sigaction sa{};
+        sa.sa_handler = signalHandler;
+        sigemptyset(&sa.sa_mask);
         sa.sa_flags = 0;
-        sigaction(SIGTERM, &sa, nullptr); // NOLINT(misc-include-cleaner)
+        sigaction(SIGTERM, &sa, nullptr);
 
         // to keep service running
         // Need to keep the service alive unless SIGTERM is received
@@ -827,3 +823,4 @@ int main()
 
     return 0;
 }
+// NOLINTEND

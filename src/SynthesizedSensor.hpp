@@ -44,7 +44,7 @@ struct SynthesizedSensor :
                       const std::string& sensorConfiguration,
                       sdbusplus::asio::object_server& objectServer,
                       std::vector<thresholds::Threshold>&& thresholdData,
-                      const double maxValue, const double minValue);
+                      double maxValue, double minValue);
     ~SynthesizedSensor() override;
 
     void checkThresholds() override;

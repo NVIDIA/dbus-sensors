@@ -5,18 +5,15 @@
 #include "SensorPaths.hpp"
 #include "Thresholds.hpp"
 #include "Utils.hpp"
-#include "sharedMemUtils.hpp"
 
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/exception.hpp>
-#include <tal.hpp>
 
 #include <array>
 #include <cerrno>
 #include <cmath>
 #include <cstddef>
-#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
