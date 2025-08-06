@@ -246,7 +246,8 @@ void MCTPDDevice::setup(
             mctpdControlPath + std::string("/interfaces/") + interface,
             mctpdControlInterface, "AssignEndpointStatic", physaddr,
             staticEID.value(),
-            static_cast<uint8_t>(bridgePoolStartEid.value_or(0)));
+            static_cast<uint8_t>(bridgePoolStartEid.value_or(0)),
+            ignoreEids.value_or(std::vector<uint8_t>{}));
     }
     else
     {
