@@ -57,7 +57,6 @@ class NVMeMiContext :
     uint8_t eid{0};
     int consecutiveFailures{0};
     static constexpr int maxConsecutiveFailures = 3;
-    bool pollingStopped{false};
 
     // Communication pipes
     FileHandle requestPipe;

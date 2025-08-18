@@ -68,8 +68,7 @@ void NVMeMiContext::readAndProcessNVMeSensor()
 
     for (auto& sensorVariant : sensors)
     {
-        std::visit(
-            [&shouldSendCommand](auto& sensor) {
+        std::visit([&shouldSendCommand](auto& sensor) {
             using SensorType = std::decay_t<decltype(sensor)>;
 
             if constexpr (std::is_same_v<SensorType,
@@ -99,8 +98,7 @@ void NVMeMiContext::readAndProcessNVMeSensor()
                     shouldSendCommand = true;
                 }
             }
-        },
-            sensorVariant);
+        }, sensorVariant);
     }
 
     // Send unified command if any sensor is ready
@@ -277,8 +275,7 @@ void NVMeMiContext::processResponse(void* msg, size_t len)
     // Process all sensors in this context
     for (auto& sensorVariant : sensors)
     {
-        std::visit(
-            [smartLog](auto& sensor) {
+        std::visit([smartLog](auto& sensor) {
             using SensorType = std::decay_t<decltype(sensor)>;
 
             if constexpr (std::is_same_v<SensorType,
@@ -313,8 +310,7 @@ void NVMeMiContext::processResponse(void* msg, size_t len)
 
                 sensor->updateStatus(present, functional, fault);
             }
-        },
-            sensorVariant);
+        }, sensorVariant);
     }
     // Schedule next polling cycle after updating both sensors
     pollNVMeDevices();

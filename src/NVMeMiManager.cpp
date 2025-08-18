@@ -183,8 +183,7 @@ void NVMeMiManager::communicationThread()
 void NVMeMiManager::processContextCommand(ContextCommInfo& commInfo)
 {
     // Check if there's data available on the request pipe
-    struct pollfd pfd
-    {};
+    struct pollfd pfd{};
     pfd.fd = commInfo.context->getRequestPipe().handle();
     pfd.events = POLLIN;
     pfd.revents = 0;

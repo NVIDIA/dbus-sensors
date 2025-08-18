@@ -62,6 +62,33 @@ NVMEMap& getNVMEMap()
     return nvmeDeviceMap;
 }
 
+using PropertiesMap =
+    std::map<std::string,
+             std::variant<uint8_t, uint32_t, uint64_t, std::vector<uint8_t>>>;
+using EidPropertiesHandler =
+    std::function<void(const boost::system::error_code&, const PropertiesMap&)>;
+using EidPropertiesCreator = std::function<EidPropertiesHandler(
+    uint8_t, const std::string&, const std::string&)>;
+using MctpDiscoveryHandler = std::function<void(
+    const boost::system::error_code&, const GetSubTreeType&)>;
+
+// Forward declarations
+static void discoverMctpEndpoint(
+    uint8_t expectedEid,
+    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
+    const std::function<void(uint8_t eid, int net)>& onMctpFound);
+
+// handle MCTP endpoint properties
+static EidPropertiesCreator handleEidProperties(
+    const std::function<void(uint8_t eid, int net)>& onMctpFound);
+
+// handle MCTP endpoint discovery
+template <typename HandlerType>
+static MctpDiscoveryHandler handleMctpDiscovery(
+    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
+    const HandlerType& handleEidProperties, uint8_t expectedEid,
+    const char* mctpEndpointInterface);
+
 static uint8_t extractAddress(const SensorBaseConfigMap& properties)
 {
     auto findSlaveAddr = properties.find("Address");
@@ -92,12 +119,28 @@ static std::optional<std::string>
 static void discoverMctpEndpoint(
     uint8_t expectedEid,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
-    const std::function<void(uint8_t eid, int net)> onMctpFound)
+    const std::function<void(uint8_t eid, int net)>& onMctpFound)
 {
-    // handle MCTP endpoint properties
-    auto handleEidProperties = [onMctpFound](uint8_t eid,
-                                             const std::string& owner,
-                                             const std::string& path) {
+    const char* mctpEndpointInterface = "xyz.openbmc_project.MCTP.Endpoint";
+
+    auto eidPropertiesHandler = handleEidProperties(onMctpFound);
+    auto mctpDiscoveryHandler =
+        handleMctpDiscovery(dbusConnection, eidPropertiesHandler, expectedEid,
+                            mctpEndpointInterface);
+
+    dbusConnection->async_method_call(
+        mctpDiscoveryHandler, mapper::busName, mapper::path, mapper::interface,
+        mapper::subtree, "/", 0,
+        std::vector<std::string>{mctpEndpointInterface,
+                                 "au.com.codeconstruct.MCTP.Endpoint1"});
+}
+
+// Helper function to handle MCTP endpoint properties
+static EidPropertiesCreator handleEidProperties(
+    const std::function<void(uint8_t eid, int net)>& onMctpFound)
+{
+    return [onMctpFound](uint8_t eid, const std::string& owner,
+                         const std::string& path) {
         return [eid, owner, path, onMctpFound](
                    const boost::system::error_code ec,
                    const std::map<std::string,
@@ -160,13 +203,18 @@ static void discoverMctpEndpoint(
             onMctpFound(static_cast<uint8_t>(eid), net);
         };
     };
+}
 
-    const char* mctpEndpointInterface = "xyz.openbmc_project.MCTP.Endpoint";
-    // handle MCTP endpoint discovery
-    auto handleMctpDiscovery =
-        [&dbusConnection, handleEidProperties, expectedEid,
-         mctpEndpointInterface](const boost::system::error_code ec,
-                                const GetSubTreeType& ret) {
+// Helper function to handle MCTP endpoint discovery
+template <typename HandlerType>
+static MctpDiscoveryHandler handleMctpDiscovery(
+    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
+    const HandlerType& handleEidProperties, uint8_t expectedEid,
+    const char* mctpEndpointInterface)
+{
+    return [&dbusConnection, handleEidProperties, expectedEid,
+            mctpEndpointInterface](const boost::system::error_code ec,
+                                   const GetSubTreeType& ret) {
         if (ec || ret.empty())
         {
             lg2::error("no MCTP endpoints found: {ERR} eid: {EID}", "ERR",
@@ -188,12 +236,6 @@ static void discoverMctpEndpoint(
             }
         }
     };
-
-    dbusConnection->async_method_call(
-        handleMctpDiscovery, mapper::busName, mapper::path, mapper::interface,
-        mapper::subtree, "/", 0,
-        std::vector<std::string>{mctpEndpointInterface,
-                                 "au.com.codeconstruct.MCTP.Endpoint1"});
 }
 
 static std::shared_ptr<NVMeContext>

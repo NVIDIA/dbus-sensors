@@ -217,7 +217,15 @@ if get_option('nvme-mi').allowed()
     libnvme = dependency('libnvme')
     libnvme_mi = dependency('libnvme-mi')
 
-    nvme_deps = [default_deps, i2c, thresholds_dep, utils_dep, threads, libnvme, libnvme_mi]
+    nvme_deps = [
+        default_deps,
+        i2c,
+        thresholds_dep,
+        utils_dep,
+        threads,
+        libnvme,
+        libnvme_mi,
+    ]
 
     executable(
         'misensor',
