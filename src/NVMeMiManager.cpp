@@ -236,11 +236,12 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
     }
 
     int cmd = req[0];
-    int nsid = req[1];
 
-    if (cmd == NVME_LOG_LID_SMART)
+    constexpr uint8_t NVME_MI_CMD_HEALTH_STATUS_POLL = 0x01;
+
+    if (cmd == NVME_MI_CMD_HEALTH_STATUS_POLL) // Health Status Polling
     {
-        resp.resize(sizeof(nvme_smart_log));
+        resp.resize(sizeof(struct nvme_mi_nvm_ss_health_status));
         // Get controllers for this EID from the map
         auto& ctrlList = controllersByEid[eid];
         if (ctrlList.empty())
@@ -263,14 +264,28 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
             return handleError(0);
         }
 
-        nvme_mi_ctrl_t ctrl = ctrlList[0];
+        // Get the endpoint for this EID
+        auto it = contexts.find(eid);
+        if (it == contexts.end() || it->second->nvmeEp == nullptr)
+        {
+            return handleError(0);
+        }
 
-        nvme_smart_log* log =
-            static_cast<nvme_smart_log*>(static_cast<void*>(resp.data()));
+        nvme_mi_ep_t ep = it->second->nvmeEp;
 
-        constexpr int readLen = sizeof(nvme_smart_log) - sizeof(log->rsvd232);
-        rc = nvme_mi_admin_get_nsid_log(ctrl, true, NVME_LOG_LID_SMART, nsid,
-                                        readLen, log);
+        struct nvme_mi_nvm_ss_health_status* log =
+            static_cast<struct nvme_mi_nvm_ss_health_status*>(
+                static_cast<void*>(resp.data()));
+
+        // Use the proper NVMe-MI health status polling function
+        rc = nvme_mi_mi_subsystem_health_status_poll(ep, false, log);
+
+        if (rc != 0)
+        {
+            lg2::error(
+                "Failed to get health status for eid: {EID}, error: {ERR}",
+                "EID", static_cast<int>(eid), "ERR", rc);
+        }
     }
     else
     {

@@ -24,6 +24,19 @@
 #include <endian.h>
 #include <nvme/types.h>
 
+// NVMe-MI NSS (NVM Subsystem Status) constants
+constexpr uint8_t NVME_MI_NSS_DRIVE_FAULT = (1 << 5); // Drive Fault Status
+
+// NVMe-MI CTEMP (Composite Temperature) constants
+constexpr uint8_t NVME_MI_CTEMP_NO_DATA =
+    0x80; // No temperature data or >5s old
+constexpr uint8_t NVME_MI_CTEMP_SENSOR_FAIL =
+    0x81; // Temperature sensor failure
+constexpr uint8_t NVME_MI_CTEMP_MAX_TEMP = 0x7F; // 127°C or higher
+constexpr uint8_t NVME_MI_CTEMP_MIN_TEMP = 0xC4; // -60°C or lower
+constexpr uint8_t NVME_MI_CTEMP_TWOS_COMP_START =
+    0xC5; // Start of two's complement range
+
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/impl/read.hpp>
@@ -150,7 +163,10 @@ void NVMeMiContext::close()
 void NVMeMiContext::sendNVMeMICommand()
 {
     std::array<uint8_t, 4> cmdArray{};
-    cmdArray[0] = NVME_LOG_LID_SMART;
+    // Use NVM Subsystem Health Status Polling instead of log page
+    // This is the proper NVMe-MI command for health status
+    constexpr uint8_t NVME_MI_CMD_HEALTH_STATUS_POLL = 0x01;
+    cmdArray[0] = NVME_MI_CMD_HEALTH_STATUS_POLL;
     cmdArray[1] = 0; // nsid
 
     /* Issue the request */
@@ -243,17 +259,58 @@ void NVMeMiContext::sendNVMeMICommand()
     });
 }
 
-static double getTemperatureReading(nvme_smart_log* log)
+static double
+    getTemperatureReading(struct nvme_mi_nvm_ss_health_status* healthLog)
 {
-    uint16_t temp = (static_cast<uint16_t>(log->temperature[1]) << 8) |
-                    static_cast<uint16_t>(log->temperature[0]);
+    uint8_t ctemp = healthLog->ctemp;
 
-    return static_cast<double>(temp) - 273.15;
+    // Handle special temperature values according to NVMe specification
+    if (ctemp == NVME_MI_CTEMP_NO_DATA)
+    {
+        // 80h: No temperature data or temperature data is more than 5s old
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    if (ctemp == NVME_MI_CTEMP_SENSOR_FAIL)
+    {
+        // 81h: Temperature sensor failure
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    if (ctemp == NVME_MI_CTEMP_MAX_TEMP)
+    {
+        // 7Fh: 127°C or higher
+        return 127.0;
+    }
+
+    if (ctemp == NVME_MI_CTEMP_MIN_TEMP)
+    {
+        // C4h: -60°C or lower
+        return -60.0;
+    }
+
+    if (ctemp <= 0x7E)
+    {
+        // 00h to 7Eh: Temperature is measured in degrees Celsius (0°C to 126°C)
+        return static_cast<double>(ctemp);
+    }
+
+    if (ctemp >= NVME_MI_CTEMP_TWOS_COMP_START)
+    {
+        // C5h to FFh: Temperature measured in degrees Celsius is represented in
+        // two's complement Convert from two's complement 8-bit to signed
+        // integer
+        int8_t temp_signed = static_cast<int8_t>(ctemp);
+        return static_cast<double>(temp_signed);
+    }
+
+    // Reserved values (82h to C3h) - return NaN
+    return std::numeric_limits<double>::quiet_NaN();
 }
 
 void NVMeMiContext::processResponse(void* msg, size_t len)
 {
-    if (msg == nullptr || len < sizeof(nvme_smart_log))
+    if (msg == nullptr || len < sizeof(struct nvme_mi_nvm_ss_health_status))
     {
         consecutiveFailures++;
         lg2::warning("Consecutive failures for eid: {EID}: {FAILURES}/{MAX}",
@@ -270,39 +327,52 @@ void NVMeMiContext::processResponse(void* msg, size_t len)
     // Reset failure counter on successful response
     consecutiveFailures = 0;
 
-    nvme_smart_log* smartLog = static_cast<nvme_smart_log*>(msg);
+    struct nvme_mi_nvm_ss_health_status* healthLog =
+        static_cast<struct nvme_mi_nvm_ss_health_status*>(msg);
 
+    lg2::info("EID: {EID} Temperature: {TEMP}", "EID", eid, "TEMP",
+              healthLog->ctemp);
     // Process all sensors in this context
     for (auto& sensorVariant : sensors)
     {
-        std::visit([smartLog](auto& sensor) {
+        std::visit([healthLog, this](auto& sensor) {
             using SensorType = std::decay_t<decltype(sensor)>;
 
             if constexpr (std::is_same_v<SensorType,
                                          std::shared_ptr<NVMeSensor>>)
             {
-                // Update temperature sensor
-                double value = getTemperatureReading(smartLog);
-                if (std::isfinite(value))
+                // Update temperature sensor using health data
+                double value = getTemperatureReading(healthLog);
+
+                if (std::isnan(value))
                 {
-                    sensor->updateValue(value);
+                    // Temperature data is unavailable, old, or sensor failed
+                    sensor->incrementError();
                 }
                 else
                 {
-                    sensor->incrementError();
+                    sensor->updateValue(value);
                 }
             }
             else if constexpr (std::is_same_v<
                                    SensorType,
                                    std::shared_ptr<NVMeStatusSensor>>)
             {
-                // Update status sensor
+                // Update status sensor using health data
                 bool present = true;
                 bool functional = true;
                 bool fault = false;
 
+                // Check for drive fault from bit 5 of NVM Subsystem Status
+                // (nss)
+                if (healthLog->nss & NVME_MI_NSS_DRIVE_FAULT)
+                {
+                    fault = true;
+                    functional = false;
+                }
+
                 // Check for critical warnings in the health status
-                if (smartLog->critical_warning != 0)
+                if (healthLog->sw != 0)
                 {
                     fault = true;
                     functional = false;
