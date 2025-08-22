@@ -41,6 +41,12 @@ class NVMeMiContext :
                     boost::asio::posix::stream_descriptor reqStream,
                     boost::asio::posix::stream_descriptor respStream);
 
+    // Set poll rate for this context
+    void setPollRate(uint8_t rate)
+    {
+        pollRate = rate;
+    }
+
     // Get pipes for communication manager
     FileHandle& getRequestPipe()
     {
@@ -57,6 +63,7 @@ class NVMeMiContext :
     uint8_t eid{0};
     int consecutiveFailures{0};
     static constexpr int maxConsecutiveFailures = 3;
+    uint8_t pollRate{1}; // Default poll rate of 1 second
 
     // Communication pipes
     FileHandle requestPipe;

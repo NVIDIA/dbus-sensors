@@ -275,6 +275,7 @@ static void handleSensorConfigurations(
         std::string sensorName;
         uint8_t eid;
         std::vector<thresholds::Threshold> thresholds;
+        uint8_t pollRate;
     };
 
     std::vector<SensorConfig> pendingSensors;
@@ -306,8 +307,12 @@ static void handleSensorConfigurations(
                            *sensorName);
             }
 
+            // Extract poll rate from sensor configuration
+            uint8_t pollRate = static_cast<uint8_t>(
+                getPollRate(sensorConfig, 1.0f)); // Default to 1 second
+
             pendingSensors.emplace_back(interfacePath, *sensorName, eid,
-                                        std::move(sensorThresholds));
+                                        std::move(sensorThresholds), pollRate);
         }
 
         auto statusSensorBase =
@@ -325,8 +330,13 @@ static void handleSensorConfigurations(
                 continue;
             }
 
+            // Extract poll rate from sensor configuration
+            uint8_t pollRate = static_cast<uint8_t>(
+                getPollRate(sensorConfig, 1.0f)); // Default to 1 second
+
             pendingSensors.emplace_back(interfacePath, *sensorName, eid,
-                                        std::vector<thresholds::Threshold>{});
+                                        std::vector<thresholds::Threshold>{},
+                                        pollRate);
         }
     }
 
@@ -356,6 +366,7 @@ static void handleSensorConfigurations(
                 provideMiContext(io, nvmeDeviceMap, discoveredEid);
 
             auto nvmeContext = std::static_pointer_cast<NVMeMiContext>(context);
+
             if (commManager)
             {
                 if (!commManager->addContext(nvmeContext, net, discoveredEid))
@@ -381,7 +392,8 @@ static void handleSensorConfigurations(
                             std::make_shared<NVMeSensor>(
                                 objectServer, io, dbusConnection,
                                 sensorConfig.sensorName, std::move(thresholds),
-                                sensorConfig.interfacePath, discoveredEid);
+                                sensorConfig.interfacePath, discoveredEid,
+                                sensorConfig.pollRate);
 
                         context->addSensor<NVMeSensor>(sensorPtr);
                     }
@@ -392,7 +404,8 @@ static void handleSensorConfigurations(
                             std::make_shared<NVMeStatusSensor>(
                                 objectServer, io, dbusConnection,
                                 sensorConfig.sensorName,
-                                sensorConfig.interfacePath, discoveredEid);
+                                sensorConfig.interfacePath, discoveredEid,
+                                sensorConfig.pollRate);
 
                         context->addSensor<NVMeStatusSensor>(statusSensorPtr);
                     }

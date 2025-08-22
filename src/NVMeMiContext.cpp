@@ -127,7 +127,8 @@ void NVMeMiContext::readAndProcessNVMeSensor()
 
 void NVMeMiContext::pollNVMeDevices()
 {
-    scanTimer.expires_after(std::chrono::seconds(1));
+    scanTimer.expires_after(
+        std::chrono::milliseconds(static_cast<unsigned int>(pollRate * 1000)));
     scanTimer.async_wait([weakSelf{weak_from_this()}](
                              const boost::system::error_code errorCode) {
         if (errorCode == boost::asio::error::operation_aborted)
@@ -330,8 +331,6 @@ void NVMeMiContext::processResponse(void* msg, size_t len)
     struct nvme_mi_nvm_ss_health_status* healthLog =
         static_cast<struct nvme_mi_nvm_ss_health_status*>(msg);
 
-    lg2::info("EID: {EID} Temperature: {TEMP}", "EID", eid, "TEMP",
-              healthLog->ctemp);
     // Process all sensors in this context
     for (auto& sensorVariant : sensors)
     {
