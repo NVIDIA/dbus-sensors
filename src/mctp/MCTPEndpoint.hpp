@@ -451,3 +451,26 @@ class SPIMCTPDDevice : public MCTPDDevice
 
     static std::string interfaceFromBusCs(int bus, int chipselect);
 };
+
+class XROTMCTPDDevice : public MCTPDDevice
+{
+  public:
+    static std::optional<SensorBaseConfigMap> match(const SensorData& config);
+    static bool match(const std::set<std::string>& interfaces);
+    static std::shared_ptr<XROTMCTPDDevice> from(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const SensorBaseConfigMap& iface);
+
+    XROTMCTPDDevice() = delete;
+    XROTMCTPDDevice(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const std::string& name,
+        std::optional<std::uint8_t> staticEID = std::nullopt) :
+        MCTPDDevice(connection, name, std::vector<uint8_t>{}, staticEID,
+                    std::nullopt, std::nullopt)
+    {}
+    ~XROTMCTPDDevice() override = default;
+
+  private:
+    static constexpr const char* configType = "MCTPXROTTarget";
+};

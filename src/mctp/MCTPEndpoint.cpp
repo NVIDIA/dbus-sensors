@@ -1328,3 +1328,89 @@ std::string SPIMCTPDDevice::interfaceFromBusCs(int bus, int chipselect)
 
     return it->path().filename();
 }
+
+/* MCTP XROT */
+std::optional<SensorBaseConfigMap> XROTMCTPDDevice::match(
+    const SensorData& config)
+{
+    auto iface = config.find(configInterfaceName(configType));
+    if (iface == config.end())
+    {
+        return std::nullopt;
+    }
+    return iface->second;
+}
+
+bool XROTMCTPDDevice::match(const std::set<std::string>& interfaces)
+{
+    return interfaces.contains(configInterfaceName(configType));
+}
+
+std::shared_ptr<XROTMCTPDDevice> XROTMCTPDDevice::from(
+    const std::shared_ptr<sdbusplus::asio::connection>& connection,
+    const SensorBaseConfigMap& iface)
+{
+    auto mType = iface.find("Type");
+    if (mType == iface.end())
+    {
+        throw std::invalid_argument(
+            "No 'Type' member found for provided configuration object");
+    }
+
+    auto type = std::visit(VariantToStringVisitor(), mType->second);
+    if (type != configType)
+    {
+        throw std::invalid_argument("Not an XROT device");
+    }
+
+    auto mName = iface.find("Name");
+    auto mStaticEndpointID = iface.find("StaticEndpointID");
+    auto mInterface = iface.find("Interface");
+
+    if (mName == iface.end() || mInterface == iface.end())
+    {
+        throw std::invalid_argument(
+            "Configuration object violates MCTPXROTTarget schema");
+    }
+
+    auto name = std::visit(VariantToStringVisitor(), mName->second);
+    auto interface = std::visit(VariantToStringVisitor(), mInterface->second);
+
+    std::optional<std::uint8_t> staticEID{};
+    if (mStaticEndpointID == iface.end())
+    {
+        warning(
+            "Info: Key 'StaticEndpointID' is not provided; skipping related processing.");
+    }
+    else
+    {
+        auto sStaticEndpointID =
+            std::visit(VariantToStringVisitor(), mStaticEndpointID->second);
+        std::uint8_t parsedEID{};
+        auto [cptr, cec] = std::from_chars(
+            sStaticEndpointID.data(),
+            sStaticEndpointID.data() + sStaticEndpointID.size(), parsedEID);
+        if (cec != std::errc{})
+        {
+            throw std::invalid_argument("Bad endpoint address");
+        }
+        staticEID = parsedEID;
+    }
+
+    try
+    {
+        if (staticEID.has_value())
+        {
+            return std::make_shared<XROTMCTPDDevice>(connection, interface,
+                                                     staticEID.value());
+        }
+        return std::make_shared<XROTMCTPDDevice>(connection, interface);
+    }
+    catch (const MCTPException& ex)
+    {
+        warning(
+            "Failed to create XROTMCTPDDevice at [ name: {XROT_NAME} ]: {EXCEPTION}",
+            "XROT_NAME", name, "EXCEPTION", ex);
+        return {};
+    }
+}
