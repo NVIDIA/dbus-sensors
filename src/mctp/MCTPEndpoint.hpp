@@ -318,7 +318,6 @@ class MCTPDDevice :
     std::unique_ptr<sdbusplus::bus::match_t> removeMatch;
     std::unique_ptr<sdbusplus::bus::match_t> discoveryNotifyMatch;
     bool discoveryNeeded = false;
-    std::optional<uint8_t> pendingEID;
     std::unique_ptr<boost::asio::steady_timer> discoveryCheckTimer;
     void performDiscovery();
 

@@ -39,10 +39,14 @@ PHOSPHOR_LOG2_USING;
 
 static constexpr const char* mctpdBusName = "au.com.codeconstruct.MCTP1";
 static constexpr const char* mctpdControlPath = "/au/com/codeconstruct/mctp1";
+static constexpr const char* mctpdEndpointPath =
+    "/au/com/codeconstruct/mctp1/networks/1/endpoints/";
 static constexpr const char* mctpdControlInterface =
     "au.com.codeconstruct.MCTP.BusOwner1";
 static constexpr const char* mctpdEndpointControlInterface =
     "au.com.codeconstruct.MCTP.Endpoint1";
+static constexpr const char* mctpdBridgeInterface =
+    "au.com.codeconstruct.MCTP.Bridge1";
 
 MCTPDDevice::MCTPDDevice(
     const std::shared_ptr<sdbusplus::asio::connection>& connection,
@@ -86,26 +90,37 @@ void MCTPDDevice::onDiscoveryMatchRule()
         connection->get_io_context());
 }
 
-void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& msg)
+void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& /*unused*/)
 {
-    uint32_t eid32 = 0;
-    msg.read(eid32);
-    uint8_t eid = static_cast<uint8_t>(eid32);
+    /* Discovery Notify could be broadcasted from unassigned or assigned
+     * EID endpoint
+     *
+     * To be consistant, we must fetch out configuration StaticEndpointID
+     * and PhyAddr for either of these cases rather relying on signal eid
+     * data from mctpd.
+     *
+     * This is feasible because DiscoveryNotify signal is now
+     * interface path specific.
+     * Prioritse to discover and setup undiscovered endpoint first.
+     */
+    if (!this->endpoint)
+    {
+        this->performDiscovery();
+        return;
+    }
 
     if (discoveryNeeded)
     {
-        info(
-            "Ignoring DiscoveryNotify for EID '{EID}' (already have a pending discovery).",
-            "EID", static_cast<int>(eid));
+        info("Ignoring DiscoveryNotify for {INTERFACE}", "INTERFACE",
+             this->interface);
         return;
     }
 
     discoveryNeeded = true;
-    pendingEID = eid;
 
     info(
-        "First DiscoveryNotify for EID '{EID}' on interface '{INTERFACE}' => scheduling discovery in ~5s.",
-        "EID", static_cast<int>(eid), "INTERFACE", this->interface);
+        "First DiscoveryNotify for {INTERFACE} => scheduling discovery in ~5s.",
+        "INTERFACE", this->interface);
     /* Broad logic: This  bumps up discovery notify handler timer for
     another 5s. This is done to ensure that a flood of discovery notifies do
     not cause us to repeatedly perform rediscovery. Upon a timer expiry, the
@@ -128,26 +143,76 @@ void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& msg)
             // Call performDiscovery(), then reset flags
             self->performDiscovery();
             self->discoveryNeeded = false;
-            self->pendingEID.reset();
         }
     });
 }
 
+static bool hasBridgeInterface(
+    const std::shared_ptr<sdbusplus::asio::connection>& connection,
+    const std::string& endpointPath)
+{
+    try
+    {
+        // Use Properties.GetAll to check if the bridge interface exists
+		// TODO: Use ObjectMapper here to avoid expense on GetAll
+        auto method = connection->new_method_call(
+            mctpdBusName, endpointPath.c_str(),
+            "org.freedesktop.DBus.Properties", "GetAll");
+        method.append(std::string(mctpdBridgeInterface));
+
+        auto reply = connection->call(method);
+        info("{BRIDGE_INTERFACE} exists on {ENDPOINT_PATH}", "BRIDGE_INTERFACE",
+             mctpdBridgeInterface, "ENDPOINT_PATH", endpointPath);
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        error("{BRIDGE_INTERFACE} not found on {ENDPOINT_PATH}: {ERROR}",
+              "BRIDGE_INTERFACE", mctpdBridgeInterface, "ENDPOINT_PATH",
+              endpointPath, "ERROR", e.what());
+        return false;
+    }
+}
+
 void MCTPDDevice::performDiscovery()
 {
-    if (!pendingEID.has_value())
+    /* Discovery Notify policy :
+     * - For direct endpoint, we need to perform device discovery
+     * - For bridge endpoint, we need to get the routing table.
+     *
+     * - If endpoint is not created, we need to create it first. So focus on
+     *   device discovery.
+     * - If endpoint is already created i.e discovery is not needed, check
+     *    - If it's a bridge endpoint, get the routing table
+     *    - If it's not a bridge endpoint, then we have case of reset.
+     *      - LearnEndpoint : expected that endpoint EID would reset post reset,
+     *        this should cause removal of endpoint and let MCTPReactor do
+     *        re-discovery
+     *      - if endpoint wasn't remove, only it's properties were updated, then
+     *        no need to do re-discovery. MCTPD will send fake connectivity
+     *        signal.
+     */
+    auto path = std::string(mctpdControlPath) + "/interfaces/" +
+                this->interface;
+    std::string dbusMethod = "LearnEndpoint";
+    uint8_t eid = 0;
+
+    if (this->endpoint)
     {
-        error("performDiscovery() called with no EID stored.");
-        return;
+        eid = this->endpoint->eid();
+        std::string endpointPath = mctpdEndpointPath + std::to_string(eid);
+        info(
+            "Discovery Notify received for {INTERFACE} of already discovered endpoint",
+            "INTERFACE", this->interface);
+        dbusMethod = hasBridgeInterface(connection, endpointPath)
+                         ? "GetRoutingTable"
+                         : "LearnEndpoint";
     }
 
-    uint8_t eid = pendingEID.value();
-
-    connection->async_method_call(
-        [weakSelf = weak_from_this(), eid](const boost::system::error_code& ec,
-                                           sdbusplus::message::message& reply) {
+    auto callback = [weakSelf = weak_from_this(),
+                     dbusMethod](const boost::system::error_code& ec,
+                                 sdbusplus::message_t& msg) {
         auto self = weakSelf.lock();
-        (void)reply;
         if (!self)
         {
             return;
@@ -155,18 +220,78 @@ void MCTPDDevice::performDiscovery()
 
         if (ec)
         {
-            error("Failed calling GetRoutingTable for EID '{EID}': {ERROR}",
-                  "EID", static_cast<int>(eid), "ERROR", ec.message());
+            error("Failed calling {METHOD} for {INTERFACE}: {ERROR}", "METHOD",
+                  dbusMethod, "INTERFACE", self->interface, "ERROR",
+                  ec.message());
         }
         else
         {
-            info("Successfully called GetRoutingTable for EID '{EID}'.", "EID",
-                 static_cast<int>(eid));
+            info("Successfully called {METHOD} for {INTERFACE}.", "METHOD",
+                 dbusMethod, "INTERFACE", self->interface);
+
+            if (dbusMethod == "LearnEndpoint")
+            {
+                auto [eid, network, objpath, allocated] =
+                    msg.unpack<uint8_t, int32_t, std::string, bool>();
+                info(
+                    "LearnEndpoint returned eid: {EID}, network: {NETWORK}, objpath: {OBJPATH}, allocated: {ALLOCATED}",
+                    "EID", eid, "NETWORK", network, "OBJPATH", objpath,
+                    "ALLOCATED", allocated);
+                if (eid == 0 && !allocated && objpath.empty())
+                {
+                    // Post reset, endpoint was removed.
+                    if (self->requestSetupCallback)
+                    {
+                        info("Requesting reactor to do setup for {INTERFACE}",
+                             "INTERFACE", self->interface);
+                        self->requestSetupCallback(self);
+                    }
+                }
+            }
         }
-    },
-        mctpdBusName,
-        (std::string(mctpdControlPath) + "/interfaces/" + this->interface),
-        mctpdControlInterface, "GetRoutingTable", eid);
+    };
+
+    if (dbusMethod == "GetRoutingTable")
+    {
+        info("Calling GetRoutingTable for {INTERFACE} with EID {EID}",
+             "INTERFACE", this->interface, "EID", eid);
+        this->connection->async_method_call(callback, mctpdBusName, path,
+                                            mctpdControlInterface, dbusMethod,
+                                            eid);
+    }
+    else
+    {
+        if (!this->requestSetupCallback)
+        {
+            warning("Failed to notify MCTPReactor to do setup for {INTERFACE}",
+                    "INTERFACE", this->interface);
+            return;
+        }
+
+        if (!this->endpoint)
+        {
+            info(
+                "Discovery Notify received for {INTERFACE} of undiscovered endpoint",
+                "INTERFACE", this->interface);
+            info("Requesting reactor to do setup for {INTERFACE}", "INTERFACE",
+                 this->interface);
+            this->requestSetupCallback(shared_from_this());
+        }
+        else
+        {
+            info(
+                "Discovery Notify received for {INTERFACE} of already discovered endpoint",
+                "INTERFACE", this->interface);
+            info("Calling LearnEndpoint for {INTERFACE} with EID {EID}",
+                 "INTERFACE", this->interface, "EID", eid);
+            auto path = std::string(mctpdControlPath) + "/interfaces/" +
+                        this->interface;
+            dbusMethod = "LearnEndpoint";
+            this->connection->async_method_call(callback, mctpdBusName, path,
+                                                mctpdControlInterface,
+                                                dbusMethod, this->physaddr);
+        }
+    }
 }
 
 void MCTPDDevice::onEndpointInterfacesRemoved(
@@ -231,10 +356,15 @@ void MCTPDDevice::setup(
             return;
         }
 
+        if (!allocated)
+        {
+            added({}, {});
+            return;
+        }
+
         if (auto self = weak.lock())
         {
             self->finaliseEndpoint(objpath, eid, network, added);
-            self->onDiscoveryMatchRule();
         }
         else
         {
