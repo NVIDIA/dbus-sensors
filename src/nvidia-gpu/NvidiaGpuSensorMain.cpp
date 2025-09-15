@@ -49,6 +49,7 @@ int main()
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server objectServer(systemBus, true);
     objectServer.add_manager("/xyz/openbmc_project/sensors");
+    objectServer.add_manager("/xyz/openbmc_project/inventory");
     systemBus->request_name("xyz.openbmc_project.GpuSensor");
 
     mctp::MctpRequester mctpRequester(io);
@@ -63,12 +64,12 @@ int main()
     std::function<void(sdbusplus::message_t&)> eventHandler =
         [&configTimer, &io, &objectServer, &systemBus,
          &mctpRequester](sdbusplus::message_t&) {
-        configTimer.expires_after(std::chrono::seconds(1));
-        // create a timer because normally multiple properties change
-        configTimer.async_wait(std::bind_front(
-            configTimerExpiryCallback, std::ref(io), std::ref(objectServer),
-            std::ref(systemBus), std::ref(mctpRequester)));
-    };
+            configTimer.expires_after(std::chrono::seconds(1));
+            // create a timer because normally multiple properties change
+            configTimer.async_wait(std::bind_front(
+                configTimerExpiryCallback, std::ref(io), std::ref(objectServer),
+                std::ref(systemBus), std::ref(mctpRequester)));
+        };
 
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
         setupPropertiesChangedMatches(
@@ -81,8 +82,8 @@ int main()
         sdbusplus::bus::match::rules::interfacesRemovedAtPath(
             std::string(inventoryPath)),
         [](sdbusplus::message_t& msg) {
-        interfaceRemoved(msg, gpuDevices, smaDevices);
-    });
+            interfaceRemoved(msg, gpuDevices, smaDevices);
+        });
 
     io.run();
     return 0;

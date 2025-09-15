@@ -5,9 +5,11 @@ Requires=xyz.openbmc_project.EntityManager.service
 After=xyz.openbmc_project.EntityManager.service
 
 [Service]
+Type=dbus
+BusName=xyz.openbmc_project.IntrusionSensor
 Restart=always
 RestartSec=5
-ExecStart=/usr/bin/intrusionsensor
+ExecStart=/usr/libexec/dbus-sensors/intrusionsensor
 
 [Install]
 WantedBy=multi-user.target

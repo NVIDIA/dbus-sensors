@@ -2,7 +2,6 @@
 
 #include "Utils.hpp"
 
-#include <boost/asio/steady_timer.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
@@ -164,10 +163,10 @@ class MCTPDevice
      *              the request was successful then @p ep contains a
      *              valid MctpEndpoint instance.
      */
-    virtual void
-        setup(std::function<void(const std::error_code& ec,
-                                 const std::shared_ptr<MCTPEndpoint>& ep)>&&
-                  added) = 0;
+    virtual void setup(
+        std::function<void(const std::error_code& ec,
+                           const std::shared_ptr<MCTPEndpoint>& ep)>&&
+            added) = 0;
 
     /**
      * @brief Remove the device and any associated endpoint from the MCTP stack.
@@ -292,16 +291,8 @@ class MCTPDDevice :
     std::shared_ptr<sdbusplus::asio::connection> connection;
     const std::string interface;
     const std::vector<uint8_t> physaddr;
-    const std::optional<std::uint8_t> staticEID;
-    const std::optional<std::uint8_t> bridgePoolStartEid;
-    const std::optional<std::vector<uint8_t>> ignoreEids;
     std::shared_ptr<MCTPDEndpoint> endpoint;
     std::unique_ptr<sdbusplus::bus::match_t> removeMatch;
-    std::unique_ptr<sdbusplus::bus::match_t> discoveryNotifyMatch;
-    bool discoveryNeeded = false;
-    std::optional<uint8_t> pendingEID;
-    std::unique_ptr<boost::asio::steady_timer> discoveryCheckTimer;
-    void performDiscovery();
 
     /**
      * @brief Actions to perform once endpoint setup has succeeded
@@ -324,9 +315,9 @@ class I2CMCTPDDevice : public MCTPDDevice
   public:
     static std::optional<SensorBaseConfigMap> match(const SensorData& config);
     static bool match(const std::set<std::string>& interfaces);
-    static std::shared_ptr<I2CMCTPDDevice>
-        from(const std::shared_ptr<sdbusplus::asio::connection>& connection,
-             const SensorBaseConfigMap& iface);
+    static std::shared_ptr<I2CMCTPDDevice> from(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const SensorBaseConfigMap& iface);
 
     I2CMCTPDDevice() = delete;
     I2CMCTPDDevice(
@@ -340,6 +331,29 @@ class I2CMCTPDDevice : public MCTPDDevice
 
   private:
     static constexpr const char* configType = "MCTPI2CTarget";
+
+    static std::string interfaceFromBus(int bus);
+};
+
+class I3CMCTPDDevice : public MCTPDDevice
+{
+  public:
+    static std::optional<SensorBaseConfigMap> match(const SensorData& config);
+    static bool match(const std::set<std::string>& interfaces);
+    static std::shared_ptr<I3CMCTPDDevice> from(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const SensorBaseConfigMap& iface);
+
+    I3CMCTPDDevice() = delete;
+    I3CMCTPDDevice(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection, int bus,
+        const std::vector<uint8_t>& physaddr) :
+        MCTPDDevice(connection, interfaceFromBus(bus), physaddr)
+    {}
+    ~I3CMCTPDDevice() override = default;
+
+  private:
+    static constexpr const char* configType = "MCTPI3CTarget";
 
     static std::string interfaceFromBus(int bus);
 };
@@ -393,3 +407,4 @@ class SPIMCTPDDevice : public MCTPDDevice
 
     static std::string interfaceFromBusCs(int bus, int chipselect);
 };
+

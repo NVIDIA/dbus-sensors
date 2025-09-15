@@ -37,10 +37,9 @@ Requester::Requester(boost::asio::io_context& ctx) :
     expiryTimer(ctx)
 {}
 
-void Requester::processRecvMsg(const std::span<const uint8_t> reqMsg,
-                               const std::span<uint8_t> respMsg,
-                               const boost::system::error_code& ec,
-                               const size_t /*length*/)
+void Requester::processRecvMsg(
+    const std::span<const uint8_t> reqMsg, const std::span<uint8_t> respMsg,
+    const boost::system::error_code& ec, const size_t /*length*/)
 {
     const auto* respAddr =
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
@@ -107,11 +106,10 @@ void Requester::processRecvMsg(const std::span<const uint8_t> reqMsg,
     callback(0);
 }
 
-void Requester::handleSendMsgCompletion(uint8_t eid,
-                                        const std::span<const uint8_t> reqMsg,
-                                        std::span<uint8_t> respMsg,
-                                        const boost::system::error_code& ec,
-                                        size_t /* length */)
+void Requester::handleSendMsgCompletion(
+    uint8_t eid, const std::span<const uint8_t> reqMsg,
+    std::span<uint8_t> respMsg, const boost::system::error_code& ec,
+    size_t /* length */)
 {
     if (!completionCallbacks.contains(eid))
     {
@@ -178,8 +176,8 @@ void QueuingRequester::sendRecvMsg(uint8_t eid, std::span<const uint8_t> reqMsg,
                                    std::span<uint8_t> respMsg,
                                    std::move_only_function<void(int)> callback)
 {
-    auto reqCtx = std::make_unique<RequestContext>(reqMsg, respMsg,
-                                                   std::move(callback));
+    auto reqCtx =
+        std::make_unique<RequestContext>(reqMsg, respMsg, std::move(callback));
 
     // Add request to queue
     auto& queue = requestContextQueues[eid];

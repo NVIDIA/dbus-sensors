@@ -126,8 +126,8 @@ TEST_F(OcpMctpVdmTests, DecodeReasonCodeAndCCSuccessCase)
     std::array<uint8_t, sizeof(response)> buf{};
     std::memcpy(buf.data(), &response, sizeof(response));
 
-    int result = ocp::accelerator_management::decodeReasonCodeAndCC(buf, cc,
-                                                                    reasonCode);
+    int result =
+        ocp::accelerator_management::decodeReasonCodeAndCC(buf, cc, reasonCode);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(cc, ocp::accelerator_management::CompletionCode::SUCCESS);
@@ -148,8 +148,8 @@ TEST_F(OcpMctpVdmTests, DecodeReasonCodeAndCCErrorCase)
     std::array<uint8_t, sizeof(response)> buf{};
     std::memcpy(buf.data(), &response, sizeof(response));
 
-    int result = ocp::accelerator_management::decodeReasonCodeAndCC(buf, cc,
-                                                                    reasonCode);
+    int result =
+        ocp::accelerator_management::decodeReasonCodeAndCC(buf, cc, reasonCode);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(cc, ocp::accelerator_management::CompletionCode::ERROR);
@@ -314,8 +314,8 @@ TEST_F(GpuMctpVdmTests, DecodeQueryDeviceIdentificationResponseError)
 TEST_F(GpuMctpVdmTests, DecodeQueryDeviceIdentificationResponseInvalidSize)
 {
     // Create a too-small buffer
-    std::vector<uint8_t> buf(sizeof(ocp::accelerator_management::Message) +
-                             2); // Too small
+    std::vector<uint8_t> buf(
+        sizeof(ocp::accelerator_management::Message) + 2); // Too small
 
     // Populate Message header only
     ocp::accelerator_management::Message msg{};
@@ -348,8 +348,8 @@ TEST_F(GpuMctpVdmTests, EncodeGetTemperatureReadingRequestSuccess)
     const uint8_t sensorId = 0;
     std::vector<uint8_t> buf(256);
 
-    int result = gpu::encodeGetTemperatureReadingRequest(instanceId, sensorId,
-                                                         buf);
+    int result =
+        gpu::encodeGetTemperatureReadingRequest(instanceId, sensorId, buf);
 
     EXPECT_EQ(result, 0);
 
@@ -409,8 +409,8 @@ TEST_F(GpuMctpVdmTests, DecodeGetTemperatureReadingResponseSuccess)
     uint16_t reasonCode{};
     double temperatureReading{};
 
-    int result = gpu::decodeGetTemperatureReadingResponse(buf, cc, reasonCode,
-                                                          temperatureReading);
+    int result = gpu::decodeGetTemperatureReadingResponse(
+        buf, cc, reasonCode, temperatureReading);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(cc, ocp::accelerator_management::CompletionCode::SUCCESS);
@@ -447,8 +447,8 @@ TEST_F(GpuMctpVdmTests, DecodeGetTemperatureReadingResponseError)
     uint16_t reasonCode{};
     double temperatureReading{};
 
-    int result = gpu::decodeGetTemperatureReadingResponse(buf, cc, reasonCode,
-                                                          temperatureReading);
+    int result = gpu::decodeGetTemperatureReadingResponse(
+        buf, cc, reasonCode, temperatureReading);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(cc, ocp::accelerator_management::CompletionCode::ERR_NOT_READY);
@@ -485,8 +485,8 @@ TEST_F(GpuMctpVdmTests, DecodeGetTemperatureReadingResponseInvalidSize)
     uint16_t reasonCode{};
     double temperatureReading{};
 
-    int result = gpu::decodeGetTemperatureReadingResponse(buf, cc, reasonCode,
-                                                          temperatureReading);
+    int result = gpu::decodeGetTemperatureReadingResponse(
+        buf, cc, reasonCode, temperatureReading);
 
     EXPECT_EQ(result, EINVAL); // Should indicate error for invalid data size
 }
@@ -498,8 +498,8 @@ TEST_F(GpuMctpVdmTests, EncodeReadThermalParametersRequestSuccess)
     const uint8_t sensorId = 1;
     std::array<uint8_t, sizeof(gpu::ReadThermalParametersRequest)> buf{};
 
-    int result = gpu::encodeReadThermalParametersRequest(instanceId, sensorId,
-                                                         buf);
+    int result =
+        gpu::encodeReadThermalParametersRequest(instanceId, sensorId, buf);
 
     EXPECT_EQ(result, 0);
 
@@ -559,8 +559,8 @@ TEST_F(GpuMctpVdmTests, DecodeReadThermalParametersResponseSuccess)
     uint16_t reasonCode{};
     int32_t threshold{};
 
-    int result = gpu::decodeReadThermalParametersResponse(buf, cc, reasonCode,
-                                                          threshold);
+    int result = gpu::decodeReadThermalParametersResponse(
+        buf, cc, reasonCode, threshold);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(cc, ocp::accelerator_management::CompletionCode::SUCCESS);
@@ -598,8 +598,8 @@ TEST_F(GpuMctpVdmTests, DecodeReadThermalParametersResponseError)
     uint16_t reasonCode{};
     int32_t threshold{};
 
-    int result = gpu::decodeReadThermalParametersResponse(buf, cc, reasonCode,
-                                                          threshold);
+    int result = gpu::decodeReadThermalParametersResponse(
+        buf, cc, reasonCode, threshold);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(cc, ocp::accelerator_management::CompletionCode::ERR_NOT_READY);
@@ -636,8 +636,8 @@ TEST_F(GpuMctpVdmTests, DecodeReadThermalParametersResponseInvalidSize)
     uint16_t reasonCode{};
     int32_t threshold{};
 
-    int result = gpu::decodeReadThermalParametersResponse(buf, cc, reasonCode,
-                                                          threshold);
+    int result = gpu::decodeReadThermalParametersResponse(
+        buf, cc, reasonCode, threshold);
 
     EXPECT_EQ(result, EINVAL); // Should indicate error for invalid data size
 }
@@ -713,8 +713,8 @@ TEST_F(GpuMctpVdmTests, DecodeGetCurrentPowerDrawResponseSuccess)
     uint16_t reasonCode{};
     uint32_t power{};
 
-    int result = gpu::decodeGetCurrentPowerDrawResponse(buf, cc, reasonCode,
-                                                        power);
+    int result =
+        gpu::decodeGetCurrentPowerDrawResponse(buf, cc, reasonCode, power);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(cc, ocp::accelerator_management::CompletionCode::SUCCESS);
@@ -752,8 +752,8 @@ TEST_F(GpuMctpVdmTests, DecodeGetCurrentPowerDrawResponseError)
     uint16_t reasonCode{};
     uint32_t power{};
 
-    int result = gpu::decodeGetCurrentPowerDrawResponse(buf, cc, reasonCode,
-                                                        power);
+    int result =
+        gpu::decodeGetCurrentPowerDrawResponse(buf, cc, reasonCode, power);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(cc, ocp::accelerator_management::CompletionCode::ERR_NOT_READY);
@@ -790,8 +790,8 @@ TEST_F(GpuMctpVdmTests, DecodeGetCurrentPowerDrawResponseInvalidSize)
     uint16_t reasonCode{};
     uint32_t power{};
 
-    int result = gpu::decodeGetCurrentPowerDrawResponse(buf, cc, reasonCode,
-                                                        power);
+    int result =
+        gpu::decodeGetCurrentPowerDrawResponse(buf, cc, reasonCode, power);
 
     EXPECT_EQ(result, EINVAL); // Should indicate error for invalid data size
 }
@@ -803,8 +803,8 @@ TEST_F(GpuMctpVdmTests, EncodeGetCurrentEnergyCounterRequestSuccess)
     const uint8_t sensorId = 3;
     std::array<uint8_t, sizeof(gpu::GetCurrentEnergyCounterRequest)> buf{};
 
-    int result = gpu::encodeGetCurrentEnergyCounterRequest(instanceId, sensorId,
-                                                           buf);
+    int result =
+        gpu::encodeGetCurrentEnergyCounterRequest(instanceId, sensorId, buf);
 
     EXPECT_EQ(result, 0);
 
@@ -865,8 +865,8 @@ TEST_F(GpuMctpVdmTests, DecodeGetCurrentEnergyCounterResponseSuccess)
     uint16_t reasonCode{};
     uint64_t energy{};
 
-    int result = gpu::decodeGetCurrentEnergyCounterResponse(buf, cc, reasonCode,
-                                                            energy);
+    int result =
+        gpu::decodeGetCurrentEnergyCounterResponse(buf, cc, reasonCode, energy);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(cc, ocp::accelerator_management::CompletionCode::SUCCESS);
@@ -904,8 +904,8 @@ TEST_F(GpuMctpVdmTests, DecodeGetCurrentEnergyCounterResponseError)
     uint16_t reasonCode{};
     uint64_t energy{};
 
-    int result = gpu::decodeGetCurrentEnergyCounterResponse(buf, cc, reasonCode,
-                                                            energy);
+    int result =
+        gpu::decodeGetCurrentEnergyCounterResponse(buf, cc, reasonCode, energy);
 
     EXPECT_EQ(result, 0);
     EXPECT_EQ(cc, ocp::accelerator_management::CompletionCode::ERR_NOT_READY);
@@ -942,8 +942,8 @@ TEST_F(GpuMctpVdmTests, DecodeGetCurrentEnergyCounterResponseInvalidSize)
     uint16_t reasonCode{};
     uint64_t energy{};
 
-    int result = gpu::decodeGetCurrentEnergyCounterResponse(buf, cc, reasonCode,
-                                                            energy);
+    int result =
+        gpu::decodeGetCurrentEnergyCounterResponse(buf, cc, reasonCode, energy);
 
     EXPECT_EQ(result, EINVAL); // Should indicate error for invalid data size
 }

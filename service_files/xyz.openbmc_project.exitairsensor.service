@@ -7,9 +7,11 @@ Requires=xyz.openbmc_project.EntityManager.service
 After=xyz.openbmc_project.EntityManager.service
 
 [Service]
+Type=dbus
+BusName=xyz.openbmc_project.ExitAirTempSensor
 Restart=always
 RestartSec=5
-ExecStart=/usr/bin/exitairtempsensor
+ExecStart=/usr/libexec/dbus-sensors/exitairtempsensor
 
 [Install]
 WantedBy=multi-user.target

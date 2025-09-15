@@ -61,6 +61,44 @@ pwmsensor_dep = declare_dependency(
     dependencies: [default_deps, thresholds_dep],
 )
 
+systemdinterface_src = files('SystemdInterface.cpp')
+
+gpiointerface_a = static_library(
+    'gpiointerface_a',
+    'GPIOInterface.cpp',
+    dependencies: [default_deps, gpiodcxx],
+)
+
+gpiointerface_dep = declare_dependency(
+    include_directories: ['.'],
+    link_with: [gpiointerface_a],
+    dependencies: default_deps,
+)
+
+entitymanagerinterface_a = static_library(
+    'entitymanagerinterface_a',
+    'EntityManagerInterface.cpp',
+    dependencies: default_deps,
+)
+
+entitymanagerinterface_dep = declare_dependency(
+    include_directories: ['.'],
+    link_with: [entitymanagerinterface_a],
+    dependencies: default_deps,
+)
+
+notifywatch_a = static_library(
+    'notifywatch_a',
+    'NotifyWatch.cpp',
+    dependencies: default_deps,
+)
+
+notifywatch_dep = declare_dependency(
+    include_directories: ['.'],
+    link_with: [notifywatch_a],
+    dependencies: default_deps,
+)
+
 peci_incdirs = []
 if not meson.get_compiler('cpp').has_header('linux/peci-ioctl.h')
     peci_incdirs = ['../include']
@@ -68,33 +106,15 @@ endif
 
 if get_option('intel-cpu').allowed()
     peci_dep = dependency('libpeci', required: true)
+    subdir('intel-cpu')
+endif
+
+if get_option('smbpbi').allowed()
+    subdir('smbpbi')
 endif
 
 if get_option('adc').allowed()
-    executable(
-        'adcsensor',
-        'ADCSensor.cpp',
-        'ADCSensorMain.cpp',
-        dependencies: [default_deps, gpiodcxx, thresholds_dep, utils_dep],
-        install: true,
-    )
-endif
-
-if get_option('intel-cpu').allowed()
-    executable(
-        'intelcpusensor',
-        'IntelCPUSensorMain.cpp',
-        'IntelCPUSensor.cpp',
-        dependencies: [
-            default_deps,
-            gpiodcxx,
-            thresholds_dep,
-            utils_dep,
-            peci_dep,
-        ],
-        include_directories: peci_incdirs,
-        install: true,
-    )
+    subdir('adc')
 endif
 
 if get_option('boot-progress').allowed()
@@ -108,42 +128,11 @@ if get_option('boot-progress').allowed()
     )
 endif
 
-if get_option('exit-air').allowed()
-    executable(
-        'exitairtempsensor',
-        'ExitAirTempSensor.cpp',
-        dependencies: [default_deps, thresholds_dep, utils_dep],
-        install: true,
-    )
-endif
-
 if get_option('synth').allowed()
     executable(
         'synthesizedsensor',
         'SynthesizedSensor.cpp',
         dependencies: [default_deps, thresholds_dep, utils_dep],
-        install: true,
-    )
-endif
-
-if get_option('fan').allowed()
-    executable(
-        'fansensor',
-        'FanMain.cpp',
-        'TachSensor.cpp',
-        'PwmSensor.cpp',
-        dependencies: [default_deps, gpiodcxx, i2c, thresholds_dep, utils_dep],
-        install: true,
-    )
-endif
-
-if get_option('hwmon-temp').allowed()
-    executable(
-        'hwmontempsensor',
-        'HwmonTempMain.cpp',
-        'HwmonTempSensor.cpp',
-        dependencies: [default_deps, devicemgmt_dep, thresholds_dep, utils_dep],
-        include_directories: '../include',
         install: true,
     )
 endif
@@ -160,25 +149,30 @@ if get_option('plx-temp').allowed()
     )
 endif
 
+
+
+if get_option('exit-air').allowed()
+    subdir('exit-air')
+endif
+
+if get_option('fan').allowed()
+    subdir('fan')
+endif
+
+if get_option('hwmon-temp').allowed()
+    subdir('hwmon-temp')
+endif
+
 if get_option('intrusion').allowed()
-    executable(
-        'intrusionsensor',
-        'ChassisIntrusionSensor.cpp',
-        'IntrusionSensorMain.cpp',
-        dependencies: [default_deps, gpiodcxx, i2c, utils_dep],
-        install: true,
-    )
+    subdir('intrusion')
 endif
 
 if get_option('ipmb').allowed()
-    executable(
-        'ipmbsensor',
-        'IpmbSensorMain.cpp',
-        'IpmbSensor.cpp',
-        'IpmbSDRSensor.cpp',
-        dependencies: [default_deps, thresholds_dep, utils_dep],
-        install: true,
-    )
+    subdir('ipmb')
+endif
+
+if get_option('mctp').allowed()
+    subdir('mctp')
 endif
 
 if get_option('mctp').allowed()
@@ -186,53 +180,19 @@ if get_option('mctp').allowed()
 endif
 
 if get_option('mcu').allowed()
-    executable(
-        'mcutempsensor',
-        'MCUTempSensor.cpp',
-        dependencies: [default_deps, i2c, thresholds_dep, utils_dep],
-        install: true,
-    )
+    subdir('mcu')
 endif
 
 if get_option('nvme').allowed()
-    nvme_srcs = files('NVMeSensor.cpp', 'NVMeSensorMain.cpp')
-    nvme_srcs += files('NVMeBasicContext.cpp')
-
-    nvme_deps = [default_deps, i2c, thresholds_dep, utils_dep, threads]
-
-    executable(
-        'nvmesensor',
-        sources: nvme_srcs,
-        dependencies: nvme_deps,
-        install: true,
-    )
+    subdir('nvme')
 endif
 
 if get_option('psu').allowed()
-    executable(
-        'psusensor',
-        'PSUEvent.cpp',
-        'PSUSensor.cpp',
-        'PSUSensorMain.cpp',
-        dependencies: [
-            default_deps,
-            devicemgmt_dep,
-            pwmsensor_dep,
-            thresholds_dep,
-            utils_dep,
-        ],
-        install: true,
-    )
+    subdir('psu')
 endif
 
-if get_option('external').allowed()
-    executable(
-        'externalsensor',
-        'ExternalSensor.cpp',
-        'ExternalSensorMain.cpp',
-        dependencies: [default_deps, thresholds_dep, utils_dep],
-        install: true,
-    )
+if get_option('nvidia-gpu').allowed()
+    subdir('nvidia-gpu')
 endif
 
 if get_option('procstatus').allowed()
@@ -321,6 +281,19 @@ if get_option('leak-detect').allowed()
         ],
         install: true,
     )
+    subdir('external')
+endif
+
+if get_option('tests').allowed()
+    subdir('tests')
+endif
+
+if get_option('leakdetector').allowed()
+    subdir('leakdetector')
+endif
+
+if get_option('cable-monitor').allowed()
+    subdir('cable-monitor')
 endif
 
 if get_option('discrete-leak-detect').allowed()

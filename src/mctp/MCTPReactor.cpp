@@ -37,34 +37,34 @@ void MCTPReactor::trackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep)
     ep->subscribe(
         // Degraded
         [](const std::shared_ptr<MCTPEndpoint>& ep) {
-        debug("Endpoint entered degraded state: [ {MCTP_ENDPOINT} ]",
-              "MCTP_ENDPOINT", ep->describe());
-    },
+            debug("Endpoint entered degraded state: [ {MCTP_ENDPOINT} ]",
+                  "MCTP_ENDPOINT", ep->describe());
+        },
         // Available
         [](const std::shared_ptr<MCTPEndpoint>& ep) {
-        debug("Endpoint entered available state: [ {MCTP_ENDPOINT} ]",
-              "MCTP_ENDPOINT", ep->describe());
-    },
+            debug("Endpoint entered available state: [ {MCTP_ENDPOINT} ]",
+                  "MCTP_ENDPOINT", ep->describe());
+        },
         // Removed
         [weak{weak_from_this()}](const std::shared_ptr<MCTPEndpoint>& ep) {
-        info("Removed MCTP endpoint from device: [ {MCTP_ENDPOINT} ]",
-             "MCTP_ENDPOINT", ep->describe());
-        if (auto self = weak.lock())
-        {
-            self->untrackEndpoint(ep);
-            // Only defer the setup if we know inventory is still present
-            if (self->devices.contains(ep->device()))
+            info("Removed MCTP endpoint from device: [ {MCTP_ENDPOINT} ]",
+                 "MCTP_ENDPOINT", ep->describe());
+            if (auto self = weak.lock())
             {
-                self->deferSetup(ep->device());
+                self->untrackEndpoint(ep);
+                // Only defer the setup if we know inventory is still present
+                if (self->devices.contains(ep->device()))
+                {
+                    self->deferSetup(ep->device());
+                }
             }
-        }
-        else
-        {
-            info(
-                "The reactor object was destroyed concurrent to the removal of the remove match for the endpoint '{MCTP_ENDPOINT}'",
-                "MCTP_ENDPOINT", ep->describe());
-        }
-    });
+            else
+            {
+                info(
+                    "The reactor object was destroyed concurrent to the removal of the remove match for the endpoint '{MCTP_ENDPOINT}'",
+                    "MCTP_ENDPOINT", ep->describe());
+            }
+        });
 
     // Proxy-host the association back to the inventory at the same path as the
     // endpoint in mctpd.
@@ -187,13 +187,13 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
     auto device = devices.deviceFor(path);
     if (!device)
     {
-        warning("Unrecognised inventory item: {INVENTORY_PATH}",
-                "INVENTORY_PATH", path);
+        debug("Unrecognised inventory item: {INVENTORY_PATH}", "INVENTORY_PATH",
+              path);
         return;
     }
 
-    info("MCTP device inventory removed at '{INVENTORY_PATH}'",
-         "INVENTORY_PATH", path);
+    debug("MCTP device inventory removed at '{INVENTORY_PATH}'",
+          "INVENTORY_PATH", path);
 
     deferred.erase(device);
 
@@ -201,8 +201,8 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
     // of removal so we don't defer its setup
     devices.remove(device);
 
-    warning("Stopping management of MCTP device at [ {MCTP_DEVICE} ]",
-            "MCTP_DEVICE", device->describe());
+    debug("Stopping management of MCTP device at [ {MCTP_DEVICE} ]",
+          "MCTP_DEVICE", device->describe());
 
     device->remove();
 }

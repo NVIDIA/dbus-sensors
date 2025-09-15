@@ -32,9 +32,7 @@
 
 using namespace std::literals;
 
-// Reading from the device is in millivolts and unit set on the dbus is volts.
-static constexpr double gpuVoltageSensorMaxReading =
-    std::numeric_limits<uint32_t>::max() / 1000000.0;
+static constexpr double gpuVoltageSensorMaxReading = 50;
 static constexpr double gpuVoltageSensorMinReading =
     std::numeric_limits<uint32_t>::min();
 
@@ -96,8 +94,8 @@ void NvidiaGpuVoltageSensor::processResponse(int sendRecvMsgResult)
     uint16_t reasonCode = 0;
     uint32_t voltageValue = 0;
 
-    auto rc = gpu::decodeGetVoltageResponse(response, cc, reasonCode,
-                                            voltageValue);
+    auto rc =
+        gpu::decodeGetVoltageResponse(response, cc, reasonCode, voltageValue);
 
     if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
     {

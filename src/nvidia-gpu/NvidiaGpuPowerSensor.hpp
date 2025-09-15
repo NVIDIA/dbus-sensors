@@ -25,13 +25,12 @@ constexpr uint8_t gpuPowerSensorId{0};
 struct NvidiaGpuPowerSensor : public Sensor
 {
   public:
-    NvidiaGpuPowerSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
-                         mctp::MctpRequester& mctpRequester,
-                         const std::string& name,
-                         const std::string& sensorConfiguration, uint8_t eid,
-                         uint8_t sensorId,
-                         sdbusplus::asio::object_server& objectServer,
-                         std::vector<thresholds::Threshold>&& thresholdData);
+    NvidiaGpuPowerSensor(
+        std::shared_ptr<sdbusplus::asio::connection>& conn,
+        mctp::MctpRequester& mctpRequester, const std::string& name,
+        const std::string& sensorConfiguration, uint8_t eid, uint8_t sensorId,
+        sdbusplus::asio::object_server& objectServer,
+        std::vector<thresholds::Threshold>&& thresholdData);
 
     ~NvidiaGpuPowerSensor() override;
 

@@ -1,0 +1,15 @@
+[Unit]
+Description=SMBPBI Sensor
+StopWhenUnneeded=false
+Requires=xyz.openbmc_project.EntityManager.service
+After=xyz.openbmc_project.EntityManager.service
+
+[Service]
+Type=dbus
+BusName=xyz.openbmc_project.SMBPBI
+Restart=always
+RestartSec=5
+ExecStart=/usr/libexec/dbus-sensors/smbpbisensor
+
+[Install]
+WantedBy=multi-user.target

@@ -22,7 +22,7 @@ detection (x86) are also supported.
 
 A typical dbus-sensors object support the following dbus interfaces:
 
-```
+```text
 Path        /xyz/openbmc_project/sensors/<type>/<sensor_name>
 
 Interfaces  xyz.openbmc_project.Sensor.Value
@@ -34,8 +34,8 @@ Interfaces  xyz.openbmc_project.Sensor.Value
 
 ```
 
-Sensor interfaces collection are described
-[here](https://github.com/openbmc/phosphor-dbus-interfaces/tree/master/yaml/xyz/openbmc_project/Sensor).
+Sensor interfaces collection are described in
+[phosphor-dbus-interfaces](https://github.com/openbmc/phosphor-dbus-interfaces/tree/master/yaml/xyz/openbmc_project/Sensor).
 
 Consumer examples of these interfaces are
 [Redfish](https://github.com/openbmc/bmcweb/blob/master/redfish-core/lib/sensors.hpp),
@@ -53,8 +53,8 @@ check thresholds periodically. PropertiesChanged signals will be broadcasted for
 other services to consume when value or threshold status change. OperationStatus
 is set to false if the sensor is determined to be faulty.
 
-A simple sensor example can be found
-[here](https://github.com/openbmc/entity-manager/blob/master/docs/my_first_sensors.md).
+A simple sensor example can be found in
+[entity-manager examples](https://github.com/openbmc/entity-manager/blob/master/docs/my_first_sensors.md).
 
 ## configuration
 
@@ -69,9 +69,9 @@ for complete list.
 - [ExternalSensor](https://github.com/openbmc/docs/blob/master/designs/external-sensor.md)
   virtual sensor
 
-# Sensor Type Documentation
+## Sensor Type Documentation
 
-## ADC Sensors
+### ADC Sensors
 
 ADC sensors are sensors based on an Analog to Digital Converter. They are read
 via the Linux kernel Industrial I/O subsystem (IIO).
@@ -87,7 +87,7 @@ When using a common OpenBMC device like the AST2600 you will find a "adc0" and
 your system-specific dts you would enable and configure what you want with
 something like this:
 
-```
+```text
 iio-hwmon {
     compatible = "iio-hwmon";
     io-channels = <&adc0 0>;
@@ -111,7 +111,7 @@ configuring a device tree but really to point users in the general direction.
 You will then create an entity-manager configuration file that is of type "ADC"
 A very simple example would like look this:
 
-```
+```text
             "Index": 0,
             "Name": "P12V",
             "PowerState": "Always",

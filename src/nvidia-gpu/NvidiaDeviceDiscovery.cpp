@@ -28,10 +28,13 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
 #include <vector>
+
+static constexpr auto sensorPollRateMs = 1000;
 
 void processQueryDeviceIdResponse(
     boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
@@ -137,11 +140,11 @@ void queryDeviceIdentification(
         [&io, &objectServer, &gpuDevices, &smaDevices, conn, &mctpRequester,
          configs, path, eid, queryDeviceIdentificationRequest,
          queryDeviceIdentificationResponse](int sendRecvMsgResult) {
-        processQueryDeviceIdResponse(io, objectServer, gpuDevices, smaDevices,
-                                     conn, mctpRequester, configs, path, eid,
-                                     sendRecvMsgResult,
-                                     *queryDeviceIdentificationResponse);
-    });
+            processQueryDeviceIdResponse(
+                io, objectServer, gpuDevices, smaDevices, conn, mctpRequester,
+                configs, path, eid, sendRecvMsgResult,
+                *queryDeviceIdentificationResponse);
+        });
 }
 
 void processEndpoint(
@@ -258,10 +261,10 @@ void queryEndpoints(
                          &mctpRequester, configs,
                          path](const boost::system::error_code& ec,
                                const SensorBaseConfigMap& endpoint) {
-                        processEndpoint(io, objectServer, gpuDevices,
-                                        smaDevices, conn, mctpRequester,
-                                        configs, path, ec, endpoint);
-                    },
+                            processEndpoint(io, objectServer, gpuDevices,
+                                            smaDevices, conn, mctpRequester,
+                                            configs, path, ec, endpoint);
+                        },
                         service, objPath, "org.freedesktop.DBus.Properties",
                         "GetAll", iface);
                 }
@@ -287,9 +290,9 @@ void discoverDevices(
         [&io, &objectServer, &gpuDevices, &smaDevices, conn, &mctpRequester,
          configs,
          path](const boost::system::error_code& ec, const GetSubTreeType& ret) {
-        queryEndpoints(io, objectServer, gpuDevices, smaDevices, conn,
-                       mctpRequester, configs, path, ec, ret);
-    },
+            queryEndpoints(io, objectServer, gpuDevices, smaDevices, conn,
+                           mctpRequester, configs, path, ec, ret);
+        },
         "xyz.openbmc_project.ObjectMapper",
         "/xyz/openbmc_project/object_mapper",
         "xyz.openbmc_project.ObjectMapper", "GetSubTree", searchPath, 0,
@@ -318,7 +321,15 @@ void processSensorConfigs(
 
             configs.name = loadVariant<std::string>(cfg, "Name");
 
-            configs.pollRate = loadVariant<uint64_t>(cfg, "PollRate");
+            try
+            {
+                configs.pollRate = loadVariant<uint64_t>(cfg, "PollRate");
+            }
+            catch (const std::invalid_argument&)
+            {
+                // PollRate is an optional config
+                configs.pollRate = sensorPollRateMs;
+            }
 
             discoverDevices(io, objectServer, gpuDevices, smaDevices,
                             dbusConnection, mctpRequester, configs, path);
@@ -348,15 +359,15 @@ void createSensors(
         [&gpuDevices, &smaDevices, &mctpRequester, dbusConnection, &io,
          &objectServer](boost::system::error_code ec,
                         const ManagedObjectType& resp) {
-        if (ec)
-        {
-            lg2::error("Error contacting entity manager");
-            return;
-        }
+            if (ec)
+            {
+                lg2::error("Error contacting entity manager");
+                return;
+            }
 
-        processSensorConfigs(io, objectServer, gpuDevices, smaDevices,
-                             dbusConnection, mctpRequester, resp);
-    },
+            processSensorConfigs(io, objectServer, gpuDevices, smaDevices,
+                                 dbusConnection, mctpRequester, resp);
+        },
         entityManagerName, "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 }

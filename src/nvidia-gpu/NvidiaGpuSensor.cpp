@@ -46,8 +46,8 @@ NvidiaGpuTempSensor::NvidiaGpuTempSensor(
     eid(eid), sensorId{sensorId}, mctpRequester(mctpRequester),
     objectServer(objectServer)
 {
-    std::string dbusPath = sensorPathPrefix + "temperature/"s +
-                           escapeName(name);
+    std::string dbusPath =
+        sensorPathPrefix + "temperature/"s + escapeName(name);
 
     sensorInterface = objectServer.add_interface(
         dbusPath, "xyz.openbmc_project.Sensor.Value");

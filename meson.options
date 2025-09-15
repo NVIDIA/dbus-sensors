@@ -156,12 +156,6 @@ option(
     description: 'Enable Satellite sensor.',
 )
 option(
-    'leak-detect',
-    type: 'feature',
-    value: 'disabled',
-    description: 'Enable Leak Detect sensor.',
-)
-option(
     'discrete-leak-detect',
     type: 'feature',
     value: 'disabled',
@@ -178,4 +172,20 @@ option(
     type: 'feature',
     value: 'enabled',
     description: 'Use NVIDIA Shared-Memory IPC.',
+    'leakdetector',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable Liquid Leak Detector.',
+)
+option(
+    'smbpbi',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable SMBPBI sensor.',
+)
+option(
+    'cable-monitor',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable Cable monitor.',
 )

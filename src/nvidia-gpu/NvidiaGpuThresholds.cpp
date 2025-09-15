@@ -75,9 +75,9 @@ void readThermalParameter(uint8_t eid, uint8_t id,
     mctpRequester.sendRecvMsg(
         eid, *reqMsg, *respMsg,
         [reqMsg, respMsg, callback](int sendRecvMsgResult) {
-        processReadThermalParameterResponse(callback, *respMsg,
-                                            sendRecvMsgResult);
-    });
+            processReadThermalParameterResponse(callback, *respMsg,
+                                                sendRecvMsgResult);
+        });
 }
 
 void readThermalParameterCallback(

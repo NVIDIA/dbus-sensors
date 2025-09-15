@@ -5,6 +5,7 @@
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/container/flat_map.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/bus/match.hpp>
@@ -19,8 +20,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
-#include <iostream>
-#include <map>
 #include <memory>
 #include <optional>
 #include <regex>
@@ -76,10 +75,9 @@ enum class PowerState
 };
 
 std::optional<std::string> openAndRead(const std::string& hwmonFile);
-std::optional<std::string>
-    getFullHwmonFilePath(const std::string& directory,
-                         const std::string& hwmonBaseName,
-                         const std::set<std::string>& permitSet);
+std::optional<std::string> getFullHwmonFilePath(
+    const std::string& directory, const std::string& hwmonBaseName,
+    const std::set<std::string>& permitSet);
 std::set<std::string> getPermitSet(const SensorBaseConfigMap& config);
 bool findFiles(const std::filesystem::path& dirPath,
                std::string_view matchString,
@@ -174,7 +172,7 @@ inline T loadVariant(const SensorBaseConfigMap& data, const std::string& key)
     auto it = data.find(key);
     if (it == data.end())
     {
-        std::cerr << "Configuration missing " << key << "\n";
+        lg2::error("Configuration missing '{KEY}'", "KEY", key);
         throw std::invalid_argument("Key Missing");
     }
     if constexpr (std::is_same_v<T, double>)
@@ -225,8 +223,8 @@ inline PowerState getPowerState(const SensorBaseConfigMap& cfg)
     auto findPowerState = cfg.find("PowerState");
     if (findPowerState != cfg.end())
     {
-        std::string powerState = std::visit(VariantToStringVisitor(),
-                                            findPowerState->second);
+        std::string powerState =
+            std::visit(VariantToStringVisitor(), findPowerState->second);
         setReadState(powerState, state);
     }
     return state;
@@ -252,11 +250,12 @@ inline void setLed(const std::shared_ptr<sdbusplus::asio::connection>& conn,
 {
     conn->async_method_call(
         [name](const boost::system::error_code ec) {
-        if (ec)
-        {
-            std::cerr << "Failed to set LED " << name << "\n";
-        }
-    }, "xyz.openbmc_project.LED.GroupManager",
+            if (ec)
+            {
+                lg2::error("Failed to set LED '{NAME}'", "NAME", name);
+            }
+        },
+        "xyz.openbmc_project.LED.GroupManager",
         "/xyz/openbmc_project/led/groups/" + name, properties::interface,
         properties::set, "xyz.openbmc_project.Led.Group", "Asserted",
         std::variant<bool>(on));
@@ -288,31 +287,35 @@ struct GetSensorConfiguration :
         self->dbusConnection->async_method_call(
             [self, path, interface, owner, retries](
                 const boost::system::error_code ec, SensorBaseConfigMap& data) {
-            if (ec)
-            {
-                std::cerr << "Error getting " << path << ": retries left"
-                          << retries - 1 << "\n";
-                if (retries == 0U)
+                if (ec)
                 {
-                    return;
-                }
-                auto timer = std::make_shared<boost::asio::steady_timer>(
-                    self->dbusConnection->get_io_context());
-                timer->expires_after(std::chrono::seconds(10));
-                timer->async_wait([self, timer, path, interface, owner,
-                                   retries](boost::system::error_code ec) {
-                    if (ec)
+                    if (retries == 0U)
                     {
-                        std::cerr << "Timer error!\n";
+                        lg2::error("Error getting '{PATH}': no retries left",
+                                   "PATH", path);
                         return;
                     }
-                    self->getPath(path, interface, owner, retries - 1);
-                });
-                return;
-            }
+                    lg2::error(
+                        "Error getting '{PATH}': '{RETRIES}' retries left",
+                        "PATH", path, "RETRIES", retries - 1);
+                    auto timer = std::make_shared<boost::asio::steady_timer>(
+                        self->dbusConnection->get_io_context());
+                    timer->expires_after(std::chrono::seconds(10));
+                    timer->async_wait([self, timer, path, interface, owner,
+                                       retries](boost::system::error_code ec) {
+                        if (ec)
+                        {
+                            lg2::error("Timer error: '{ERROR_MESSAGE}'",
+                                       "ERROR_MESSAGE", ec.message());
+                            return;
+                        }
+                        self->getPath(path, interface, owner, retries - 1);
+                    });
+                    return;
+                }
 
-            self->respData[path][interface] = std::move(data);
-        },
+                self->respData[path][interface] = std::move(data);
+            },
             owner, path, "org.freedesktop.DBus.Properties", "GetAll",
             interface);
     }
@@ -335,51 +338,54 @@ struct GetSensorConfiguration :
         dbusConnection->async_method_call(
             [self, interfaces, retries](const boost::system::error_code ec,
                                         const GetSubTreeType& ret) {
-            if (ec)
-            {
-                std::cerr << "Error calling mapper\n";
-                if (retries == 0U)
+                if (ec)
                 {
-                    return;
-                }
-                auto timer = std::make_shared<boost::asio::steady_timer>(
-                    self->dbusConnection->get_io_context());
-                timer->expires_after(std::chrono::seconds(10));
-                timer->async_wait([self, timer, interfaces,
-                                   retries](boost::system::error_code ec) {
-                    if (ec)
+                    lg2::error("Error calling mapper: '{ERROR_MESSAGE}'",
+                               "ERROR_MESSAGE", ec.message());
+                    if (retries == 0U)
                     {
-                        std::cerr << "Timer error!\n";
                         return;
                     }
-                    self->getConfiguration(interfaces, retries - 1);
-                });
+                    auto timer = std::make_shared<boost::asio::steady_timer>(
+                        self->dbusConnection->get_io_context());
+                    timer->expires_after(std::chrono::seconds(10));
+                    timer->async_wait([self, timer, interfaces,
+                                       retries](boost::system::error_code ec) {
+                        if (ec)
+                        {
+                            lg2::error("Timer error: '{ERROR_MESSAGE}'",
+                                       "ERROR_MESSAGE", ec.message());
+                            return;
+                        }
+                        self->getConfiguration(interfaces, retries - 1);
+                    });
 
-                return;
-            }
-            for (const auto& [path, objDict] : ret)
-            {
-                if (objDict.empty())
-                {
                     return;
                 }
-                const std::string& owner = objDict.begin()->first;
-
-                for (const std::string& interface : objDict.begin()->second)
+                for (const auto& [path, objDict] : ret)
                 {
-                    // anything that starts with a requested configuration
-                    // is good
-                    if (std::find_if(interfaces.begin(), interfaces.end(),
-                                     [interface](const std::string& possible) {
-                        return interface.starts_with(possible);
-                    }) == interfaces.end())
+                    if (objDict.empty())
                     {
-                        continue;
+                        return;
                     }
-                    self->getPath(path, interface, owner);
+                    const std::string& owner = objDict.begin()->first;
+
+                    for (const std::string& interface : objDict.begin()->second)
+                    {
+                        // anything that starts with a requested configuration
+                        // is good
+                        if (std::find_if(
+                                interfaces.begin(), interfaces.end(),
+                                [interface](const std::string& possible) {
+                                    return interface.starts_with(possible);
+                                }) == interfaces.end())
+                        {
+                            continue;
+                        }
+                        self->getPath(path, interface, owner);
+                    }
                 }
-            }
-        },
+            },
             mapper::busName, mapper::path, mapper::interface, mapper::subtree,
             "/", 0, interfaces);
     }
@@ -396,8 +402,8 @@ struct GetSensorConfiguration :
 
 // The common scheme for sysfs files naming is: <type><number>_<item>.
 // This function returns optionally these 3 elements as a tuple.
-std::optional<std::tuple<std::string, std::string, std::string>>
-    splitFileName(const std::filesystem::path& filePath);
+std::optional<std::tuple<std::string, std::string, std::string>> splitFileName(
+    const std::filesystem::path& filePath);
 std::optional<double> readFile(const std::string& thresholdFile,
                                const double& scaleFactor);
 void setupManufacturingModeMatch(sdbusplus::asio::connection& conn);
@@ -413,7 +419,7 @@ bool getDeviceBusAddr(const std::string& deviceName, T& bus, T& addr)
     auto findHyphen = deviceName.find('-');
     if (findHyphen == std::string::npos)
     {
-        std::cerr << "found bad device " << deviceName << "\n";
+        lg2::error("found bad device '{NAME}'", "NAME", deviceName);
         return false;
     }
     std::string busStr = deviceName.substr(0, findHyphen);
@@ -423,13 +429,13 @@ bool getDeviceBusAddr(const std::string& deviceName, T& bus, T& addr)
     res = std::from_chars(&*busStr.begin(), &*busStr.end(), bus);
     if (res.ec != std::errc{} || res.ptr != &*busStr.end())
     {
-        std::cerr << "Error finding bus for " << deviceName << "\n";
+        lg2::error("Error finding bus for '{NAME}'", "NAME", deviceName);
         return false;
     }
     res = std::from_chars(&*addrStr.begin(), &*addrStr.end(), addr, 16);
     if (res.ec != std::errc{} || res.ptr != &*addrStr.end())
     {
-        std::cerr << "Error finding addr for " << deviceName << "\n";
+        lg2::error("Error finding addr for '{NAME}'", "NAME", deviceName);
         return false;
     }
 

@@ -17,6 +17,7 @@
 #pragma once
 #include <boost/type_index.hpp>
 
+#include <concepts>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -68,18 +69,26 @@ struct VariantToStringVisitor
     }
 };
 
-struct VariantToVecVisitor
+template <std::integral V, std::integral U>
+struct VariantToNumArrayVisitor
 {
     template <typename T>
-    std::vector<std::string> operator()(const T& t) const
+    std::vector<V> operator()(const T& t) const
     {
-        if constexpr (std::is_same_v<T, std::vector<std::string>>)
+        if constexpr (std::is_same_v<T, std::vector<U>>)
         {
-            return t;
+            std::vector<V> output;
+            output.reserve(t.size());
+
+            for (const auto& value : t)
+            {
+                output.push_back(static_cast<V>(value));
+            }
+
+            return output;
         }
         throw std::invalid_argument(
-            "Cannot translate type " +
-            boost::typeindex::type_id<T>().pretty_name() +
-            " to vector<string>");
+            "Cannot handle type " +
+            boost::typeindex::type_id<T>().pretty_name() + " to vector<U>");
     }
 };

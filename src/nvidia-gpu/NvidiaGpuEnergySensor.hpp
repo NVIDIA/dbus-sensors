@@ -25,13 +25,12 @@ constexpr uint8_t gpuEnergySensorId{0};
 struct NvidiaGpuEnergySensor : public Sensor
 {
   public:
-    NvidiaGpuEnergySensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
-                          mctp::MctpRequester& mctpRequester,
-                          const std::string& name,
-                          const std::string& sensorConfiguration, uint8_t eid,
-                          uint8_t sensorId,
-                          sdbusplus::asio::object_server& objectServer,
-                          std::vector<thresholds::Threshold>&& thresholdData);
+    NvidiaGpuEnergySensor(
+        std::shared_ptr<sdbusplus::asio::connection>& conn,
+        mctp::MctpRequester& mctpRequester, const std::string& name,
+        const std::string& sensorConfiguration, uint8_t eid, uint8_t sensorId,
+        sdbusplus::asio::object_server& objectServer,
+        std::vector<thresholds::Threshold>&& thresholdData);
 
     ~NvidiaGpuEnergySensor() override;
 

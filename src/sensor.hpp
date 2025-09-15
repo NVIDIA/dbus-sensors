@@ -6,6 +6,7 @@
 #include "Thresholds.hpp"
 #include "Utils.hpp"
 
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/exception.hpp>
@@ -16,7 +17,6 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
-#include <iostream>
 #include <limits>
 #include <memory>
 #include <string>
@@ -130,13 +130,13 @@ struct Sensor
                thresholds::thresProp.size()>
         thresholdInterfaces;
 
-    std::shared_ptr<sdbusplus::asio::dbus_interface>
-        getThresholdInterface(Level lev)
+    std::shared_ptr<sdbusplus::asio::dbus_interface> getThresholdInterface(
+        Level lev)
     {
         size_t index = static_cast<size_t>(lev);
         if (index >= thresholdInterfaces.size())
         {
-            std::cout << "Unknown threshold level \n";
+            lg2::info("Unknown threshold level");
             return nullptr;
         }
         std::shared_ptr<sdbusplus::asio::dbus_interface> interface =
@@ -162,9 +162,10 @@ struct Sensor
         // Show constants if first reading (even if unsuccessful)
         if ((inst.numCollectsGood == 0) && (inst.numCollectsMiss == 0))
         {
-            std::cerr << "Sensor " << name << ": Configuration min=" << minValue
-                      << ", max=" << maxValue << ", type=" << configInterface
-                      << ", path=" << configurationPath << "\n";
+            lg2::info(
+                "Sensor name: {NAME}, min: {MIN}, max: {MAX}, type: {TYPE}, path: {PATH}",
+                "NAME", name, "MIN", minValue, "MAX", maxValue, "TYPE",
+                configInterface, "PATH", configurationPath);
         }
 
         // Sensors can use "nan" to indicate unavailable reading
@@ -173,12 +174,12 @@ struct Sensor
             // Only show this if beginning a new streak
             if (inst.numStreakMisses == 0)
             {
-                std::cerr << "Sensor " << name
-                          << ": Missing reading, Reading counts good="
-                          << inst.numCollectsGood
-                          << ", miss=" << inst.numCollectsMiss
-                          << ", Prior good streak=" << inst.numStreakGreats
-                          << "\n";
+                lg2::warning(
+                    "Sensor name: {NAME}, Missing reading, Reading counts good= {NUM_COLLECTS_GOOD},"
+                    " miss= {NUM_COLLECTS_MISS}, Prior good streak= {NUM_STREAK_GREATS}",
+                    "NAME", name, "NUM_COLLECTS_GOOD", inst.numCollectsGood,
+                    "NUM_COLLECTS_MISS", inst.numCollectsMiss,
+                    "NUM_STREAK_GREATS", inst.numStreakGreats);
             }
 
             inst.numStreakGreats = 0;
@@ -191,18 +192,19 @@ struct Sensor
         // Only show this if beginning a new streak and not the first time
         if ((inst.numStreakGreats == 0) && (inst.numCollectsGood != 0))
         {
-            std::cerr << "Sensor " << name
-                      << ": Recovered reading, Reading counts good="
-                      << inst.numCollectsGood
-                      << ", miss=" << inst.numCollectsMiss
-                      << ", Prior miss streak=" << inst.numStreakMisses << "\n";
+            lg2::info(
+                "Sensor name: {NAME}, Recovered reading, Reading counts good= {NUM_COLLECTS_GOOD},"
+                " miss= {NUM_COLLECTS_MISS}, Prior good streak= {NUM_STREAK_GREATS}",
+                "NAME", name, "NUM_COLLECTS_GOOD", inst.numCollectsGood,
+                "NUM_COLLECTS_MISS", inst.numCollectsMiss, "NUM_STREAK_GREATS",
+                inst.numStreakGreats);
         }
 
         // Initialize min/max if the first successful reading
         if (inst.numCollectsGood == 0)
         {
-            std::cerr << "Sensor " << name << ": First reading=" << readValue
-                      << "\n";
+            lg2::info("Sensor name: {NAME}, First reading: {VALUE}", "NAME",
+                      name, "VALUE", readValue);
 
             inst.minCollected = readValue;
             inst.maxCollected = readValue;
@@ -215,16 +217,16 @@ struct Sensor
         // Only provide subsequent output if new min/max established
         if (readValue < inst.minCollected)
         {
-            std::cerr << "Sensor " << name << ": Lowest reading=" << readValue
-                      << "\n";
+            lg2::info("Sensor name: {NAME}, Lowest reading: {VALUE}", "NAME",
+                      name, "VALUE", readValue);
 
             inst.minCollected = readValue;
         }
 
         if (readValue > inst.maxCollected)
         {
-            std::cerr << "Sensor " << name << ": Highest reading=" << readValue
-                      << "\n";
+            lg2::info("Sensor name: {NAME}, Highest reading: {VALUE}", "NAME",
+                      name, "VALUE", readValue);
 
             inst.maxCollected = readValue;
         }
@@ -276,8 +278,8 @@ struct Sensor
         sensorInterface->register_property("MinValue", minValue);
         sensorInterface->register_property(
             "Value", value, [this](const double& newValue, double& oldValue) {
-            return setSensorValue(newValue, oldValue);
-        });
+                return setSensorValue(newValue, oldValue);
+            });
 
         fillMissingThresholds();
 
@@ -293,45 +295,45 @@ struct Sensor
 
             if (!iface)
             {
-                std::cout << "trying to set uninitialized interface\n";
+                lg2::info("trying to set uninitialized interface");
                 continue;
             }
 
-            std::string level = propertyLevel(threshold.level,
-                                              threshold.direction);
-            std::string alarm = propertyAlarm(threshold.level,
-                                              threshold.direction);
+            std::string level =
+                propertyLevel(threshold.level, threshold.direction);
+            std::string alarm =
+                propertyAlarm(threshold.level, threshold.direction);
 
             if ((level.empty()) || (alarm.empty()))
             {
                 continue;
             }
-            size_t thresSize = label.empty() ? thresholds.size()
-                                             : thresholdSize;
+            size_t thresSize =
+                label.empty() ? thresholds.size() : thresholdSize;
             iface->register_property(
                 level, threshold.value,
                 [&, label, thresSize](const double& request, double& oldValue) {
-                oldValue = request; // todo, just let the config do this?
-                threshold.value = request;
-                thresholds::persistThreshold(configurationPath, configInterface,
-                                             threshold, dbusConnection,
-                                             thresSize, label);
-                // Invalidate previously remembered value,
-                // so new thresholds will be checked during next update,
-                // even if sensor reading remains unchanged.
-                value = std::numeric_limits<double>::quiet_NaN();
+                    oldValue = request; // todo, just let the config do this?
+                    threshold.value = request;
+                    thresholds::persistThreshold(
+                        configurationPath, configInterface, threshold,
+                        dbusConnection, thresSize, label);
+                    // Invalidate previously remembered value,
+                    // so new thresholds will be checked during next update,
+                    // even if sensor reading remains unchanged.
+                    value = std::numeric_limits<double>::quiet_NaN();
 
-                // Although tempting, don't call checkThresholds() from here
-                // directly. Let the regular sensor monitor call the same
-                // using updateValue(), which can check conditions like
-                // poweron, etc., before raising any event.
-                return 1;
-            });
+                    // Although tempting, don't call checkThresholds() from here
+                    // directly. Let the regular sensor monitor call the same
+                    // using updateValue(), which can check conditions like
+                    // poweron, etc., before raising any event.
+                    return 1;
+                });
             iface->register_property(alarm, false);
         }
         if (!sensorInterface->initialize())
         {
-            std::cerr << "error initializing value interface\n";
+            lg2::error("error initializing value interface");
         }
 
         for (auto& thresIface : thresholdInterfaces)
@@ -340,7 +342,7 @@ struct Sensor
             {
                 if (!thresIface->initialize(true))
                 {
-                    std::cerr << "Error initializing threshold interface \n";
+                    lg2::error("Error initializing threshold interface");
                 }
             }
         }
@@ -354,8 +356,8 @@ struct Sensor
             valueMutabilityInterface->register_property("Mutable", true);
             if (!valueMutabilityInterface->initialize())
             {
-                std::cerr
-                    << "error initializing sensor value mutability interface\n";
+                lg2::error(
+                    "error initializing sensor value mutability interface");
                 valueMutabilityInterface = nullptr;
             }
         }
@@ -368,17 +370,17 @@ struct Sensor
                     availableInterfaceName);
             availableInterface->register_property(
                 "Available", true, [this](const bool propIn, bool& old) {
-                if (propIn == old)
-                {
+                    if (propIn == old)
+                    {
+                        return 1;
+                    }
+                    old = propIn;
+                    if (!propIn)
+                    {
+                        updateValue(std::numeric_limits<double>::quiet_NaN());
+                    }
                     return 1;
-                }
-                old = propIn;
-                if (!propIn)
-                {
-                    updateValue(std::numeric_limits<double>::quiet_NaN());
-                }
-                return 1;
-            });
+                });
             availableInterface->initialize();
         }
         if (!operationalInterface)
@@ -478,7 +480,7 @@ struct Sensor
         errCount++;
         if (errCount == errorThreshold)
         {
-            std::cerr << "Sensor " << name << " reading error!\n";
+            lg2::error("Sensor name: {NAME}, reading error!", "NAME", name);
             markFunctional(false);
         }
     }
@@ -549,8 +551,8 @@ struct Sensor
             if (interface &&
                 !(interface->set_property(dbusPropertyName, newValue)))
             {
-                std::cerr << "error setting property " << dbusPropertyName
-                          << " to " << newValue << "\n";
+                lg2::error("error setting property '{NAME}' to '{VALUE}'",
+                           "NAME", dbusPropertyName, "VALUE", newValue);
             }
         }
     }

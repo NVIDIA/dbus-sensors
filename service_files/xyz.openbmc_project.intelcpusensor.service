@@ -5,10 +5,12 @@ Requires=xyz.openbmc_project.EntityManager.service
 After=xyz.openbmc_project.EntityManager.service
 
 [Service]
+Type=dbus
+BusName=xyz.openbmc_project.IntelCPUSensor
 Restart=always
 RestartSec=5
 StartLimitBurst=10
-ExecStart=/usr/bin/intelcpusensor
+ExecStart=/usr/libexec/dbus-sensors/intelcpusensor
 
 [Install]
 WantedBy=multi-user.target

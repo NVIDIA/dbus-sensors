@@ -22,7 +22,6 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
-#include <string>
 #include <system_error>
 #include <vector>
 
@@ -81,12 +80,6 @@ static std::shared_ptr<MCTPDevice> deviceFromConfig(
     try
     {
         std::optional<SensorBaseConfigMap> iface;
-        // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
-        iface = I2CMCTPDDevice::match(config);
-        if (iface)
-        {
-            return I2CMCTPDDevice::from(connection, *iface);
-        }
 
         iface = USBMCTPDDevice::match(config);
         if (iface)
@@ -99,6 +92,20 @@ static std::shared_ptr<MCTPDevice> deviceFromConfig(
         {
             return SPIMCTPDDevice::from(connection, *iface);
         }
+        
+        iface = I2CMCTPDDevice::match(config);
+        if (iface)
+        {
+            info("Creating I2CMCTPDDevice");
+            return I2CMCTPDDevice::from(connection, *iface);
+        }
+
+        iface = I3CMCTPDDevice::match(config);
+        if (iface)
+        {
+            info("Creating I3CMCTPDDevice");
+            return I3CMCTPDDevice::from(connection, *iface);
+        }
     }
     catch (const std::invalid_argument& ex)
     {
@@ -108,10 +115,9 @@ static std::shared_ptr<MCTPDevice> deviceFromConfig(
     return {};
 }
 
-static void
-    addInventory(const std::shared_ptr<sdbusplus::asio::connection>& connection,
-                 const std::shared_ptr<MCTPReactor>& reactor,
-                 sdbusplus::message_t& msg)
+static void addInventory(
+    const std::shared_ptr<sdbusplus::asio::connection>& connection,
+    const std::shared_ptr<MCTPReactor>& reactor, sdbusplus::message_t& msg)
 {
     auto [path,
           exposed] = msg.unpack<sdbusplus::message::object_path, SensorData>();
@@ -140,7 +146,7 @@ static void removeInventory(const std::shared_ptr<MCTPReactor>& reactor,
         msg.unpack<sdbusplus::message::object_path, std::set<std::string>>();
     try
     {
-        if (I2CMCTPDDevice::match(removed) || USBMCTPDDevice::match(removed) ||
+        if (I2CMCTPDDevice::match(removed) || I3CMCTPDDevice::match(removed) || USBMCTPDDevice::match(removed) ||
             SPIMCTPDDevice::match(removed))
         {
             reactor->unmanageMCTPDevice(path.str);
@@ -206,14 +212,14 @@ int main()
 
     std::function<void(const boost::system::error_code&)> alarm =
         [&](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            return;
-        }
-        clock.expires_after(period);
-        clock.async_wait(alarm);
-        reactor->tick();
-    };
+            if (ec)
+            {
+                return;
+            }
+            clock.expires_after(period);
+            clock.async_wait(alarm);
+            reactor->tick();
+        };
     clock.expires_after(period);
     clock.async_wait(alarm);
 
@@ -256,7 +262,7 @@ int main()
     boost::asio::post(io, [reactor, systemBus]() {
         auto gsc = std::make_shared<GetSensorConfiguration>(
             systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
-        gsc->getConfiguration({"MCTPI2CTarget"});
+        gsc->getConfiguration({"MCTPI2CTarget", "MCTPI3CTarget"});
     });
 
     boost::asio::post(io, [reactor, systemBus]() {
