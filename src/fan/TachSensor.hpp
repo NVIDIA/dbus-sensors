@@ -19,6 +19,9 @@
 #include <optional>
 #include <string>
 #include <utility>
+
+namespace redundancy
+{
 constexpr const char* full = "Full";
 constexpr const char* degraded = "Degraded";
 constexpr const char* failed = "Failed";

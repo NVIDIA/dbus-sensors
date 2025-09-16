@@ -25,7 +25,6 @@ unit_files = [
     ['nvme', 'xyz.openbmc_project.nvmesensor.service'],
     ['nvme-mi', 'xyz.openbmc_project.nvmemisensor.service'],
     ['psu', 'xyz.openbmc_project.psusensor.service'],
-    ['external', 'xyz.openbmc_project.externalsensor.service'],
     ['procstatus', 'xyz.openbmc_project.processorstatus.service'],
     ['ipmbstatus', 'xyz.openbmc_project.ipmbstatus.service'],
     ['nvmeu2', 'xyz.openbmc_project.nvmestatus.service'],

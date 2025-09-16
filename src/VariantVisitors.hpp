@@ -69,6 +69,26 @@ struct VariantToStringVisitor
     }
 };
 
+struct VariantToVecVisitor
+{
+    template <typename T>
+    std::vector<std::string> operator()(const T& t) const
+    {
+        if constexpr (std::is_same_v<T, std::vector<std::string>>)
+        {
+            return t;
+        }
+        else if constexpr (std::is_same_v<T, std::string>)
+        {
+            return {t};
+        }
+        throw std::invalid_argument(
+            "Cannot translate type " +
+            boost::typeindex::type_id<T>().pretty_name() +
+            " to vector<string>");
+    }
+};
+
 template <std::integral V, std::integral U>
 struct VariantToNumArrayVisitor
 {

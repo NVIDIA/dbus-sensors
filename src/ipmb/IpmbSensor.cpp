@@ -52,6 +52,7 @@
 
 constexpr const bool debug = false;
 static constexpr uint8_t meAddress = 1;
+static constexpr uint8_t meAddressDefault = 1;
 static constexpr uint8_t lun = 0;
 static constexpr uint8_t hostSMbusIndexDefault = 0x03;
 static constexpr uint8_t ipmbBusIndexDefault = 0;
@@ -687,7 +688,8 @@ void createSensors(
                     */
                     paramMap sensorParamMap;
                     parseSensorParamFromConfig(interfaces, sensorParamMap);
-                    getSensorParamMapValues(maxValue, minValue, sensorParamMap);
+                    double maxValue = 0.0;
+                    double minValue = 0.0;
 
                     auto& sensor = sensors[name];
                     sensor = nullptr;

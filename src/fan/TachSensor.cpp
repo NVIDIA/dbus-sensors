@@ -16,6 +16,7 @@
 
 #include "TachSensor.hpp"
 
+#include "LedUtils.hpp"
 #include "PresenceGpio.hpp"
 #include "SensorPaths.hpp"
 #include "Thresholds.hpp"
@@ -53,7 +54,8 @@ TachSensor::TachSensor(
     std::vector<thresholds::Threshold>&& thresholdsIn,
     const std::string& sensorConfiguration,
     const std::pair<double, double>& limits, const PowerState& powerState,
-    const std::optional<std::string>& ledIn) :
+    const std::optional<std::string>& ledIn, std::optional<uint8_t> ledReg,
+    std::optional<uint8_t> offset) :
     Sensor(escapeName(fanName), std::move(thresholdsIn), sensorConfiguration,
            objectType, false, false, limits.second, limits.first, conn,
            powerState),

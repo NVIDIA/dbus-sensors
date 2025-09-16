@@ -59,7 +59,7 @@ static std::string deviceDirName(uint64_t bus, uint64_t address)
     return name.str();
 }
 
-fs::path I2CDeviceParams::devicePath() const
+bool I2CDeviceParams::devicePresent() const
 {
     std::filesystem::path path = i2cBusPath(bus) / deviceDirName(bus, address);
 
@@ -67,13 +67,6 @@ fs::path I2CDeviceParams::devicePath() const
     {
         path /= "hwmon";
     }
-
-    return path;
-}
-
-bool I2CDeviceParams::devicePresent() const
-{
-    fs::path path = devicePath();
 
     // Ignore errors; anything but a clean 'true' is fine as 'false'
     std::error_code ec;
@@ -94,6 +87,18 @@ bool I2CDeviceParams::deviceStatic() const
     // otherwise we can assume we created it from userspace.
     std::error_code ec;
     return std::filesystem::exists(ofNode, ec);
+}
+
+std::filesystem::path I2CDeviceParams::devicePath() const
+{
+    std::filesystem::path path = i2cBusPath(bus) / deviceDirName(bus, address);
+
+    if (type->createsHWMon)
+    {
+        path /= "hwmon";
+    }
+
+    return path;
 }
 
 I2CDevice::I2CDevice(I2CDeviceParams params) : params(params)

@@ -314,6 +314,9 @@ class MCTPDDevice :
     std::shared_ptr<sdbusplus::asio::connection> connection;
     const std::string interface;
     const std::vector<uint8_t> physaddr;
+    const std::optional<std::uint8_t> staticEID;
+    const std::optional<std::uint8_t> bridgePoolStartEid;
+    const std::optional<std::vector<uint8_t>> ignoreEids;
     std::shared_ptr<MCTPDEndpoint> endpoint;
     std::unique_ptr<sdbusplus::bus::match_t> removeMatch;
     const std::optional<std::uint8_t> staticEID;

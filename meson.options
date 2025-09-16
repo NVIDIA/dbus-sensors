@@ -178,6 +178,18 @@ option(
     description: 'Enable Liquid Leak Detector.',
 )
 option(
+    'leak-detect',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable Leak Detect sensor.',
+)
+option(
+    'discrete-leak-detect',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable Discrete Leak Detect sensor.',
+)
+option(
     'smbpbi',
     type: 'feature',
     value: 'enabled',

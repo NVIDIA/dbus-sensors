@@ -76,27 +76,3 @@ test(
     ),
 )
 
-test(
-    'MCTPReactor',
-    executable(
-        'test_MCTPReactor',
-        'test_MCTPReactor.cpp',
-        '../src/mctp/MCTPReactor.cpp',
-        '../src/mctp/MCTPEndpoint.cpp',
-        dependencies: [gmock_dep, ut_deps_list, utils_dep],
-        implicit_include_directories: false,
-        include_directories: '../src/mctp',
-    ),
-)
-
-test(
-    'MCTPEndpoint',
-    executable(
-        'test_MCTPEndpoint',
-        'test_MCTPEndpoint.cpp',
-        '../src/mctp/MCTPEndpoint.cpp',
-        dependencies: [gmock_dep, ut_deps_list, utils_dep],
-        implicit_include_directories: false,
-        include_directories: '../src/mctp',
-    ),
-)

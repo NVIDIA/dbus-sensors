@@ -469,6 +469,16 @@ void createSensors(
                     }
                 }
 
+                std::string sensorPhysicalContext;
+                auto configurationSensorPhysicalContext =
+                    baseConfigMap.find("PhysicalContext");
+
+                if (configurationSensorPhysicalContext != baseConfigMap.end())
+                {
+                    sensorPhysicalContext = std::get<std::string>(
+                        configurationSensorPhysicalContext->second);
+                }
+
                 std::vector<thresholds::Threshold> sensorThresholds;
 
                 if (!parseThresholdsFromConfig(sensorData, sensorThresholds,
@@ -505,9 +515,9 @@ void createSensors(
                         sensor = std::make_shared<HwmonTempSensor>(
                             *hwmonFile, sensorType, objectServer,
                             dbusConnection, io, sensorName,
-                            std::move(thresholds), thisSensorParameters,
+                            std::move(sensorThresholds), thisSensorParameters,
                             pollRate, interfacePath, readState, i2cDev,
-                            context);
+                            sensorPhysicalContext);
                         sensor->setupRead();
                     }
                 }
@@ -569,7 +579,7 @@ void createSensors(
                                 *hwmonFile, sensorType, objectServer,
                                 dbusConnection, io, sensorName,
                                 std::move(thresholds), thisSensorParameters,
-                                pollRate, interfacePath, readState, i2cDev);
+                                pollRate, interfacePath, readState, i2cDev, "");
                             sensor->setupRead();
                         }
                     }

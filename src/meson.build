@@ -175,10 +175,6 @@ if get_option('mctp').allowed()
     subdir('mctp')
 endif
 
-if get_option('mctp').allowed()
-    subdir('mctp')
-endif
-
 if get_option('mcu').allowed()
     subdir('mcu')
 endif
@@ -339,7 +335,7 @@ if get_option('presence-detect').enabled()
         'presence-detect',
         'GPIOPresenceSensor.cpp',
         'GPIOPresenceSensorMain.cpp',
-        dependencies: [sdbusplus, gpiodcxx, uring],
+        dependencies: [sdbusplus, gpiodcxx, uring, phosphor_logging_dep, i2c, utils_dep],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
@@ -351,7 +347,7 @@ if get_option('write-protect').enabled()
         'writeprotectsensor',
         'WriteProtectSensor.cpp',
         'WriteProtectSensorMain.cpp',
-        dependencies: [sdbusplus, gpiodcxx, uring],
+        dependencies: [sdbusplus, gpiodcxx, uring, phosphor_logging_dep],
         implicit_include_directories: false,
         include_directories: '../include',
         install: true,
