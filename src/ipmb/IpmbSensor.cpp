@@ -431,14 +431,6 @@ void IpmbSensor::ipmbRequestCompletionCb(const boost::system::error_code& ec,
     if (ec || (status != 0))
     {
         incrementError();
-        if (!isValueInitialized)
-        {
-            if (initCount < maxInitialRetry)
-            {
-                sendIpmbRequest();
-                initCount++;
-            }
-        }
         read();
         return;
     }
@@ -489,7 +481,16 @@ void IpmbSensor::ipmbRequestCompletionCb(const boost::system::error_code& ec,
 
 void IpmbSensor::read()
 {
-    waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
+    if (!isValueInitialized && initCount < maxInitialRetry)
+    {
+        waitTimer.expires_after(std::chrono::milliseconds(
+            static_cast<int>(pollRateDefault * 1000)));
+        initCount++;
+    }
+    else
+    {
+        waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
+    }
     waitTimer.async_wait(
         [weakRef{weak_from_this()}](const boost::system::error_code& ec) {
             if (ec == boost::asio::error::operation_aborted)

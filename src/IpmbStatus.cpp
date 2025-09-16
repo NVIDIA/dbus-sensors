@@ -160,14 +160,11 @@ bool IpmbSensor::processReading(const std::vector<uint8_t>& data,
 
 void IpmbSensor::read()
 {
-    if (!isValueInitialized)
+    if (!isValueInitialized && initCount < maxInitialRetry)
     {
-        if (initCount < maxInitialRetry)
-        {
-            waitTimer.expires_after(std::chrono::milliseconds(
-                static_cast<int>(pollRateDefault * 1000)));
-            initCount++;
-        }
+        waitTimer.expires_after(std::chrono::milliseconds(
+            static_cast<int>(pollRateDefault * 1000)));
+        initCount++;
     }
     else
     {
