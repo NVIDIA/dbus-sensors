@@ -13,7 +13,7 @@ BusName=xyz.openbmc_project.MCTPHeartBeat
 
 Restart=always
 RestartSec=5
-ExecStart=/usr/bin/mctpheartbeat
+ExecStart=/usr/bin/mctpheartbeat -e $MCTP_HEARTBEAT_EID
 
 [Install]
 WantedBy=multi-user.target

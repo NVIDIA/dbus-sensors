@@ -19,6 +19,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <CLI/CLI.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus/match.hpp>
@@ -734,12 +735,22 @@ static void checkExistingEndpoint(
         mctpdEndpointControlInterface, "EID");
 }
 
-int main()
+int main(int argc, char* argv[])
 {
+    CLI::App app{"MCTP Heartbeat Application"};
+    app.set_help_flag("-h,--help", "Example: mctpheartbeat -e 10");
+
+    uint8_t eid = 0;
+    app.add_option("-e,--eid", eid,
+                   "MCTP Endpoint ID to monitor, must be greater than 7")
+        ->required()
+        ->check(CLI::Range(8, 255));
+
+    CLI11_PARSE(app, argc, argv);
+
     try
     {
-        // Single EID configuration
-        uint8_t eid = 10; // Example target SPI HMC EROT
+        lg2::info("Starting MCTP Heartbeat App with EID: {EID}", "EID", eid);
         // Use global io_context instead of local
         auto systemBus = std::make_shared<sdbusplus::asio::connection>(gIo);
         using namespace sdbusplus::bus::match;
