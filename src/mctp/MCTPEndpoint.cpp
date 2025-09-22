@@ -617,6 +617,8 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
     auto mAddress = iface.find("Address");
     auto mBus = iface.find("Bus");
     auto mName = iface.find("Name");
+    auto mStaticEndpointID = iface.find("StaticEndpointID");
+    auto mbridgePoolStartEid = iface.find("BridgePoolStartEid");
     if (mAddress == iface.end() || mBus == iface.end() || mName == iface.end())
     {
         throw std::invalid_argument(
@@ -639,8 +641,62 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
         throw std::invalid_argument("Bad bus index");
     }
 
+    std::optional<std::uint8_t> staticEID{};
+    if (mStaticEndpointID == iface.end())
+    {
+        info(
+            "Info: Key 'StaticEndpointID' is not provided; skipping related processing.");
+    }
+    else
+    {
+        auto sStaticEndpointID = std::visit(VariantToStringVisitor(),
+                                            mStaticEndpointID->second);
+        std::uint8_t parsedEID{};
+        auto [cptr, cec] = std::from_chars(
+            sStaticEndpointID.data(),
+            sStaticEndpointID.data() + sStaticEndpointID.size(), parsedEID);
+        if (cec != std::errc{})
+        {
+            throw std::invalid_argument("Bad endpoint address");
+        }
+        staticEID = parsedEID;
+    }
+
+    std::optional<std::uint8_t> bridgePoolStartEid{};
+    if (mbridgePoolStartEid == iface.end())
+    {
+        info(
+            "Info: Key 'BridgePoolStartEid' is not provided; skipping related processing.");
+    }
+    else
+    {
+        auto sbridgePoolStartEid = std::visit(VariantToStringVisitor(),
+                                              mbridgePoolStartEid->second);
+        std::uint8_t parsedbridgePoolStartEid{};
+        auto [dptr, dec] = std::from_chars(sbridgePoolStartEid.data(),
+                                           sbridgePoolStartEid.data() +
+                                               sbridgePoolStartEid.size(),
+                                           parsedbridgePoolStartEid);
+        if (dec != std::errc{})
+        {
+            throw std::invalid_argument("Bad BridgePool Start address");
+        }
+        bridgePoolStartEid = parsedbridgePoolStartEid;
+    }
+
     try
     {
+        if (staticEID.has_value() && bridgePoolStartEid.has_value())
+        {
+            return std::make_shared<I3CMCTPDDevice>(connection, bus, address,
+                                                    staticEID.value(),
+                                                    bridgePoolStartEid.value());
+        }
+        if (staticEID.has_value())
+        {
+            return std::make_shared<I3CMCTPDDevice>(connection, bus, address,
+                                                    staticEID.value());
+        }
         return std::make_shared<I3CMCTPDDevice>(connection, bus, address);
     }
     catch (const MCTPException& ex)
