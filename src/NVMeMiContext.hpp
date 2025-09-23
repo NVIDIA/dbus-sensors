@@ -21,9 +21,10 @@
 #include <FileHandle.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
-#include <boost/asio/read.hpp>
-#include <boost/asio/streambuf.hpp>
-#include <boost/asio/write.hpp>
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 
 class NVMeMiContext :
     public NVMeContext,

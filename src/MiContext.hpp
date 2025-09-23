@@ -21,9 +21,13 @@
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/container/flat_map.hpp>
 
+#include <cstdint>
+#include <list>
 #include <memory>
-#include <stdexcept>
+#include <optional>
+#include <string>
 #include <variant>
 
 using SensorVariant = std::variant<std::shared_ptr<NVMeSensor>,

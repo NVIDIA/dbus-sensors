@@ -22,25 +22,33 @@
 #include "NVMeMiStatusSensor.hpp"
 
 #include <endian.h>
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
 #include <nvme/types.h>
 
+#ifdef __cplusplus
+}
+#endif
+
+#include <boost/asio/read.hpp>
+#include <boost/asio/write.hpp>
+
 // NVMe-MI NSS (NVM Subsystem Status) constants
-constexpr uint8_t NVME_MI_NSS_DRIVE_FAULT = (1 << 5); // Drive Fault Status
+constexpr uint8_t nvmeMiNssDriveFault = (1 << 5); // Drive Fault Status
 
 // NVMe-MI CTEMP (Composite Temperature) constants
-constexpr uint8_t NVME_MI_CTEMP_NO_DATA =
-    0x80; // No temperature data or >5s old
-constexpr uint8_t NVME_MI_CTEMP_SENSOR_FAIL =
-    0x81; // Temperature sensor failure
-constexpr uint8_t NVME_MI_CTEMP_MAX_TEMP = 0x7F; // 127°C or higher
-constexpr uint8_t NVME_MI_CTEMP_MIN_TEMP = 0xC4; // -60°C or lower
-constexpr uint8_t NVME_MI_CTEMP_TWOS_COMP_START =
+constexpr uint8_t nvmeMiCtempNoData = 0x80; // No temperature data or >5s old
+constexpr uint8_t nvmeMiCtempSensorFail = 0x81; // Temperature sensor failure
+constexpr uint8_t nvmeMiCtempMaxTemp = 0x7F;    // 127°C or higher
+constexpr uint8_t nvmeMiCtempMinTemp = 0xC4;    // -60°C or lower
+constexpr uint8_t nvmeMiCtempTwosCompStart =
     0xC5; // Start of two's complement range
 
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/error.hpp>
-#include <boost/asio/impl/read.hpp>
-#include <boost/asio/impl/write.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/streambuf.hpp>
@@ -166,8 +174,8 @@ void NVMeMiContext::sendNVMeMICommand()
     std::array<uint8_t, 4> cmdArray{};
     // Use NVM Subsystem Health Status Polling instead of log page
     // This is the proper NVMe-MI command for health status
-    constexpr uint8_t NVME_MI_CMD_HEALTH_STATUS_POLL = 0x01;
-    cmdArray[0] = NVME_MI_CMD_HEALTH_STATUS_POLL;
+    constexpr uint8_t nvmeMiCmdHealthStatusPoll = 0x01;
+    cmdArray[0] = nvmeMiCmdHealthStatusPoll;
     cmdArray[1] = 0; // nsid
 
     /* Issue the request */
@@ -266,25 +274,25 @@ static double
     uint8_t ctemp = healthLog->ctemp;
 
     // Handle special temperature values according to NVMe specification
-    if (ctemp == NVME_MI_CTEMP_NO_DATA)
+    if (ctemp == nvmeMiCtempNoData)
     {
         // 80h: No temperature data or temperature data is more than 5s old
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    if (ctemp == NVME_MI_CTEMP_SENSOR_FAIL)
+    if (ctemp == nvmeMiCtempSensorFail)
     {
         // 81h: Temperature sensor failure
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    if (ctemp == NVME_MI_CTEMP_MAX_TEMP)
+    if (ctemp == nvmeMiCtempMaxTemp)
     {
         // 7Fh: 127°C or higher
         return 127.0;
     }
 
-    if (ctemp == NVME_MI_CTEMP_MIN_TEMP)
+    if (ctemp == nvmeMiCtempMinTemp)
     {
         // C4h: -60°C or lower
         return -60.0;
@@ -296,13 +304,13 @@ static double
         return static_cast<double>(ctemp);
     }
 
-    if (ctemp >= NVME_MI_CTEMP_TWOS_COMP_START)
+    if (ctemp >= nvmeMiCtempTwosCompStart)
     {
         // C5h to FFh: Temperature measured in degrees Celsius is represented in
         // two's complement Convert from two's complement 8-bit to signed
         // integer
-        int8_t temp_signed = static_cast<int8_t>(ctemp);
-        return static_cast<double>(temp_signed);
+        int8_t tempSigned = static_cast<int8_t>(ctemp);
+        return static_cast<double>(tempSigned);
     }
 
     // Reserved values (82h to C3h) - return NaN
@@ -364,7 +372,7 @@ void NVMeMiContext::processResponse(void* msg, size_t len)
 
                 // Check for drive fault from bit 5 of NVM Subsystem Status
                 // (nss)
-                if (healthLog->nss & NVME_MI_NSS_DRIVE_FAULT)
+                if (healthLog->nss & nvmeMiNssDriveFault)
                 {
                     fault = true;
                     functional = false;

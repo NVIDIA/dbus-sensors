@@ -16,15 +16,26 @@
  */
 #pragma once
 
-#include "MiContext.hpp"
 #include "NVMeMiContext.hpp"
 
-#include <libnvme-mi.h>
+#include <nvme/tree.h>
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+#include <nvme/mi.h>
+
+#ifdef __cplusplus
+}
+#endif
+#include <unistd.h>
 
 #include <FileHandle.hpp>
 #include <boost/asio/io_context.hpp>
-#include <boost/asio/posix/stream_descriptor.hpp>
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>

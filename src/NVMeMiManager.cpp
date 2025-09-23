@@ -20,12 +20,20 @@
 #include "NVMeMiContext.hpp"
 
 #include <endian.h>
+#include <nvme/tree.h>
+#include <sys/poll.h>
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
 #include <nvme/log.h>
 #include <nvme/mi.h>
-#include <nvme/tree.h>
 #include <nvme/types.h>
-#include <sys/poll.h>
-#include <sys/types.h>
+
+#ifdef __cplusplus
+}
+#endif
 #include <unistd.h>
 
 #include <boost/asio/io_context.hpp>
@@ -237,9 +245,9 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
 
     int cmd = req[0];
 
-    constexpr uint8_t NVME_MI_CMD_HEALTH_STATUS_POLL = 0x01;
+    constexpr uint8_t nvmeMiCmdHealthStatusPoll = 0x01;
 
-    if (cmd == NVME_MI_CMD_HEALTH_STATUS_POLL) // Health Status Polling
+    if (cmd == nvmeMiCmdHealthStatusPoll) // Health Status Polling
     {
         resp.resize(sizeof(struct nvme_mi_nvm_ss_health_status));
         // Get controllers for this EID from the map
@@ -273,12 +281,11 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
 
         nvme_mi_ep_t ep = it->second->nvmeEp;
 
-        struct nvme_mi_nvm_ss_health_status* log =
-            static_cast<struct nvme_mi_nvm_ss_health_status*>(
-                static_cast<void*>(resp.data()));
+        struct nvme_mi_nvm_ss_health_status log{};
+        std::memcpy(&log, resp.data(), sizeof(log));
 
         // Use the proper NVMe-MI health status polling function
-        rc = nvme_mi_mi_subsystem_health_status_poll(ep, false, log);
+        rc = nvme_mi_mi_subsystem_health_status_poll(ep, false, &log);
 
         if (rc != 0)
         {

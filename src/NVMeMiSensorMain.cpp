@@ -24,7 +24,16 @@
 #include "Utils.hpp"
 #include "VariantVisitors.hpp"
 
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
 #include <nvme/mi.h>
+
+#ifdef __cplusplus
+}
+#endif
 
 #include <boost/asio/error.hpp>
 #include <boost/asio/io_context.hpp>
@@ -201,7 +210,7 @@ static EidPropertiesCreator handleEidProperties(
                     }
                 }
             }
-            onMctpFound(static_cast<uint8_t>(eid), net);
+            onMctpFound(eid, net);
         };
     };
 }
@@ -310,7 +319,7 @@ static void handleSensorConfigurations(
 
             // Extract poll rate from sensor configuration
             uint8_t pollRate = static_cast<uint8_t>(
-                getPollRate(sensorConfig, 1.0f)); // Default to 1 second
+                getPollRate(sensorConfig, 1.0F)); // Default to 1 second
 
             pendingSensors.emplace_back(interfacePath, *sensorName, eid,
                                         std::move(sensorThresholds), pollRate);
@@ -333,7 +342,7 @@ static void handleSensorConfigurations(
 
             // Extract poll rate from sensor configuration
             uint8_t pollRate = static_cast<uint8_t>(
-                getPollRate(sensorConfig, 1.0f)); // Default to 1 second
+                getPollRate(sensorConfig, 1.0F)); // Default to 1 second
 
             pendingSensors.emplace_back(interfacePath, *sensorName, eid,
                                         std::vector<thresholds::Threshold>{},
