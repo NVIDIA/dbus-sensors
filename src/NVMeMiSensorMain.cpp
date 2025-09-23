@@ -42,6 +42,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <climits>
 #include <cstdint>
 #include <functional>
 #include <iostream>
@@ -380,6 +381,19 @@ static void handleSensorConfigurations(
 
             try
             {
+                // Find minimum poll rate from all sensors for this EID
+                uint8_t minPollRate = UINT8_MAX;
+                for (const auto& sensorConfig : sensorConfigs)
+                {
+                    if (sensorConfig.pollRate < minPollRate)
+                    {
+                        minPollRate = sensorConfig.pollRate;
+                    }
+                }
+
+                // Configure context with minimum poll rate
+                nvmeContext->setPollRate(minPollRate);
+
                 // Create both temperature and status sensors for this EID
                 for (const auto& sensorConfig : sensorConfigs)
                 {
@@ -392,8 +406,7 @@ static void handleSensorConfigurations(
                             std::make_shared<NVMeSensor>(
                                 objectServer, io, dbusConnection,
                                 sensorConfig.sensorName, std::move(thresholds),
-                                sensorConfig.interfacePath, discoveredEid,
-                                sensorConfig.pollRate);
+                                sensorConfig.interfacePath, discoveredEid);
 
                         context->addSensor<NVMeSensor>(sensorPtr);
                     }
@@ -404,17 +417,17 @@ static void handleSensorConfigurations(
                             std::make_shared<NVMeStatusSensor>(
                                 objectServer, io, dbusConnection,
                                 sensorConfig.sensorName,
-                                sensorConfig.interfacePath, discoveredEid,
-                                sensorConfig.pollRate);
+                                sensorConfig.interfacePath, discoveredEid);
 
                         context->addSensor<NVMeStatusSensor>(statusSensorPtr);
                     }
                 }
 
                 lg2::debug(
-                    "polling nvme devices for eid: {EID} with {COUNT} sensors",
+                    "polling nvme devices for eid: {EID} with {COUNT} sensors poll rate: {RATE} seconds",
                     "EID", static_cast<int>(discoveredEid), "COUNT",
-                    sensorConfigs.size());
+                    sensorConfigs.size(), "RATE",
+                    static_cast<int>(minPollRate));
                 context->pollNVMeDevices();
             }
             catch (const std::invalid_argument& ex)

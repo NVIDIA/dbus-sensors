@@ -182,6 +182,6 @@ option(
 option(
     'nvme-mi',
     type: 'feature',
-    value: 'enabled',
+    value: 'disabled',
     description: 'Enable NVMe-MI sensor.',
 )

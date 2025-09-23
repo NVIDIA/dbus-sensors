@@ -50,8 +50,7 @@ class NVMeStatusSensor :
                      boost::asio::io_context& io,
                      std::shared_ptr<sdbusplus::asio::connection>& conn,
                      const std::string& sensorName,
-                     const std::string& sensorConfiguration, uint8_t eid,
-                     uint8_t pollRate);
+                     const std::string& sensorConfiguration, uint8_t eid);
     ~NVMeStatusSensor() override;
 
     NVMeStatusSensor& operator=(const NVMeStatusSensor& other) = delete;
@@ -68,5 +67,4 @@ class NVMeStatusSensor :
     unsigned int scanDelay{0};
     std::shared_ptr<sdbusplus::asio::dbus_interface> driveInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> association;
-    uint8_t pollRate;
 };

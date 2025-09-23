@@ -334,7 +334,7 @@ void NVMeMiContext::processResponse(void* msg, size_t len)
     // Process all sensors in this context
     for (auto& sensorVariant : sensors)
     {
-        std::visit([healthLog, this](auto& sensor) {
+        std::visit([healthLog](auto& sensor) {
             using SensorType = std::decay_t<decltype(sensor)>;
 
             if constexpr (std::is_same_v<SensorType,

@@ -44,14 +44,14 @@ NVMeStatusSensor::NVMeStatusSensor(
     boost::asio::io_context& /*unused*/,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     const std::string& sensorName, const std::string& sensorConfiguration,
-    const uint8_t eid, uint8_t pollRate) :
+    const uint8_t eid) :
     StatusInterface(
         static_cast<sdbusplus::bus::bus&>(*conn),
         ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))
             .c_str(),
         StatusInterface::action::defer_emit),
     eid(eid), name(sensorName), configurationPath(sensorConfiguration),
-    objServer(objectServer), pollRate(pollRate)
+    objServer(objectServer)
 {
     // Create drive interface
     driveInterface = objectServer.add_interface(
