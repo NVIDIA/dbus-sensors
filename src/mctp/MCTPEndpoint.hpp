@@ -8,6 +8,7 @@
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -283,19 +284,37 @@ class MCTPDDevice :
     void onDiscoveryNotify(sdbusplus::message_t& msg);
     void onDiscoveryMatchRule();
 
+    void setRequestSetupCallback(
+        std::function<void(const std::shared_ptr<MCTPDDevice>&)> callback)
+    {
+        requestSetupCallback = std::move(callback);
+    }
+
+  protected:
+    /**
+     * @brief Virtual hook called after endpoint is successfully established.
+     *        Derived classes can override to add transport-specific behavior.
+     */
+    virtual void onEndpointEstablished() {}
+
+    std::shared_ptr<sdbusplus::asio::connection> connection;
+    const std::string interface;
+    const std::vector<uint8_t> physaddr;
+    std::shared_ptr<MCTPDEndpoint> endpoint;
+
+    // Callback to request setup through the reactor
+    std::function<void(const std::shared_ptr<MCTPDDevice>&)>
+        requestSetupCallback;
+
   private:
     static void
         onEndpointInterfacesRemoved(const std::weak_ptr<MCTPDDevice>& weak,
                                     const std::string& objpath,
                                     sdbusplus::message_t& msg);
 
-    std::shared_ptr<sdbusplus::asio::connection> connection;
-    const std::string interface;
-    const std::vector<uint8_t> physaddr;
     const std::optional<std::uint8_t> staticEID;
     const std::optional<std::uint8_t> bridgePoolStartEid;
     const std::optional<std::vector<uint8_t>> ignoreEids;
-    std::shared_ptr<MCTPDEndpoint> endpoint;
     std::unique_ptr<sdbusplus::bus::match_t> removeMatch;
     std::unique_ptr<sdbusplus::bus::match_t> discoveryNotifyMatch;
     bool discoveryNeeded = false;
@@ -364,10 +383,26 @@ class I3CMCTPDDevice : public MCTPDDevice
     {}
     ~I3CMCTPDDevice() override = default;
 
+  protected:
+    void onEndpointEstablished() override;
+
   private:
     static constexpr const char* configType = "MCTPI3CTarget";
+    // TODO: These should be configurable in Entity Manager
+    static constexpr std::chrono::seconds pollingInterval{5};
+    static constexpr int maxRetries = 3;
 
     static std::string interfaceFromBus(int bus);
+
+    std::unique_ptr<boost::asio::steady_timer> healthTimer;
+    int retryCount = 0;
+    bool inRecoveryMode = false;
+
+    // Health monitoring for I3C hotplug support
+    void startHealthMonitoring();
+    void stopHealthMonitoring();
+    void performHealthCheck();
+    void recover();
 };
 
 class USBMCTPDDevice : public MCTPDDevice

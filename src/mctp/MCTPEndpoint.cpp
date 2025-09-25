@@ -207,6 +207,10 @@ void MCTPDDevice::finaliseEndpoint(
                         weak_from_this(), objpath));
     endpoint = std::make_shared<MCTPDEndpoint>(shared_from_this(), connection,
                                                objpath, network, eid);
+
+    // Call virtual hook for transport-specific initialization
+    onEndpointEstablished();
+
     added({}, endpoint);
 }
 
@@ -748,6 +752,141 @@ std::string I3CMCTPDDevice::interfaceFromBus(int bus)
     error("No matching net device found for I3C bus {I3C_BUS} at {NET_DEVICE}",
           "I3C_BUS", bus, "NET_DEVICE", netdir);
     throw MCTPException("No matching net device found for the specified bus");
+}
+
+void I3CMCTPDDevice::onEndpointEstablished()
+{
+    inRecoveryMode = false;
+    retryCount = 0;
+    startHealthMonitoring();
+}
+
+void I3CMCTPDDevice::startHealthMonitoring()
+{
+    if (!healthTimer)
+    {
+        healthTimer = std::make_unique<boost::asio::steady_timer>(
+            connection->get_io_context());
+    }
+    healthTimer->expires_after(pollingInterval);
+    healthTimer->async_wait(
+        [weak = weak_from_this()](const boost::system::error_code& ec) {
+        if (ec == boost::asio::error::operation_aborted)
+        {
+            return;
+        }
+        if (auto self = std::static_pointer_cast<I3CMCTPDDevice>(weak.lock()))
+        {
+            self->performHealthCheck();
+        }
+    });
+}
+
+void I3CMCTPDDevice::stopHealthMonitoring()
+{
+    if (healthTimer)
+    {
+        healthTimer->cancel();
+    }
+}
+
+void I3CMCTPDDevice::performHealthCheck()
+{
+    /* Monitors I3C device health and handles hotplug.
+     * We use GetEndpointID as a health check - if the D-Bus call succeeds,
+     * the device is responding (regardless of completion codes).
+     * If it fails, device may be unplugged or unresponsive.
+     */
+
+    connection->async_method_call(
+        [weak = weak_from_this()](const boost::system::error_code& ec,
+                                  uint8_t eid, uint8_t, uint8_t) {
+        auto self = std::static_pointer_cast<I3CMCTPDDevice>(weak.lock());
+        if (!self)
+        {
+            return;
+        }
+
+        if (ec || eid == 0)
+        {
+            if (self->inRecoveryMode)
+            {
+                // Already in recovery, just keep trying setup
+                if (self->requestSetupCallback)
+                {
+                    self->requestSetupCallback(
+                        std::static_pointer_cast<MCTPDDevice>(self));
+                }
+            }
+            else
+            {
+                // Normal mode - check retry count
+                self->retryCount++;
+                error(
+                    "GetEndpointID failed on {INTERFACE} (retry {RETRY}/{MAX})",
+                    "INTERFACE", self->interface, "RETRY", self->retryCount,
+                    "MAX", maxRetries);
+                if (self->retryCount >= maxRetries)
+                {
+                    self->recover();
+                }
+            }
+        }
+        else
+        {
+            // D-Bus call succeeded - device is healthy
+            debug("I3C device on {INTERFACE} is healthy (EID={EID})",
+                  "INTERFACE", self->interface, "EID", static_cast<int>(eid));
+
+            self->inRecoveryMode = false;
+            self->retryCount = 0;
+        }
+
+        self->startHealthMonitoring();
+    },
+        mctpdBusName,
+        std::string(mctpdControlPath) + "/interfaces/" + interface,
+        mctpdControlInterface, "GetEndpointID", physaddr);
+}
+
+void I3CMCTPDDevice::recover()
+{
+    inRecoveryMode = true;
+    retryCount = 0;
+
+    if (endpoint)
+    {
+        info("Calling Recover on I3C endpoint {EID} on {INTERFACE}", "EID",
+             static_cast<int>(endpoint->eid()), "INTERFACE", interface);
+
+        std::string endpointPath = MCTPDEndpoint::path(endpoint);
+
+        connection->async_method_call(
+            [weak = weak_from_this()](const boost::system::error_code& ec) {
+            auto self = std::static_pointer_cast<I3CMCTPDDevice>(weak.lock());
+            if (!self)
+            {
+                return;
+            }
+
+            if (ec)
+            {
+                error("Failed to call Recover on endpoint: {ERROR}", "ERROR",
+                      ec.message());
+            }
+            else
+            {
+                info("Successfully called Recover on I3C endpoint");
+            }
+
+            self->startHealthMonitoring();
+        }, mctpdBusName, endpointPath, "au.com.codeconstruct.MCTP.Endpoint1",
+            "Recover");
+    }
+    else
+    {
+        startHealthMonitoring();
+    }
 }
 
 /* Changes for MCTPUSB */

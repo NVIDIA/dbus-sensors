@@ -144,6 +144,19 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
         return;
     }
 
+    // Set up the callback for devices to request setup through the reactor
+    if (auto mctpDevice = std::dynamic_pointer_cast<MCTPDDevice>(device))
+    {
+        mctpDevice->setRequestSetupCallback(
+            [weak = weak_from_this()](
+                const std::shared_ptr<MCTPDDevice>& requestingDevice) {
+            if (auto self = weak.lock())
+            {
+                self->setupEndpoint(requestingDevice);
+            }
+        });
+    }
+
     try
     {
         devices.add(path, device);
