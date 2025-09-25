@@ -282,9 +282,6 @@ class MCTPDDevice :
     std::string describe() const override;
     void onDiscoveryNotify(sdbusplus::message_t& msg);
     void onDiscoveryMatchRule();
-    void initPolling();
-    void setRequestSetupCallback(
-        std::function<void(std::shared_ptr<MCTPDDevice>)> callback);
 
   private:
     static void
@@ -305,12 +302,6 @@ class MCTPDDevice :
     std::optional<uint8_t> pendingEID;
     std::unique_ptr<boost::asio::steady_timer> discoveryCheckTimer;
     void performDiscovery();
-
-    std::unique_ptr<boost::asio::steady_timer> devicePollTimer;
-    void startDevicePolling();
-    void pollDevice();
-    bool pollingStarted{false};
-    std::function<void(std::shared_ptr<MCTPDDevice>)> requestSetupCallback;
 
     /**
      * @brief Actions to perform once endpoint setup has succeeded

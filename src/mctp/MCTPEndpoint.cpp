@@ -53,11 +53,7 @@ MCTPDDevice::MCTPDDevice(
     connection(connection), interface(interface), physaddr(physaddr),
     staticEID(staticEID), bridgePoolStartEid(bridgePoolStartEid),
     ignoreEids(ignoreEids)
-{
-    // Initialize device poll timer
-    devicePollTimer = std::make_unique<boost::asio::steady_timer>(
-        connection->get_io_context());
-}
+{}
 
 void MCTPDDevice::onDiscoveryMatchRule()
 {
@@ -212,9 +208,6 @@ void MCTPDDevice::finaliseEndpoint(
     endpoint = std::make_shared<MCTPDEndpoint>(shared_from_this(), connection,
                                                objpath, network, eid);
     added({}, endpoint);
-
-    // Start polling now that endpoint exists
-    initPolling();
 }
 
 void MCTPDDevice::setup(
@@ -279,23 +272,12 @@ void MCTPDDevice::endpointRemoved()
 
 void MCTPDDevice::remove()
 {
-    if (devicePollTimer)
-    {
-        devicePollTimer->cancel();
-    }
-
     if (endpoint)
     {
         debug("Removing endpoint @ [ {MCTP_ENDPOINT} ]", "MCTP_ENDPOINT",
               endpoint->describe());
         endpoint->remove();
     }
-}
-
-void MCTPDDevice::setRequestSetupCallback(
-    std::function<void(std::shared_ptr<MCTPDDevice>)> callback)
-{
-    requestSetupCallback = std::move(callback);
 }
 
 std::string MCTPDDevice::describe() const
@@ -312,89 +294,6 @@ std::string MCTPDDevice::describe() const
         description.append(std::format("{:02x} ]", *it));
     }
     return description;
-}
-
-void MCTPDDevice::initPolling()
-{
-    if (pollingStarted)
-    {
-        debug("Polling already started for interface {INTERFACE}", "INTERFACE",
-              interface);
-        return;
-    }
-
-    pollingStarted = true;
-    info("Starting device polling for interface {INTERFACE}", "INTERFACE",
-         interface);
-
-    pollDevice();
-}
-
-void MCTPDDevice::startDevicePolling()
-{
-    if (!devicePollTimer)
-    {
-        return;
-    }
-
-    using namespace std::chrono_literals;
-    devicePollTimer->expires_after(10s); // Poll every 10 seconds
-    devicePollTimer->async_wait(
-        [weakThis = weak_from_this()](const boost::system::error_code& ec) {
-        if (ec == boost::asio::error::operation_aborted)
-        {
-            return;
-        }
-        if (auto self = weakThis.lock())
-        {
-            self->pollDevice();
-        }
-    });
-}
-
-void MCTPDDevice::pollDevice()
-{
-    if (endpoint)
-    {
-        // Endpoint exists, check health with GetEndpointId
-        uint8_t eid = endpoint->eid();
-        debug("Polling device health for EID {EID} on interface {INTERFACE}",
-              "EID", static_cast<int>(eid), "INTERFACE", interface);
-        connection->async_method_call(
-            [weakThis = weak_from_this()](const boost::system::error_code& ec,
-                                          uint8_t, uint8_t, uint8_t) {
-            if (auto self = weakThis.lock())
-            {
-                if (ec && self->endpoint)
-                {
-                    // GetEID failed, trigger recovery
-                    self->connection->async_method_call(
-                        [](const boost::system::error_code&) {}, mctpdBusName,
-                        MCTPDEndpoint::path(self->endpoint),
-                        mctpdEndpointControlInterface, "Recover");
-                }
-                self->startDevicePolling();
-            }
-        },
-            mctpdBusName,
-            (std::string(mctpdControlPath) + "/interfaces/" + interface),
-            mctpdControlInterface, "GetEndpointId", eid);
-    }
-    else
-    {
-        debug("No endpoint found for device on interface {INTERFACE}.",
-              "INTERFACE", interface);
-
-        // Request MCTPReactor to setup the device
-        if (requestSetupCallback)
-        {
-            debug("Requesting reactor to setup device on interface {INTERFACE}",
-                  "INTERFACE", interface);
-            requestSetupCallback(shared_from_this());
-        }
-
-        startDevicePolling();
-    }
 }
 
 std::string MCTPDEndpoint::path(const std::shared_ptr<MCTPEndpoint>& ep)
@@ -787,24 +686,18 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
 
     try
     {
-        std::shared_ptr<I3CMCTPDDevice> device;
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
-            device = std::make_shared<I3CMCTPDDevice>(
-                connection, bus, address, staticEID.value(),
-                bridgePoolStartEid.value());
+            return std::make_shared<I3CMCTPDDevice>(connection, bus, address,
+                                                    staticEID.value(),
+                                                    bridgePoolStartEid.value());
         }
-        else if (staticEID.has_value())
+        if (staticEID.has_value())
         {
-            device = std::make_shared<I3CMCTPDDevice>(connection, bus, address,
-                                                      staticEID.value());
+            return std::make_shared<I3CMCTPDDevice>(connection, bus, address,
+                                                    staticEID.value());
         }
-        else
-        {
-            device = std::make_shared<I3CMCTPDDevice>(connection, bus, address);
-        }
-
-        return device;
+        return std::make_shared<I3CMCTPDDevice>(connection, bus, address);
     }
     catch (const MCTPException& ex)
     {
@@ -1130,19 +1023,12 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
 
     try
     {
-        std::shared_ptr<SPIMCTPDDevice> device;
         if (staticEID.has_value())
         {
-            device = std::make_shared<SPIMCTPDDevice>(
-                connection, bus, chipselect, staticEID.value());
+            return std::make_shared<SPIMCTPDDevice>(connection, bus, chipselect,
+                                                    staticEID.value());
         }
-        else
-        {
-            device = std::make_shared<SPIMCTPDDevice>(connection, bus,
-                                                      chipselect);
-        }
-
-        return device;
+        return std::make_shared<SPIMCTPDDevice>(connection, bus, chipselect);
     }
     catch (const MCTPException& ex)
     {

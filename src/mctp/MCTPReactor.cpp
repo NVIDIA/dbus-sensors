@@ -149,21 +149,6 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
         devices.add(path, device);
         debug("MCTP device inventory added at '{INVENTORY_PATH}'",
               "INVENTORY_PATH", path);
-
-        if (auto mctpDevice = std::dynamic_pointer_cast<MCTPDDevice>(device))
-        {
-            mctpDevice->setRequestSetupCallback(
-                [weak{weak_from_this()}](
-                    const std::shared_ptr<MCTPDDevice>& requestingDevice) {
-                auto self = weak.lock();
-                if (!self)
-                {
-                    return;
-                }
-                self->setupEndpoint(requestingDevice);
-            });
-        }
-
         setupEndpoint(device);
     }
     catch (const std::system_error& e)
@@ -191,20 +176,6 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
         unmanageMCTPDevice(path);
 
         devices.add(path, device);
-
-        if (auto mctpDevice = std::dynamic_pointer_cast<MCTPDDevice>(device))
-        {
-            mctpDevice->setRequestSetupCallback(
-                [weak{weak_from_this()}](
-                    const std::shared_ptr<MCTPDDevice>& requestingDevice) {
-                auto self = weak.lock();
-                if (!self)
-                {
-                    return;
-                }
-                self->setupEndpoint(requestingDevice);
-            });
-        }
 
         // Pray (this is the unsynchronised bit)
         deferSetup(device);
