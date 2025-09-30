@@ -106,11 +106,19 @@ void MCTPReactor::setupEndpoint(const std::shared_ptr<MCTPDevice>& dev)
 
         if (ec)
         {
-            error(
+            debug(
                 "Setup failed for MCTP device at [ {MCTP_DEVICE} ]: {ERROR_MESSAGE}",
                 "MCTP_DEVICE", dev->describe(), "ERROR_MESSAGE", ec.message());
 
             self->deferSetup(dev);
+            return;
+        }
+
+        if (!ep)
+        {
+            info(
+                "Ignoring already discovered endpoint for MCTP device at [ {MCTP_DEVICE} ]",
+                "MCTP_DEVICE", dev->describe());
             return;
         }
 

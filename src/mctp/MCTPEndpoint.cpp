@@ -154,7 +154,7 @@ static bool hasBridgeInterface(
     try
     {
         // Use Properties.GetAll to check if the bridge interface exists
-		// TODO: Use ObjectMapper here to avoid expense on GetAll
+        // TODO: Use ObjectMapper here to avoid expense on GetAll
         auto method = connection->new_method_call(
             mctpdBusName, endpointPath.c_str(),
             "org.freedesktop.DBus.Properties", "GetAll");
