@@ -80,6 +80,19 @@ static std::shared_ptr<MCTPDevice> deviceFromConfig(
     try
     {
         std::optional<SensorBaseConfigMap> iface;
+        iface = I2CMCTPDDevice::match(config);
+        if (iface)
+        {
+            info("Creating I2CMCTPDDevice");
+            return I2CMCTPDDevice::from(connection, *iface);
+        }
+
+        iface = I3CMCTPDDevice::match(config);
+        if (iface)
+        {
+            info("Creating I3CMCTPDDevice");
+            return I3CMCTPDDevice::from(connection, *iface);
+        }
 
         iface = USBMCTPDDevice::match(config);
         if (iface)
@@ -146,8 +159,8 @@ static void removeInventory(const std::shared_ptr<MCTPReactor>& reactor,
         msg.unpack<sdbusplus::message::object_path, std::set<std::string>>();
     try
     {
-        if (I2CMCTPDDevice::match(removed) || I3CMCTPDDevice::match(removed) || USBMCTPDDevice::match(removed) ||
-            SPIMCTPDDevice::match(removed))
+        if (I2CMCTPDDevice::match(removed) || I3CMCTPDDevice::match(removed) ||
+            USBMCTPDDevice::match(removed) || SPIMCTPDDevice::match(removed))
         {
             reactor->unmanageMCTPDevice(path.str);
         }

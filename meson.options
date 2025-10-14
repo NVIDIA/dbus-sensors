@@ -189,3 +189,9 @@ option(
     value: 'enabled',
     description: 'Enable Cable monitor.',
 )
+option(
+    'nvme-mi',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable NVMe-MI sensor.',
+)

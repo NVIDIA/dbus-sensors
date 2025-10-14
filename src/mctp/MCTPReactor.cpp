@@ -114,6 +114,14 @@ void MCTPReactor::setupEndpoint(const std::shared_ptr<MCTPDevice>& dev)
             return;
         }
 
+        if (!ep)
+        {
+            info(
+                "Ignoring already discovered endpoint for MCTP device at [ {MCTP_DEVICE} ]",
+                "MCTP_DEVICE", dev->describe());
+            return;
+        }
+
         try
         {
             self->trackEndpoint(ep);
@@ -147,8 +155,26 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
     try
     {
         devices.add(path, device);
-        debug("MCTP device inventory added at '{INVENTORY_PATH}'",
-              "INVENTORY_PATH", path);
+        info("MCTP device inventory added at '{INVENTORY_PATH}'",
+             "INVENTORY_PATH", path);
+        if (auto mctpDevice = std::dynamic_pointer_cast<MCTPDDevice>(device))
+        {
+            // There could be case where Discovery Notify is expected to do
+            // device discovery thus setup match rule before hand and setup
+            // callback for the same
+            mctpDevice->onDiscoveryMatchRule();
+            mctpDevice->setRequestSetupCallback(
+                [weak{weak_from_this()}](
+                    const std::shared_ptr<MCTPDDevice>& requestingDevice) {
+                auto self = weak.lock();
+                if (!self)
+                {
+                    return;
+                }
+                self->setupEndpoint(requestingDevice);
+            });
+        }
+
         setupEndpoint(device);
     }
     catch (const std::system_error& e)

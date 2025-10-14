@@ -287,6 +287,9 @@ void NVMeBasicContext::readAndProcessNVMeSensor()
 
     auto command = encodeBasicQuery(sensor->bus, sensor->address, 0x00);
 
+    // Create weak pointer to the sensor
+    std::weak_ptr<NVMeSensor> weakPtr = sensor;
+
     /* Issue the request */
     boost::asio::async_write(
         reqStream, boost::asio::buffer(command->data(), command->size()),
@@ -339,17 +342,33 @@ void NVMeBasicContext::readAndProcessNVMeSensor()
                 return len + 1 - n;
             }
 
-            response->prepare(len);
-            return len;
-        },
-        [weakSelf{weak_from_this()}, sensor, response](
+        response->prepare(len);
+        return len;
+    },
+        [weakSelf{weak_from_this()}, weakSensor{weakPtr}, response](
             const boost::system::error_code& ec, std::size_t length) mutable {
-            if (ec)
-            {
-                lg2::error("Got error reading basic query: '{ERROR_MESSAGE}'",
-                           "ERROR_MESSAGE", ec.message());
-                return;
-            }
+        // Check if this is a cancellation error (stream closed)
+        if (ec == boost::asio::error::operation_aborted)
+        {
+            std::cerr
+                << "NVMeBasicContext: Operation cancelled (stream closed)\n";
+            return;
+        }
+
+        // Safely lock the weak pointer to get the sensor
+        auto sensor = weakSensor.lock();
+        if (!sensor)
+        {
+            std::cerr
+                << "NVMeBasicContext: Sensor no longer exists, skipping response processing\n";
+            return;
+        }
+
+        if (ec)
+        {
+            std::cerr << "Got error reading basic query: " << ec << "\n";
+            return;
+        }
 
             if (length == 0)
             {
@@ -440,20 +459,4 @@ void NVMeBasicContext::processResponse(std::shared_ptr<NVMeSensor>& sensor,
     }
 
     sensor->updateValue(value);
-}
-
-void NVMeBasicContext::close()
-{
-    // Call the base class close method
-    NVMeContext::close();
-
-    // Close the stream descriptors to signal the thread to terminate
-    reqStream.close();
-    respStream.close();
-
-    // Wait for the thread to finish
-    if (thread.joinable())
-    {
-        thread.join();
-    }
 }

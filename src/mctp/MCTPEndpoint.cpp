@@ -36,10 +36,14 @@ PHOSPHOR_LOG2_USING;
 
 static constexpr const char* mctpdBusName = "au.com.codeconstruct.MCTP1";
 static constexpr const char* mctpdControlPath = "/au/com/codeconstruct/mctp1";
+static constexpr const char* mctpdEndpointPath =
+    "/au/com/codeconstruct/mctp1/networks/1/endpoints/";
 static constexpr const char* mctpdControlInterface =
     "au.com.codeconstruct.MCTP.BusOwner1";
 static constexpr const char* mctpdEndpointControlInterface =
     "au.com.codeconstruct.MCTP.Endpoint1";
+static constexpr const char* mctpdBridgeInterface =
+    "au.com.codeconstruct.MCTP.Bridge1";
 
 MCTPDDevice::MCTPDDevice(
     const std::shared_ptr<sdbusplus::asio::connection>& connection,
@@ -83,26 +87,37 @@ void MCTPDDevice::onDiscoveryMatchRule()
         connection->get_io_context());
 }
 
-void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& msg)
+void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& /*unused*/)
 {
-    uint32_t eid32 = 0;
-    msg.read(eid32);
-    uint8_t eid = static_cast<uint8_t>(eid32);
+    /* Discovery Notify could be broadcasted from unassigned or assigned
+     * EID endpoint
+     *
+     * To be consistant, we must fetch out configuration StaticEndpointID
+     * and PhyAddr for either of these cases rather relying on signal eid
+     * data from mctpd.
+     *
+     * This is feasible because DiscoveryNotify signal is now
+     * interface path specific.
+     * Prioritse to discover and setup undiscovered endpoint first.
+     */
+    if (!this->endpoint)
+    {
+        this->performDiscovery();
+        return;
+    }
 
     if (discoveryNeeded)
     {
-        info(
-            "Ignoring DiscoveryNotify for EID '{EID}' (already have a pending discovery).",
-            "EID", static_cast<int>(eid));
+        info("Ignoring DiscoveryNotify for {INTERFACE}", "INTERFACE",
+             this->interface);
         return;
     }
 
     discoveryNeeded = true;
-    pendingEID = eid;
 
     info(
-        "First DiscoveryNotify for EID '{EID}' on interface '{INTERFACE}' => scheduling discovery in ~5s.",
-        "EID", static_cast<int>(eid), "INTERFACE", this->interface);
+        "First DiscoveryNotify for {INTERFACE} => scheduling discovery in ~5s.",
+        "INTERFACE", this->interface);
     /* Broad logic: This  bumps up discovery notify handler timer for
     another 5s. This is done to ensure that a flood of discovery notifies do
     not cause us to repeatedly perform rediscovery. Upon a timer expiry, the
@@ -125,26 +140,76 @@ void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& msg)
             // Call performDiscovery(), then reset flags
             self->performDiscovery();
             self->discoveryNeeded = false;
-            self->pendingEID.reset();
         }
     });
 }
 
+static bool hasBridgeInterface(
+    const std::shared_ptr<sdbusplus::asio::connection>& connection,
+    const std::string& endpointPath)
+{
+    try
+    {
+        // Use Properties.GetAll to check if the bridge interface exists
+        // TODO: Use ObjectMapper here to avoid expense on GetAll
+        auto method = connection->new_method_call(
+            mctpdBusName, endpointPath.c_str(),
+            "org.freedesktop.DBus.Properties", "GetAll");
+        method.append(std::string(mctpdBridgeInterface));
+
+        auto reply = connection->call(method);
+        info("{BRIDGE_INTERFACE} exists on {ENDPOINT_PATH}", "BRIDGE_INTERFACE",
+             mctpdBridgeInterface, "ENDPOINT_PATH", endpointPath);
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        error("{BRIDGE_INTERFACE} not found on {ENDPOINT_PATH}: {ERROR}",
+              "BRIDGE_INTERFACE", mctpdBridgeInterface, "ENDPOINT_PATH",
+              endpointPath, "ERROR", e.what());
+        return false;
+    }
+}
+
 void MCTPDDevice::performDiscovery()
 {
-    if (!pendingEID.has_value())
+    /* Discovery Notify policy :
+     * - For direct endpoint, we need to perform device discovery
+     * - For bridge endpoint, we need to get the routing table.
+     *
+     * - If endpoint is not created, we need to create it first. So focus on
+     *   device discovery.
+     * - If endpoint is already created i.e discovery is not needed, check
+     *    - If it's a bridge endpoint, get the routing table
+     *    - If it's not a bridge endpoint, then we have case of reset.
+     *      - LearnEndpoint : expected that endpoint EID would reset post reset,
+     *        this should cause removal of endpoint and let MCTPReactor do
+     *        re-discovery
+     *      - if endpoint wasn't remove, only it's properties were updated, then
+     *        no need to do re-discovery. MCTPD will send fake connectivity
+     *        signal.
+     */
+    auto path = std::string(mctpdControlPath) + "/interfaces/" +
+                this->interface;
+    std::string dbusMethod = "LearnEndpoint";
+    uint8_t eid = 0;
+
+    if (this->endpoint)
     {
-        error("performDiscovery() called with no EID stored.");
-        return;
+        eid = this->endpoint->eid();
+        std::string endpointPath = mctpdEndpointPath + std::to_string(eid);
+        info(
+            "Discovery Notify received for {INTERFACE} of already discovered endpoint",
+            "INTERFACE", this->interface);
+        dbusMethod = hasBridgeInterface(connection, endpointPath)
+                         ? "GetRoutingTable"
+                         : "LearnEndpoint";
     }
 
-    uint8_t eid = pendingEID.value();
-
-    connection->async_method_call(
-        [weakSelf = weak_from_this(), eid](const boost::system::error_code& ec,
-                                           sdbusplus::message::message& reply) {
+    auto callback = [weakSelf = weak_from_this(),
+                     dbusMethod](const boost::system::error_code& ec,
+                                 sdbusplus::message_t& msg) {
         auto self = weakSelf.lock();
-        (void)reply;
         if (!self)
         {
             return;
@@ -152,18 +217,78 @@ void MCTPDDevice::performDiscovery()
 
         if (ec)
         {
-            error("Failed calling GetRoutingTable for EID '{EID}': {ERROR}",
-                  "EID", static_cast<int>(eid), "ERROR", ec.message());
+            error("Failed calling {METHOD} for {INTERFACE}: {ERROR}", "METHOD",
+                  dbusMethod, "INTERFACE", self->interface, "ERROR",
+                  ec.message());
         }
         else
         {
-            info("Successfully called GetRoutingTable for EID '{EID}'.", "EID",
-                 static_cast<int>(eid));
+            info("Successfully called {METHOD} for {INTERFACE}.", "METHOD",
+                 dbusMethod, "INTERFACE", self->interface);
+
+            if (dbusMethod == "LearnEndpoint")
+            {
+                auto [eid, network, objpath, allocated] =
+                    msg.unpack<uint8_t, int32_t, std::string, bool>();
+                info(
+                    "LearnEndpoint returned eid: {EID}, network: {NETWORK}, objpath: {OBJPATH}, allocated: {ALLOCATED}",
+                    "EID", eid, "NETWORK", network, "OBJPATH", objpath,
+                    "ALLOCATED", allocated);
+                if (eid == 0 && !allocated && objpath.empty())
+                {
+                    // Post reset, endpoint was removed.
+                    if (self->requestSetupCallback)
+                    {
+                        info("Requesting reactor to do setup for {INTERFACE}",
+                             "INTERFACE", self->interface);
+                        self->requestSetupCallback(self);
+                    }
+                }
+            }
         }
-    },
-        mctpdBusName,
-        (std::string(mctpdControlPath) + "/interfaces/" + this->interface),
-        mctpdControlInterface, "GetRoutingTable", eid);
+    };
+
+    if (dbusMethod == "GetRoutingTable")
+    {
+        info("Calling GetRoutingTable for {INTERFACE} with EID {EID}",
+             "INTERFACE", this->interface, "EID", eid);
+        this->connection->async_method_call(callback, mctpdBusName, path,
+                                            mctpdControlInterface, dbusMethod,
+                                            eid);
+    }
+    else
+    {
+        if (!this->requestSetupCallback)
+        {
+            warning("Failed to notify MCTPReactor to do setup for {INTERFACE}",
+                    "INTERFACE", this->interface);
+            return;
+        }
+
+        if (!this->endpoint)
+        {
+            info(
+                "Discovery Notify received for {INTERFACE} of undiscovered endpoint",
+                "INTERFACE", this->interface);
+            info("Requesting reactor to do setup for {INTERFACE}", "INTERFACE",
+                 this->interface);
+            this->requestSetupCallback(shared_from_this());
+        }
+        else
+        {
+            info(
+                "Discovery Notify received for {INTERFACE} of already discovered endpoint",
+                "INTERFACE", this->interface);
+            info("Calling LearnEndpoint for {INTERFACE} with EID {EID}",
+                 "INTERFACE", this->interface, "EID", eid);
+            auto path = std::string(mctpdControlPath) + "/interfaces/" +
+                        this->interface;
+            dbusMethod = "LearnEndpoint";
+            this->connection->async_method_call(callback, mctpdBusName, path,
+                                                mctpdControlInterface,
+                                                dbusMethod, this->physaddr);
+        }
+    }
 }
 
 void MCTPDDevice::onEndpointInterfacesRemoved(
@@ -204,6 +329,10 @@ void MCTPDDevice::finaliseEndpoint(
                         weak_from_this(), objpath));
     endpoint = std::make_shared<MCTPDEndpoint>(shared_from_this(), connection,
                                                objpath, network, eid);
+
+    // Call virtual hook for transport-specific initialization
+    onEndpointEstablished();
+
     added({}, endpoint);
 }
 
@@ -224,10 +353,15 @@ void MCTPDDevice::setup(
             return;
         }
 
+        if (!allocated)
+        {
+            added({}, {});
+            return;
+        }
+
         if (auto self = weak.lock())
         {
             self->finaliseEndpoint(objpath, eid, network, added);
-            self->onDiscoveryMatchRule();
         }
         else
         {
@@ -471,6 +605,17 @@ std::optional<SensorBaseConfigMap> I3CMCTPDDevice::match(
     return iface->second;
 }
 
+std::optional<SensorBaseConfigMap>
+    I3CMCTPDDevice::match(const SensorData& config)
+{
+    auto iface = config.find(configInterfaceName(configType));
+    if (iface == config.end())
+    {
+        return std::nullopt;
+    }
+    return iface->second;
+}
+
 bool I2CMCTPDDevice::match(const std::set<std::string>& interfaces)
 {
     return interfaces.contains(configInterfaceName(configType));
@@ -614,6 +759,8 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
     auto mAddress = iface.find("Address");
     auto mBus = iface.find("Bus");
     auto mName = iface.find("Name");
+    auto mStaticEndpointID = iface.find("StaticEndpointID");
+    auto mbridgePoolStartEid = iface.find("BridgePoolStartEid");
     if (mAddress == iface.end() || mBus == iface.end() || mName == iface.end())
     {
         throw std::invalid_argument(
@@ -636,8 +783,62 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
         throw std::invalid_argument("Bad bus index");
     }
 
+    std::optional<std::uint8_t> staticEID{};
+    if (mStaticEndpointID == iface.end())
+    {
+        info(
+            "Info: Key 'StaticEndpointID' is not provided; skipping related processing.");
+    }
+    else
+    {
+        auto sStaticEndpointID = std::visit(VariantToStringVisitor(),
+                                            mStaticEndpointID->second);
+        std::uint8_t parsedEID{};
+        auto [cptr, cec] = std::from_chars(
+            sStaticEndpointID.data(),
+            sStaticEndpointID.data() + sStaticEndpointID.size(), parsedEID);
+        if (cec != std::errc{})
+        {
+            throw std::invalid_argument("Bad endpoint address");
+        }
+        staticEID = parsedEID;
+    }
+
+    std::optional<std::uint8_t> bridgePoolStartEid{};
+    if (mbridgePoolStartEid == iface.end())
+    {
+        info(
+            "Info: Key 'BridgePoolStartEid' is not provided; skipping related processing.");
+    }
+    else
+    {
+        auto sbridgePoolStartEid = std::visit(VariantToStringVisitor(),
+                                              mbridgePoolStartEid->second);
+        std::uint8_t parsedbridgePoolStartEid{};
+        auto [dptr, dec] = std::from_chars(sbridgePoolStartEid.data(),
+                                           sbridgePoolStartEid.data() +
+                                               sbridgePoolStartEid.size(),
+                                           parsedbridgePoolStartEid);
+        if (dec != std::errc{})
+        {
+            throw std::invalid_argument("Bad BridgePool Start address");
+        }
+        bridgePoolStartEid = parsedbridgePoolStartEid;
+    }
+
     try
     {
+        if (staticEID.has_value() && bridgePoolStartEid.has_value())
+        {
+            return std::make_shared<I3CMCTPDDevice>(connection, bus, address,
+                                                    staticEID.value(),
+                                                    bridgePoolStartEid.value());
+        }
+        if (staticEID.has_value())
+        {
+            return std::make_shared<I3CMCTPDDevice>(connection, bus, address,
+                                                    staticEID.value());
+        }
         return std::make_shared<I3CMCTPDDevice>(connection, bus, address);
     }
     catch (const MCTPException& ex)
@@ -663,6 +864,167 @@ std::string I2CMCTPDDevice::interfaceFromBus(int bus)
     }
 
     return it->path().filename();
+}
+
+std::string I3CMCTPDDevice::interfaceFromBus(int bus)
+{
+    std::filesystem::path netdir = std::format("/sys/devices/virtual/net");
+    std::error_code ec;
+    std::filesystem::directory_iterator it(netdir, ec);
+    if (ec || it == std::filesystem::end(it))
+    {
+        error("No net device associated with I3C bus {I3C_BUS} at {NET_DEVICE}",
+              "I3C_BUS", bus, "NET_DEVICE", netdir);
+        throw MCTPException("Bus is not configured as an MCTP interface");
+    }
+
+    std::string targetInterface = std::format("mctpi3c{}", bus);
+    for (const auto& entry : std::filesystem::directory_iterator(netdir))
+    {
+        if (entry.is_directory() && entry.path().filename() == targetInterface)
+        {
+            return targetInterface;
+        }
+    }
+
+    error("No matching net device found for I3C bus {I3C_BUS} at {NET_DEVICE}",
+          "I3C_BUS", bus, "NET_DEVICE", netdir);
+    throw MCTPException("No matching net device found for the specified bus");
+}
+
+void I3CMCTPDDevice::onEndpointEstablished()
+{
+    inRecoveryMode = false;
+    retryCount = 0;
+    startHealthMonitoring();
+}
+
+void I3CMCTPDDevice::startHealthMonitoring()
+{
+    if (!healthTimer)
+    {
+        healthTimer = std::make_unique<boost::asio::steady_timer>(
+            connection->get_io_context());
+    }
+    healthTimer->expires_after(pollingInterval);
+    healthTimer->async_wait(
+        [weak = weak_from_this()](const boost::system::error_code& ec) {
+        if (ec == boost::asio::error::operation_aborted)
+        {
+            return;
+        }
+        if (auto self = std::static_pointer_cast<I3CMCTPDDevice>(weak.lock()))
+        {
+            self->performHealthCheck();
+        }
+    });
+}
+
+void I3CMCTPDDevice::stopHealthMonitoring()
+{
+    if (healthTimer)
+    {
+        healthTimer->cancel();
+    }
+}
+
+void I3CMCTPDDevice::performHealthCheck()
+{
+    /* Monitors I3C device health and handles hotplug.
+     * We use GetEndpointID as a health check - if the D-Bus call succeeds,
+     * the device is responding (regardless of completion codes).
+     * If it fails, device may be unplugged or unresponsive.
+     */
+
+    connection->async_method_call(
+        [weak = weak_from_this()](const boost::system::error_code& ec,
+                                  uint8_t eid, uint8_t, uint8_t) {
+        auto self = std::static_pointer_cast<I3CMCTPDDevice>(weak.lock());
+        if (!self)
+        {
+            return;
+        }
+
+        if (ec || eid == 0)
+        {
+            if (self->inRecoveryMode)
+            {
+                // Already in recovery, just keep trying setup
+                if (self->requestSetupCallback)
+                {
+                    self->requestSetupCallback(
+                        std::static_pointer_cast<MCTPDDevice>(self));
+                }
+            }
+            else
+            {
+                // Normal mode - check retry count
+                self->retryCount++;
+                error(
+                    "GetEndpointID failed on {INTERFACE} (retry {RETRY}/{MAX})",
+                    "INTERFACE", self->interface, "RETRY", self->retryCount,
+                    "MAX", maxRetries);
+                if (self->retryCount >= maxRetries)
+                {
+                    self->recover();
+                }
+            }
+        }
+        else
+        {
+            // D-Bus call succeeded - device is healthy
+            debug("I3C device on {INTERFACE} is healthy (EID={EID})",
+                  "INTERFACE", self->interface, "EID", static_cast<int>(eid));
+
+            self->inRecoveryMode = false;
+            self->retryCount = 0;
+        }
+
+        self->startHealthMonitoring();
+    },
+        mctpdBusName,
+        std::string(mctpdControlPath) + "/interfaces/" + interface,
+        mctpdControlInterface, "GetEndpointID", physaddr);
+}
+
+void I3CMCTPDDevice::recover()
+{
+    inRecoveryMode = true;
+    retryCount = 0;
+
+    if (endpoint)
+    {
+        info("Calling Recover on I3C endpoint {EID} on {INTERFACE}", "EID",
+             static_cast<int>(endpoint->eid()), "INTERFACE", interface);
+
+        std::string endpointPath = MCTPDEndpoint::path(endpoint);
+
+        connection->async_method_call(
+            [weak = weak_from_this()](const boost::system::error_code& ec) {
+            auto self = std::static_pointer_cast<I3CMCTPDDevice>(weak.lock());
+            if (!self)
+            {
+                return;
+            }
+
+            if (ec)
+            {
+                error("Failed to call Recover on endpoint: {ERROR}", "ERROR",
+                      ec.message());
+            }
+            else
+            {
+                info("Successfully called Recover on I3C endpoint");
+            }
+
+            self->startHealthMonitoring();
+        }, mctpdBusName, endpointPath, "au.com.codeconstruct.MCTP.Endpoint1",
+            "Recover");
+    }
+    else
+    {
+        startHealthMonitoring();
+    }
 }
 
 /* Changes for MCTPUSB */
