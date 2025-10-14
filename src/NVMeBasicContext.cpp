@@ -99,6 +99,15 @@ static void execBasicQuery(int bus, uint8_t addr, uint8_t cmd,
             return;
         }
 
+        /* Enable PEC (Packet Error Checking) */
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+        if (::ioctl(fileHandle.handle(), I2C_PEC, 1) < 0)
+        {
+            std::cerr << "Failed to enable PEC for device 0x" << std::hex
+                      << (int)addr << " on bus " << std::dec << bus << ": "
+                      << strerror(errno) << "\n";
+        }
+
         resp.resize(UINT8_MAX + 1);
 
         /* Issue the NVMe MI basic command */
