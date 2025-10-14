@@ -75,8 +75,8 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
     // Add association of the inventory object to the chassis.  This is required
     // for other applications such as bmcweb to determine which chassis this
     // particular Leak Detector belongs to.
-    inventoryAssociation = objectServer.add_interface(inventoryObjPath,
-                                                      association::interface);
+    inventoryAssociation =
+        objectServer.add_interface(inventoryObjPath, association::interface);
     std::vector<Association> inventoryAssociations;
     inventoryAssociations.emplace_back(
         "chassis", "contained_by",
@@ -109,8 +109,8 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
     // Add association of the state object to the invetory object that describes
     // the leak detector.  Other application such as bmcweb may use this to
     // determine which leak detector the state is describing.
-    stateAssociation = objectServer.add_interface(stateObjPath,
-                                                  association::interface);
+    stateAssociation =
+        objectServer.add_interface(stateObjPath, association::interface);
     std::vector<Association> stateAssociations;
     stateAssociations.emplace_back("inventory", "leak_detecting",
                                    inventoryObjPath);
@@ -167,8 +167,8 @@ int DiscreteLeakDetectSensor::getLeakInfo()
     return 0;
 }
 
-std::string
-    DiscreteLeakDetectSensor::getLeakLevelStatusName(LeakLevel leaklevel)
+std::string DiscreteLeakDetectSensor::getLeakLevelStatusName(
+    LeakLevel leaklevel)
 {
     switch (leaklevel)
     {

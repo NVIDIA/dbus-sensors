@@ -44,13 +44,12 @@ const static constexpr size_t nvmeStatusCmd = 0x00;
 const static constexpr size_t nvmeDriveFaultMask = 0x20;
 const static constexpr size_t nvmeDriveFailureStatus = 0x00;
 
-NVMeMIStatus::NVMeMIStatus(sdbusplus::asio::object_server& objectServer,
-                           std::shared_ptr<sdbusplus::asio::connection>& conn,
-                           boost::asio::io_context& io,
-                           const std::string& sensorName,
-                           const std::string& sensorConfiguration,
-                           unsigned int pollRate, uint8_t busId,
-                           uint8_t nvmeAddress) :
+NVMeMIStatus::NVMeMIStatus(
+    sdbusplus::asio::object_server& objectServer,
+    std::shared_ptr<sdbusplus::asio::connection>& conn,
+    boost::asio::io_context& io, const std::string& sensorName,
+    const std::string& sensorConfiguration, unsigned int pollRate,
+    uint8_t busId, uint8_t nvmeAddress) :
     StatusInterface(
         static_cast<sdbusplus::bus::bus&>(*conn),
         ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))

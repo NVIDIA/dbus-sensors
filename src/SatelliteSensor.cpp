@@ -89,8 +89,8 @@ SatelliteSensor::SatelliteSensor(
     }
     std::string sensorPath = sensorRootPath + sensorType + "/";
 
-    sensorInterface = objectServer.add_interface(sensorPath + name,
-                                                 sensorValueInterface);
+    sensorInterface =
+        objectServer.add_interface(sensorPath + name, sensorValueInterface);
 
     for (const auto& threshold : thresholds)
     {
@@ -98,8 +98,8 @@ SatelliteSensor::SatelliteSensor(
         thresholdInterfaces[static_cast<size_t>(threshold.level)] =
             objectServer.add_interface(sensorPath + name, interface);
     }
-    association = objectServer.add_interface(sensorPath + name,
-                                             association::interface);
+    association =
+        objectServer.add_interface(sensorPath + name, association::interface);
 
     if (sensorType == "temperature")
     {
@@ -387,87 +387,92 @@ void createSensors(
     dbusConnection->async_method_call(
         [&io, &objectServer, &dbusConnection, &sensors](
             boost::system::error_code ec, const ManagedObjectType& resp) {
-        if (ec)
-        {
-            lg2::error("Error contacting entity manager");
-            return;
-        }
-        for (const auto& pathPair : resp)
-        {
-            for (const auto& entry : pathPair.second)
+            if (ec)
             {
-                if (entry.first != configInterface)
-                {
-                    continue;
-                }
-                std::string name = loadVariant<std::string>(entry.second,
-                                                            "Name");
-
-                std::vector<thresholds::Threshold> sensorThresholds;
-                if (!parseThresholdsFromConfig(pathPair.second,
-                                               sensorThresholds))
-                {
-                    lg2::error("error populating thresholds for {NAME}", "NAME",
-                               name);
-                }
-
-                uint8_t busId = loadVariant<uint8_t>(entry.second, "Bus");
-
-                uint8_t addr = loadVariant<uint8_t>(entry.second, "Address");
-
-                uint16_t off = loadVariant<uint16_t>(entry.second,
-                                                     "OffsetValue");
-
-                std::string sensorType = loadVariant<std::string>(entry.second,
-                                                                  "SensorType");
-
-                std::string valueType = loadVariant<std::string>(entry.second,
-                                                                 "ValueType");
-
-                size_t rate = loadVariant<uint8_t>(entry.second, "PollRate");
-
-                std::string powerSate = loadVariant<std::string>(entry.second,
-                                                                 "PowerState");
-
-                PowerState pwrState = PowerState::always;
-                setReadState(powerSate, pwrState);
-
-                double minVal = loadVariant<double>(entry.second, "MinValue");
-
-                double maxVal = loadVariant<double>(entry.second, "MaxValue");
-                if constexpr (debug)
-                {
-                    lg2::info("Configuration parsed for \n\t {CONF}\nwith\n"
-                              "\tName: {NAME}\n"
-                              "\tBus: {BUS}\n"
-                              "\tAddress:{ADDR}\n"
-                              "\tPowerState:{PWRSTATE}\n"
-                              "\tOffset: {OFF}\n"
-                              "\tType : {TYPE}\n"
-                              "\tValue Type : {VALUETYPE}\n"
-                              "\tPollrate: {RATE}\n"
-                              "\tMinValue: {MIN}\n"
-                              "\tMaxValue: {MAX}\n",
-                              "CONF", entry.first, "NAME", name, "BUS",
-                              static_cast<int>(busId), "ADDR",
-                              static_cast<int>(addr), "PWRSTATE", powerSate,
-                              "OFF", static_cast<int>(off), "TYPE", sensorType,
-                              "VALUETYPE", valueType, "RATE", rate, "MIN",
-                              minVal, "MAX", maxVal);
-                }
-
-                auto& sensor = sensors[name];
-                sensor = nullptr;
-
-                sensor = std::make_unique<SatelliteSensor>(
-                    dbusConnection, io, name, pathPair.first, objectType,
-                    objectServer, std::move(sensorThresholds), busId, addr, off,
-                    sensorType, valueType, rate, minVal, maxVal, pwrState);
-
-                sensor->init();
+                lg2::error("Error contacting entity manager");
+                return;
             }
-        }
-    },
+            for (const auto& pathPair : resp)
+            {
+                for (const auto& entry : pathPair.second)
+                {
+                    if (entry.first != configInterface)
+                    {
+                        continue;
+                    }
+                    std::string name =
+                        loadVariant<std::string>(entry.second, "Name");
+
+                    std::vector<thresholds::Threshold> sensorThresholds;
+                    if (!parseThresholdsFromConfig(pathPair.second,
+                                                   sensorThresholds))
+                    {
+                        lg2::error("error populating thresholds for {NAME}",
+                                   "NAME", name);
+                    }
+
+                    uint8_t busId = loadVariant<uint8_t>(entry.second, "Bus");
+
+                    uint8_t addr =
+                        loadVariant<uint8_t>(entry.second, "Address");
+
+                    uint16_t off =
+                        loadVariant<uint16_t>(entry.second, "OffsetValue");
+
+                    std::string sensorType =
+                        loadVariant<std::string>(entry.second, "SensorType");
+
+                    std::string valueType =
+                        loadVariant<std::string>(entry.second, "ValueType");
+
+                    size_t rate =
+                        loadVariant<uint8_t>(entry.second, "PollRate");
+
+                    std::string powerSate =
+                        loadVariant<std::string>(entry.second, "PowerState");
+
+                    PowerState pwrState = PowerState::always;
+                    setReadState(powerSate, pwrState);
+
+                    double minVal =
+                        loadVariant<double>(entry.second, "MinValue");
+
+                    double maxVal =
+                        loadVariant<double>(entry.second, "MaxValue");
+                    if constexpr (debug)
+                    {
+                        lg2::info("Configuration parsed for \n\t {CONF}\nwith\n"
+                                  "\tName: {NAME}\n"
+                                  "\tBus: {BUS}\n"
+                                  "\tAddress:{ADDR}\n"
+                                  "\tPowerState:{PWRSTATE}\n"
+                                  "\tOffset: {OFF}\n"
+                                  "\tType : {TYPE}\n"
+                                  "\tValue Type : {VALUETYPE}\n"
+                                  "\tPollrate: {RATE}\n"
+                                  "\tMinValue: {MIN}\n"
+                                  "\tMaxValue: {MAX}\n",
+                                  "CONF", entry.first, "NAME", name, "BUS",
+                                  static_cast<int>(busId), "ADDR",
+                                  static_cast<int>(addr), "PWRSTATE", powerSate,
+                                  "OFF", static_cast<int>(off), "TYPE",
+                                  sensorType, "VALUETYPE", valueType, "RATE",
+                                  rate, "MIN", minVal, "MAX", maxVal);
+                    }
+
+                    auto& sensor = sensors[name];
+                    sensor = nullptr;
+
+                    sensor = std::make_unique<SatelliteSensor>(
+                        dbusConnection, io, name, pathPair.first, objectType,
+                        objectServer, std::move(sensorThresholds), busId, addr,
+                        off, sensorType, valueType, rate, minVal, maxVal,
+                        pwrState);
+
+                    sensor->init();
+                }
+            }
+        },
         entityManagerName, "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 }
@@ -504,8 +509,9 @@ int main()
     objectServer.add_manager("/xyz/openbmc_project/sensors");
     systemBus->request_name("xyz.openbmc_project.Satellite");
 
-    boost::asio::post(
-        io, [&]() { createSensors(io, objectServer, sensors, systemBus); });
+    boost::asio::post(io, [&]() {
+        createSensors(io, objectServer, sensors, systemBus);
+    });
 
     boost::asio::steady_timer configTimer(io);
 
@@ -516,26 +522,26 @@ int main()
 
     std::function<void(sdbusplus::message::message&)> eventHandler =
         [&](sdbusplus::message::message&) {
-        configTimer.expires_after(std::chrono::seconds(1));
-        // create a timer because normally multiple properties change
-        configTimer.async_wait([&](const boost::system::error_code& ec) {
-            if (ec == boost::asio::error::operation_aborted)
-            {
-                return; // we're being canceled
-            }
-            // config timer error
-            if (ec)
-            {
-                lg2::error("timer error");
-                return;
-            }
-            createSensors(io, objectServer, sensors, systemBus);
-            if (sensors.empty())
-            {
-                lg2::info("Configuration not detected");
-            }
-        });
-    };
+            configTimer.expires_after(std::chrono::seconds(1));
+            // create a timer because normally multiple properties change
+            configTimer.async_wait([&](const boost::system::error_code& ec) {
+                if (ec == boost::asio::error::operation_aborted)
+                {
+                    return; // we're being canceled
+                }
+                // config timer error
+                if (ec)
+                {
+                    lg2::error("timer error");
+                    return;
+                }
+                createSensors(io, objectServer, sensors, systemBus);
+                if (sensors.empty())
+                {
+                    lg2::info("Configuration not detected");
+                }
+            });
+        };
 
     sdbusplus::bus::match::match configMatch(
         static_cast<sdbusplus::bus::bus&>(*systemBus),

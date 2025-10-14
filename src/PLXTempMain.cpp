@@ -44,123 +44,124 @@ void createSensors(
         dbusConnection,
         [&io, &objectServer, &sensors, &dbusConnection,
          sensorsChanged](const ManagedObjectType& sensorConfigurations) {
-        bool firstScan = sensorsChanged == nullptr;
+            bool firstScan = sensorsChanged == nullptr;
 
-        const SensorData* sensorData = nullptr;
-        const std::string* interfacePath = nullptr;
-        const char* sensorType = nullptr;
-        const SensorBaseConfiguration* baseConfiguration = nullptr;
-        const SensorBaseConfigMap* baseConfigMap = nullptr;
+            const SensorData* sensorData = nullptr;
+            const std::string* interfacePath = nullptr;
+            const char* sensorType = nullptr;
+            const SensorBaseConfiguration* baseConfiguration = nullptr;
+            const SensorBaseConfigMap* baseConfigMap = nullptr;
 
-        for (const std::pair<sdbusplus::message::object_path, SensorData>&
-                 sensor : sensorConfigurations)
-        {
-            sensorData = &(sensor.second);
-            for (const char* type : sensorTypes)
+            for (const std::pair<sdbusplus::message::object_path, SensorData>&
+                     sensor : sensorConfigurations)
             {
-                auto sensorBase = sensorData->find(type);
-                if (sensorBase != sensorData->end())
+                sensorData = &(sensor.second);
+                for (const char* type : sensorTypes)
                 {
-                    baseConfiguration = &(*sensorBase);
-                    sensorType = type;
-                    break;
-                }
-            }
-            if (baseConfiguration == nullptr)
-            {
-                std::cerr << "error finding base configuration "
-                          << "\n";
-                continue;
-            }
-            baseConfigMap = &baseConfiguration->second;
-            auto configurationBus = baseConfigMap->find("Bus");
-            auto configurationAddress = baseConfigMap->find("Address");
-
-            if (configurationBus == baseConfigMap->end() ||
-                configurationAddress == baseConfigMap->end())
-            {
-                std::cerr << "error finding bus or address in "
-                             "configuration\n";
-                continue;
-            }
-
-            uint8_t deviceAddress = std::visit(VariantToUnsignedIntVisitor(),
-                                               configurationAddress->second);
-            uint8_t deviceBus = std::visit(VariantToUnsignedIntVisitor(),
-                                           configurationBus->second);
-            interfacePath = &(sensor.first.str);
-            auto findSensorName = baseConfigMap->find("Name");
-            if (findSensorName == baseConfigMap->end())
-            {
-                std::cerr << "could not determine configuration name for "
-                          << "\n";
-                continue;
-            }
-            std::string sensorName =
-                std::get<std::string>(findSensorName->second);
-            // on rescans, only update sensors we were signaled by
-            auto findSensor = sensors.find(sensorName);
-            if (!firstScan && findSensor != sensors.end())
-            {
-                bool found = false;
-                auto it = sensorsChanged->begin();
-                while (it != sensorsChanged->end())
-                {
-                    if (boost::ends_with(*it, findSensor->second->name))
+                    auto sensorBase = sensorData->find(type);
+                    if (sensorBase != sensorData->end())
                     {
-                        it = sensorsChanged->erase(it);
-                        findSensor->second = nullptr;
-                        found = true;
+                        baseConfiguration = &(*sensorBase);
+                        sensorType = type;
                         break;
                     }
-                    ++it;
                 }
-
-                if (!found)
+                if (baseConfiguration == nullptr)
                 {
+                    std::cerr << "error finding base configuration "
+                              << "\n";
                     continue;
                 }
-            }
+                baseConfigMap = &baseConfiguration->second;
+                auto configurationBus = baseConfigMap->find("Bus");
+                auto configurationAddress = baseConfigMap->find("Address");
 
-            std::vector<thresholds::Threshold> sensorThresholds;
-            if (!parseThresholdsFromConfig(*sensorData, sensorThresholds))
-            {
-                std::cerr << "error populating thresholds for " << sensorName
-                          << "\n";
-            }
-
-            auto findPowerOn = baseConfiguration->second.find("PowerState");
-            PowerState readState = PowerState::always;
-            if (findPowerOn != baseConfiguration->second.end())
-            {
-                std::string powerState = std::visit(VariantToStringVisitor(),
-                                                    findPowerOn->second);
-                setReadState(powerState, readState);
-            }
-
-            auto findPollRate = baseConfiguration->second.find("PollRate");
-            float pollRate = pollRateDefault;
-            if (findPollRate != baseConfiguration->second.end())
-            {
-                pollRate = std::visit(VariantToFloatVisitor(),
-                                      findPollRate->second);
-                if (pollRate <= 0.0F)
+                if (configurationBus == baseConfigMap->end() ||
+                    configurationAddress == baseConfigMap->end())
                 {
-                    std::cerr << "polling time too short for " << sensorName
-                              << "\n";
-                    pollRate = pollRateDefault; // polling time too short
+                    std::cerr << "error finding bus or address in "
+                                 "configuration\n";
+                    continue;
                 }
-            }
-            auto& sensorEntry = sensors[sensorName];
-            sensorEntry = nullptr;
 
-            sensorEntry = std::make_shared<PLXTempSensor>(
-                sensorType, objectServer, dbusConnection, io, sensorName,
-                std::move(sensorThresholds), *interfacePath, readState,
-                deviceBus, deviceAddress, pollRate);
-            sensorEntry->setupRead();
-        }
-    });
+                uint8_t deviceAddress =
+                    std::visit(VariantToUnsignedIntVisitor(),
+                               configurationAddress->second);
+                uint8_t deviceBus = std::visit(VariantToUnsignedIntVisitor(),
+                                               configurationBus->second);
+                interfacePath = &(sensor.first.str);
+                auto findSensorName = baseConfigMap->find("Name");
+                if (findSensorName == baseConfigMap->end())
+                {
+                    std::cerr << "could not determine configuration name for "
+                              << "\n";
+                    continue;
+                }
+                std::string sensorName =
+                    std::get<std::string>(findSensorName->second);
+                // on rescans, only update sensors we were signaled by
+                auto findSensor = sensors.find(sensorName);
+                if (!firstScan && findSensor != sensors.end())
+                {
+                    bool found = false;
+                    auto it = sensorsChanged->begin();
+                    while (it != sensorsChanged->end())
+                    {
+                        if (boost::ends_with(*it, findSensor->second->name))
+                        {
+                            it = sensorsChanged->erase(it);
+                            findSensor->second = nullptr;
+                            found = true;
+                            break;
+                        }
+                        ++it;
+                    }
+
+                    if (!found)
+                    {
+                        continue;
+                    }
+                }
+
+                std::vector<thresholds::Threshold> sensorThresholds;
+                if (!parseThresholdsFromConfig(*sensorData, sensorThresholds))
+                {
+                    std::cerr << "error populating thresholds for "
+                              << sensorName << "\n";
+                }
+
+                auto findPowerOn = baseConfiguration->second.find("PowerState");
+                PowerState readState = PowerState::always;
+                if (findPowerOn != baseConfiguration->second.end())
+                {
+                    std::string powerState = std::visit(
+                        VariantToStringVisitor(), findPowerOn->second);
+                    setReadState(powerState, readState);
+                }
+
+                auto findPollRate = baseConfiguration->second.find("PollRate");
+                float pollRate = pollRateDefault;
+                if (findPollRate != baseConfiguration->second.end())
+                {
+                    pollRate = std::visit(VariantToFloatVisitor(),
+                                          findPollRate->second);
+                    if (pollRate <= 0.0F)
+                    {
+                        std::cerr << "polling time too short for " << sensorName
+                                  << "\n";
+                        pollRate = pollRateDefault; // polling time too short
+                    }
+                }
+                auto& sensorEntry = sensors[sensorName];
+                sensorEntry = nullptr;
+
+                sensorEntry = std::make_shared<PLXTempSensor>(
+                    sensorType, objectServer, dbusConnection, io, sensorName,
+                    std::move(sensorThresholds), *interfacePath, readState,
+                    deviceBus, deviceAddress, pollRate);
+                sensorEntry->setupRead();
+            }
+        });
     getter->getConfiguration(
         std::vector<std::string>(sensorTypes.begin(), sensorTypes.end()));
 }
@@ -218,29 +219,30 @@ int main()
     boost::asio::steady_timer filterTimer(io);
     std::function<void(sdbusplus::message::message&)> eventHandler =
         [&](sdbusplus::message::message& message) {
-        if (message.is_method_error())
-        {
-            std::cerr << "callback method error\n";
-            return;
-        }
-        sensorsChanged->insert(message.get_path());
-        // this implicitly cancels the timer
-        filterTimer.expires_after(std::chrono::seconds(1));
+            if (message.is_method_error())
+            {
+                std::cerr << "callback method error\n";
+                return;
+            }
+            sensorsChanged->insert(message.get_path());
+            // this implicitly cancels the timer
+            filterTimer.expires_after(std::chrono::seconds(1));
 
-        filterTimer.async_wait([&](const boost::system::error_code& ec) {
-            if (ec == boost::asio::error::operation_aborted)
-            {
-                /* we were canceled*/
-                return;
-            }
-            if (ec)
-            {
-                std::cerr << "timer error\n";
-                return;
-            }
-            createSensors(io, objectServer, sensors, systemBus, sensorsChanged);
-        });
-    };
+            filterTimer.async_wait([&](const boost::system::error_code& ec) {
+                if (ec == boost::asio::error::operation_aborted)
+                {
+                    /* we were canceled*/
+                    return;
+                }
+                if (ec)
+                {
+                    std::cerr << "timer error\n";
+                    return;
+                }
+                createSensors(io, objectServer, sensors, systemBus,
+                              sensorsChanged);
+            });
+        };
 
     for (const char* type : sensorTypes)
     {
@@ -259,8 +261,8 @@ int main()
         "type='signal',member='InterfacesRemoved',arg0path='" +
             std::string(inventoryPath) + "/'",
         [&sensors](sdbusplus::message::message& msg) {
-        interfaceRemoved(msg, sensors);
-    });
+            interfaceRemoved(msg, sensors);
+        });
 
     matches.emplace_back(std::move(ifaceRemovedMatch));
 

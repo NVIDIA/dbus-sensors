@@ -105,7 +105,7 @@ static std::shared_ptr<MCTPDevice> deviceFromConfig(
         {
             return SPIMCTPDDevice::from(connection, *iface);
         }
-        
+
         iface = I2CMCTPDDevice::match(config);
         if (iface)
         {

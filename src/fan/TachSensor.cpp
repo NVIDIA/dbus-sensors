@@ -206,8 +206,8 @@ void TachSensor::checkThresholds()
         return;
     }
 
-    bool status = thresholds::checkThresholdsPowerDelay(weak_from_this(),
-                                                        thresholdTimer);
+    bool status =
+        thresholds::checkThresholdsPowerDelay(weak_from_this(), thresholdTimer);
 
     if ((redundancy != nullptr) && *redundancy)
     {
@@ -233,9 +233,10 @@ RedundancySensor::RedundancySensor(size_t count,
                                    const std::vector<std::string>& children,
                                    sdbusplus::asio::object_server& objectServer,
                                    const std::string& sensorConfiguration) :
-    count(count), iface(objectServer.add_interface(
-                      "/xyz/openbmc_project/control/FanRedundancy/Tach",
-                      "xyz.openbmc_project.Control.FanRedundancy")),
+    count(count),
+    iface(objectServer.add_interface(
+        "/xyz/openbmc_project/control/FanRedundancy/Tach",
+        "xyz.openbmc_project.Control.FanRedundancy")),
     association(objectServer.add_interface(
         "/xyz/openbmc_project/control/FanRedundancy/Tach",
         association::interface)),

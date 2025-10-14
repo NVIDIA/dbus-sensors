@@ -46,7 +46,7 @@
 // scaling factor from hwmon
 static constexpr unsigned int sensorScaleFactor = 1000;
 
-static constexpr double roundFactor = 10000;     // 3 decimal places
+static constexpr double roundFactor = 10000; // 3 decimal places
 
 ADCSensor::ADCSensor(
     const std::string& path, sdbusplus::asio::object_server& objectServer,

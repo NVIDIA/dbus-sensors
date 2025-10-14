@@ -306,10 +306,9 @@ class MCTPDDevice :
         requestSetupCallback;
 
   private:
-    static void
-        onEndpointInterfacesRemoved(const std::weak_ptr<MCTPDDevice>& weak,
-                                    const std::string& objpath,
-                                    sdbusplus::message_t& msg);
+    static void onEndpointInterfacesRemoved(
+        const std::weak_ptr<MCTPDDevice>& weak, const std::string& objpath,
+        sdbusplus::message_t& msg);
 
     std::shared_ptr<sdbusplus::asio::connection> connection;
     const std::string interface;
@@ -415,9 +414,9 @@ class USBMCTPDDevice : public MCTPDDevice
   public:
     static std::optional<SensorBaseConfigMap> match(const SensorData& config);
     static bool match(const std::set<std::string>& interfaces);
-    static std::shared_ptr<USBMCTPDDevice>
-        from(const std::shared_ptr<sdbusplus::asio::connection>& connection,
-             const SensorBaseConfigMap& iface);
+    static std::shared_ptr<USBMCTPDDevice> from(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const SensorBaseConfigMap& iface);
 
     USBMCTPDDevice() = delete;
     USBMCTPDDevice(
@@ -440,9 +439,9 @@ class SPIMCTPDDevice : public MCTPDDevice
   public:
     static std::optional<SensorBaseConfigMap> match(const SensorData& config);
     static bool match(const std::set<std::string>& interfaces);
-    static std::shared_ptr<SPIMCTPDDevice>
-        from(const std::shared_ptr<sdbusplus::asio::connection>& connection,
-             const SensorBaseConfigMap& iface);
+    static std::shared_ptr<SPIMCTPDDevice> from(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const SensorBaseConfigMap& iface);
 
     SPIMCTPDDevice() = delete;
     SPIMCTPDDevice(
@@ -459,4 +458,3 @@ class SPIMCTPDDevice : public MCTPDDevice
 
     static std::string interfaceFromBusCs(int bus, int chipselect);
 };
-

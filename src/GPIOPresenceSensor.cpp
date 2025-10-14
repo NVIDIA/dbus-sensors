@@ -59,22 +59,23 @@ void GPIOPresence::waitForGPIOEvent(
     const std::string& name, const std::function<void(bool)>& eventHandler,
     gpiod::line& line, boost::asio::posix::stream_descriptor& event)
 {
-    event.async_wait(boost::asio::posix::stream_descriptor::wait_read,
-                     [ref{this}, &name, eventHandler, &line,
-                      &event](const boost::system::error_code ec) {
-        if (ec)
-        {
-            std::cout << name << ""
-                      << " fd handler error: " << ec.message() << " Error"
-                      << std::endl;
-            return;
-        }
-        gpiod::line_event lineEvent = line.event_read();
-        bool present = true;
-        present = !(lineEvent.event_type == gpiod::line_event::RISING_EDGE);
-        eventHandler(present);
-        ref->waitForGPIOEvent(name, eventHandler, line, event);
-    });
+    event.async_wait(
+        boost::asio::posix::stream_descriptor::wait_read,
+        [ref{this}, &name, eventHandler, &line,
+         &event](const boost::system::error_code ec) {
+            if (ec)
+            {
+                std::cout << name << ""
+                          << " fd handler error: " << ec.message() << " Error"
+                          << std::endl;
+                return;
+            }
+            gpiod::line_event lineEvent = line.event_read();
+            bool present = true;
+            present = !(lineEvent.event_type == gpiod::line_event::RISING_EDGE);
+            eventHandler(present);
+            ref->waitForGPIOEvent(name, eventHandler, line, event);
+        });
 }
 
 bool GPIOPresence::requestGPIOEvents(const std::string& name,
@@ -217,8 +218,9 @@ void GPIOPresence::startGPIOEventMonitor(boost::asio::io_context& gpioContext)
             config.gpioLine,
 
             [self(shared_from_this()), gpioLine{config.gpioLine}](bool state) {
-            self->updatePresence(gpioLine, state);
-        }, gpioContext);
+                self->updatePresence(gpioLine, state);
+            },
+            gpioContext);
     }
 }
 } // namespace gpio_presence_sensing

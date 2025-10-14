@@ -130,9 +130,8 @@ std::string getPlatform()
     return "";
 }
 
-static struct SensorParams
-    getSensorParameters(const std::filesystem::path& path,
-                        const std::string& interfacePath)
+static struct SensorParams getSensorParameters(
+    const std::filesystem::path& path, const std::string& interfacePath)
 {
     // offset is to default to 0 and scale to 1, see lore
     // https://lore.kernel.org/linux-iio/5c79425f-6e88-36b6-cdfe-4080738d039f@metafoo.de/
@@ -399,7 +398,7 @@ void createSensors(
                 const std::string& interfacePath =
                     findSensorCfg->second.sensorPath;
                 auto thisSensorParameters =
-                    getSensorParameters(path, interfacePath);                    
+                    getSensorParameters(path, interfacePath);
                 auto findI2CDev = devices.find(interfacePath);
 
                 std::shared_ptr<I2CDevice> i2cDev;

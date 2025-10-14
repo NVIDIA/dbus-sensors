@@ -35,15 +35,13 @@ class DiscreteLeakDetectSensor :
     public std::enable_shared_from_this<DiscreteLeakDetectSensor>
 {
   public:
-    DiscreteLeakDetectSensor(sdbusplus::asio::object_server& objectServer,
-                             std::shared_ptr<sdbusplus::asio::connection>& conn,
-                             boost::asio::io_context& io,
-                             const std::string& sensorType,
-                             const std::string& sensorSysfsPath,
-                             const std::string& sensorName,
-                             const std::string& configurationPath,
-                             float pollRate, uint8_t busId, uint8_t address,
-                             const std::string& driver);
+    DiscreteLeakDetectSensor(
+        sdbusplus::asio::object_server& objectServer,
+        std::shared_ptr<sdbusplus::asio::connection>& conn,
+        boost::asio::io_context& io, const std::string& sensorType,
+        const std::string& sensorSysfsPath, const std::string& sensorName,
+        const std::string& configurationPath, float pollRate, uint8_t busId,
+        uint8_t address, const std::string& driver);
     ~DiscreteLeakDetectSensor();
 
     void monitor();

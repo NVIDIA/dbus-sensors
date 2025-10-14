@@ -52,8 +52,8 @@ class NVMeContext
     }
 
     template <typename SensorType>
-    std::optional<std::shared_ptr<SensorType>>
-        getSensorAtPath(const std::string& path)
+    std::optional<std::shared_ptr<SensorType>> getSensorAtPath(
+        const std::string& path)
     {
         for (auto& sensorVariant : sensors)
         {
@@ -74,14 +74,17 @@ class NVMeContext
     template <typename SensorType>
     void removeSensor(const std::shared_ptr<SensorType>& sensor)
     {
-        auto found = std::find_if(sensors.begin(), sensors.end(),
-                                  [&sensor](const SensorVariant& variant) {
-            if (std::holds_alternative<std::shared_ptr<SensorType>>(variant))
-            {
-                return std::get<std::shared_ptr<SensorType>>(variant) == sensor;
-            }
-            return false;
-        });
+        auto found = std::find_if(
+            sensors.begin(), sensors.end(),
+            [&sensor](const SensorVariant& variant) {
+                if (std::holds_alternative<std::shared_ptr<SensorType>>(
+                        variant))
+                {
+                    return std::get<std::shared_ptr<SensorType>>(variant) ==
+                           sensor;
+                }
+                return false;
+            });
 
         if (found == sensors.end())
         {

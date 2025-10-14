@@ -63,28 +63,30 @@ static void setupSensorMatch(
 {
     std::function<void(sdbusplus::message_t & message)> eventHandler =
         [callback{std::move(callback)}](sdbusplus::message_t& message) {
-        std::string objectName;
-        boost::container::flat_map<std::string, std::variant<double, int64_t>>
-            values;
-        message.read(objectName, values);
-        auto findValue = values.find("Value");
-        if (findValue == values.end())
-        {
-            return;
-        }
-        // The synthesized sensor value should update if any of the sensors
-        // comprising is 'NaN'
-        double value = std::visit(VariantToDoubleVisitor(), findValue->second);
-        callback(value, message);
-    };
-    matches.emplace_back(connection,
-                         "type='signal',"
-                         "member='PropertiesChanged',interface='org."
-                         "freedesktop.DBus.Properties',path_"
-                         "namespace='/xyz/openbmc_project/sensors/" +
-                             std::string(type) +
-                             "',arg0='xyz.openbmc_project.Sensor.Value'",
-                         std::move(eventHandler));
+            std::string objectName;
+            boost::container::flat_map<std::string,
+                                       std::variant<double, int64_t>>
+                values;
+            message.read(objectName, values);
+            auto findValue = values.find("Value");
+            if (findValue == values.end())
+            {
+                return;
+            }
+            // The synthesized sensor value should update if any of the sensors
+            // comprising is 'NaN'
+            double value =
+                std::visit(VariantToDoubleVisitor(), findValue->second);
+            callback(value, message);
+        };
+    matches.emplace_back(
+        connection,
+        "type='signal',"
+        "member='PropertiesChanged',interface='org."
+        "freedesktop.DBus.Properties',path_"
+        "namespace='/xyz/openbmc_project/sensors/" +
+            std::string(type) + "',arg0='xyz.openbmc_project.Sensor.Value'",
+        std::move(eventHandler));
 }
 
 static constexpr double totalHscMaxReading = 1500;
@@ -132,100 +134,103 @@ void SynthesizedSensor::setupMatches()
     std::weak_ptr<SynthesizedSensor> weakRef = weak_from_this();
     for (const std::string type : matchTypes)
     {
-        setupSensorMatch(matches, *dbusConnection, type,
-                         [weakRef, type](const double& value,
-                                         sdbusplus::message_t& message) {
+        setupSensorMatch(
+            matches, *dbusConnection, type,
+            [weakRef,
+             type](const double& value, sdbusplus::message_t& message) {
+                auto self = weakRef.lock();
+                if (!self)
+                {
+                    return;
+                }
+                if (type == "power")
+                {
+                    std::string path = message.get_path();
+                    for (const auto& [sensName, mSign] : self->sensorOperands)
+                    {
+                        if (path.ends_with(sensName))
+                        {
+                            // Change the sensor reading sign according to the
+                            // sensorOperands map
+                            self->powerReadings[message.get_path()] =
+                                value * mSign;
+                        }
+                    }
+                }
+                if (self->powerReadings.size() == self->sensorOperands.size())
+                {
+                    self->updateReading();
+                }
+            });
+    }
+
+    dbusConnection->async_method_call(
+        [weakRef](boost::system::error_code ec, const GetSubTreeType& subtree) {
+            if (ec)
+            {
+                std::cerr << "Error contacting mapper\n";
+                return;
+            }
             auto self = weakRef.lock();
             if (!self)
             {
                 return;
             }
-            if (type == "power")
+            for (const auto& [path, matches] : subtree)
             {
-                std::string path = message.get_path();
+                size_t lastSlash = path.rfind('/');
+                if (lastSlash == std::string::npos ||
+                    lastSlash == path.size() || matches.empty())
+                {
+                    continue;
+                }
+                std::string sensorName = path.substr(lastSlash + 1);
                 for (const auto& [sensName, mSign] : self->sensorOperands)
                 {
-                    if (path.ends_with(sensName))
+                    if (sensorName == sensName)
                     {
-                        // Change the sensor reading sign according to the
-                        // sensorOperands map
-                        self->powerReadings[message.get_path()] = value * mSign;
+                        // lambda capture requires a proper variable (not a
+                        // structured binding)
+                        const std::string& cbPath = path;
+                        self->dbusConnection->async_method_call(
+                            [weakRef, cbPath,
+                             mSign](boost::system::error_code ec,
+                                    const std::variant<double>& value) {
+                                if (ec)
+                                {
+                                    std::cerr << "Error getting value from "
+                                              << cbPath << "\n";
+                                }
+                                auto self = weakRef.lock();
+                                if (!self)
+                                {
+                                    return;
+                                }
+                                double reading =
+                                    std::visit(VariantToDoubleVisitor(), value);
+                                if constexpr (debug)
+                                {
+                                    std::cerr << cbPath << "Reading " << reading
+                                              << "\n";
+                                }
+                                // Change the sensor reading sign according to
+                                // the sensorOperands map
+                                self->powerReadings[cbPath] = reading * mSign;
+                                // Only update the synthesized sensor reading
+                                // when all the sensor operands have been loaded
+                                if (self->powerReadings.size() ==
+                                    self->sensorOperands.size())
+                                {
+                                    self->updateReading();
+                                }
+                            },
+                            matches[0].first, cbPath, properties::interface,
+                            properties::get, sensorValueInterface, "Value");
                     }
                 }
             }
-            if (self->powerReadings.size() == self->sensorOperands.size())
-            {
-                self->updateReading();
-            }
-        });
-    }
-
-    dbusConnection->async_method_call(
-        [weakRef](boost::system::error_code ec, const GetSubTreeType& subtree) {
-        if (ec)
-        {
-            std::cerr << "Error contacting mapper\n";
-            return;
-        }
-        auto self = weakRef.lock();
-        if (!self)
-        {
-            return;
-        }
-        for (const auto& [path, matches] : subtree)
-        {
-            size_t lastSlash = path.rfind('/');
-            if (lastSlash == std::string::npos || lastSlash == path.size() ||
-                matches.empty())
-            {
-                continue;
-            }
-            std::string sensorName = path.substr(lastSlash + 1);
-            for (const auto& [sensName, mSign] : self->sensorOperands)
-            {
-                if (sensorName == sensName)
-                {
-                    // lambda capture requires a proper variable (not a
-                    // structured binding)
-                    const std::string& cbPath = path;
-                    self->dbusConnection->async_method_call(
-                        [weakRef, cbPath,
-                         mSign](boost::system::error_code ec,
-                                const std::variant<double>& value) {
-                        if (ec)
-                        {
-                            std::cerr << "Error getting value from " << cbPath
-                                      << "\n";
-                        }
-                        auto self = weakRef.lock();
-                        if (!self)
-                        {
-                            return;
-                        }
-                        double reading = std::visit(VariantToDoubleVisitor(),
-                                                    value);
-                        if constexpr (debug)
-                        {
-                            std::cerr << cbPath << "Reading " << reading
-                                      << "\n";
-                        }
-                        // Change the sensor reading sign according to the
-                        // sensorOperands map
-                        self->powerReadings[cbPath] = reading * mSign;
-                        // Only update the synthesized sensor reading when all
-                        // the sensor operands have been loaded
-                        if (self->powerReadings.size() ==
-                            self->sensorOperands.size())
-                        {
-                            self->updateReading();
-                        }
-                    },
-                        matches[0].first, cbPath, properties::interface,
-                        properties::get, sensorValueInterface, "Value");
-                }
-            }
-        }
-    }, mapper::busName, mapper::path, mapper::interface, mapper::subtree,
+        },
+        mapper::busName, mapper::path, mapper::interface, mapper::subtree,
         "/xyz/openbmc_project/sensors/power", 0,
         std::array<const char*, 1>{sensorValueInterface});
 }
@@ -282,74 +287,78 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
     auto getter = std::make_shared<GetSensorConfiguration>(
         dbusConnection, [&objectServer, &dbusConnection,
                          &summationSensor](const ManagedObjectType& resp) {
-        synthSensors.clear();
+            synthSensors.clear();
 
-        for (const auto& [path, interfaces] : resp)
-        {
-            summationSensor = nullptr;
-            for (const auto& [intf, cfg] : interfaces)
+            for (const auto& [path, interfaces] : resp)
             {
-                // Get Summation sensor related info
-                if (intf == configInterfaceName(synthesizedsensorType))
+                summationSensor = nullptr;
+                for (const auto& [intf, cfg] : interfaces)
                 {
-                    // parseThresholdsFromConfig traverses all
-                    // interfaces for this path, looking
-                    // for thresholds.
-                    std::vector<thresholds::Threshold> sensorThresholds;
-                    parseThresholdsFromConfig(interfaces, sensorThresholds);
-                    paramMap sensorParamMap;
-                    parseSensorParamFromConfig(interfaces, sensorParamMap);
-                    /*read the "SensorParam" vector and check for minValue and
-                    MaxValue If one of the values is not in the SensorParam use
-                    the defalut values.
-                    */
-                    double maxValue = totalHscMaxReading;
-                    double minValue = totalHscMinReading;
-                    getSensorParamMapValues(maxValue, minValue, sensorParamMap);
-                    std::string name = loadVariant<std::string>(cfg, "Name");
-                    summationSensor = std::make_shared<SynthesizedSensor>(
-                        dbusConnection, name, path.str, objectServer,
-                        std::move(sensorThresholds), maxValue, minValue);
-                    summationSensor->sensorOperands.clear();
-                    /*
-                    Retrieve the SensorsToSum vector from entity manager files.
-                    Create the sensorOperands map: assign 1 for "+" or -1 for
-                    "-". For other values, use the sensor name as the map key.
-                    */
-                    std::vector<std::string> sensorOperandstTmp =
-                        loadVariant<std::vector<std::string>>(cfg,
-                                                              "SensorsToSum");
-                    int mathSign = 1;
-                    for (std::string paramStr : sensorOperandstTmp)
+                    // Get Summation sensor related info
+                    if (intf == configInterfaceName(synthesizedsensorType))
                     {
-                        if (paramStr == "-")
+                        // parseThresholdsFromConfig traverses all
+                        // interfaces for this path, looking
+                        // for thresholds.
+                        std::vector<thresholds::Threshold> sensorThresholds;
+                        parseThresholdsFromConfig(interfaces, sensorThresholds);
+                        paramMap sensorParamMap;
+                        parseSensorParamFromConfig(interfaces, sensorParamMap);
+                        /*read the "SensorParam" vector and check for minValue
+                        and MaxValue If one of the values is not in the
+                        SensorParam use the defalut values.
+                        */
+                        double maxValue = totalHscMaxReading;
+                        double minValue = totalHscMinReading;
+                        getSensorParamMapValues(maxValue, minValue,
+                                                sensorParamMap);
+                        std::string name =
+                            loadVariant<std::string>(cfg, "Name");
+                        summationSensor = std::make_shared<SynthesizedSensor>(
+                            dbusConnection, name, path.str, objectServer,
+                            std::move(sensorThresholds), maxValue, minValue);
+                        summationSensor->sensorOperands.clear();
+                        /*
+                        Retrieve the SensorsToSum vector from entity manager
+                        files. Create the sensorOperands map: assign 1 for "+"
+                        or -1 for
+                        "-". For other values, use the sensor name as the map
+                        key.
+                        */
+                        std::vector<std::string> sensorOperandstTmp =
+                            loadVariant<std::vector<std::string>>(
+                                cfg, "SensorsToSum");
+                        int mathSign = 1;
+                        for (std::string paramStr : sensorOperandstTmp)
                         {
-                            mathSign = -1;
-                        }
-                        else if (paramStr == "+")
-                        {
-                            mathSign = 1;
-                        }
-                        else if (paramStr != "-" && paramStr != "+")
-                        {
-                            summationSensor->sensorOperands.emplace(
-                                std::move(paramStr), mathSign);
+                            if (paramStr == "-")
+                            {
+                                mathSign = -1;
+                            }
+                            else if (paramStr == "+")
+                            {
+                                mathSign = 1;
+                            }
+                            else if (paramStr != "-" && paramStr != "+")
+                            {
+                                summationSensor->sensorOperands.emplace(
+                                    std::move(paramStr), mathSign);
+                            }
                         }
                     }
                 }
-            }
-            if (summationSensor)
-            {
-                synthSensors.push_back(summationSensor);
-                summationSensor->setupMatches();
-                if (summationSensor->powerReadings.size() ==
-                    summationSensor->sensorOperands.size())
+                if (summationSensor)
                 {
-                    summationSensor->updateReading();
+                    synthSensors.push_back(summationSensor);
+                    summationSensor->setupMatches();
+                    if (summationSensor->powerReadings.size() ==
+                        summationSensor->sensorOperands.size())
+                    {
+                        summationSensor->updateReading();
+                    }
                 }
             }
-        }
-    });
+        });
     getter->getConfiguration(
         std::vector<std::string>(monitorTypes.begin(), monitorTypes.end()));
 }
@@ -370,20 +379,20 @@ int main()
 
     std::function<void(sdbusplus::message_t&)> eventHandler =
         [&](sdbusplus::message_t&) {
-        configTimer.expires_after(std::chrono::seconds(1));
-        // create a timer because normally multiple properties change
-        configTimer.async_wait([&](const boost::system::error_code& ec) {
-            if (ec == boost::asio::error::operation_aborted)
-            {
-                return; // we're being canceled
-            }
-            createSensor(objectServer, sensor, systemBus);
-            if (!sensor)
-            {
-                std::cout << "Configuration not detected\n";
-            }
-        });
-    };
+            configTimer.expires_after(std::chrono::seconds(1));
+            // create a timer because normally multiple properties change
+            configTimer.async_wait([&](const boost::system::error_code& ec) {
+                if (ec == boost::asio::error::operation_aborted)
+                {
+                    return; // we're being canceled
+                }
+                createSensor(objectServer, sensor, systemBus);
+                if (!sensor)
+                {
+                    std::cout << "Configuration not detected\n";
+                }
+            });
+        };
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
         setupPropertiesChangedMatches(*systemBus, monitorTypes, eventHandler);
 

@@ -58,8 +58,8 @@ MCTPDDevice::MCTPDDevice(
 
 void MCTPDDevice::onDiscoveryMatchRule()
 {
-    std::string interfacePath = std::string(mctpdControlPath) + "/interfaces/" +
-                                this->interface;
+    std::string interfacePath =
+        std::string(mctpdControlPath) + "/interfaces/" + this->interface;
     const auto matchRule =
         sdbusplus::bus::match::rules::type::signal() +
         sdbusplus::bus::match::rules::path(interfacePath) +
@@ -69,16 +69,16 @@ void MCTPDDevice::onDiscoveryMatchRule()
     discoveryNotifyMatch = std::make_unique<sdbusplus::bus::match_t>(
         *connection, matchRule,
         [weakThis{weak_from_this()}](sdbusplus::message_t& msg) {
-        if (auto self = weakThis.lock())
-        {
-            self->onDiscoveryNotify(msg);
-        }
-        else
-        {
-            error(
-                "MCTPDDevice instance destroyed during DiscoveryNotify handling.");
-        }
-    });
+            if (auto self = weakThis.lock())
+            {
+                self->onDiscoveryNotify(msg);
+            }
+            else
+            {
+                error(
+                    "MCTPDDevice instance destroyed during DiscoveryNotify handling.");
+            }
+        });
 
     info("DiscoveryNotify match registered for interface {INTERFACE}.",
          "INTERFACE", this->interface);
@@ -131,17 +131,17 @@ void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& /*unused*/)
     discoveryCheckTimer->expires_after(5s);
     discoveryCheckTimer->async_wait(
         [weakThis = weak_from_this()](const boost::system::error_code& ecWait) {
-        if (ecWait == boost::asio::error::operation_aborted)
-        {
-            return;
-        }
-        if (auto self = weakThis.lock())
-        {
-            // Call performDiscovery(), then reset flags
-            self->performDiscovery();
-            self->discoveryNeeded = false;
-        }
-    });
+            if (ecWait == boost::asio::error::operation_aborted)
+            {
+                return;
+            }
+            if (auto self = weakThis.lock())
+            {
+                // Call performDiscovery(), then reset flags
+                self->performDiscovery();
+                self->discoveryNeeded = false;
+            }
+        });
 }
 
 static bool hasBridgeInterface(
@@ -284,9 +284,9 @@ void MCTPDDevice::performDiscovery()
             auto path = std::string(mctpdControlPath) + "/interfaces/" +
                         this->interface;
             dbusMethod = "LearnEndpoint";
-            this->connection->async_method_call(callback, mctpdBusName, path,
-                                                mctpdControlInterface,
-                                                dbusMethod, this->physaddr);
+            this->connection->async_method_call(
+                callback, mctpdBusName, path, mctpdControlInterface, dbusMethod,
+                this->physaddr);
         }
     }
 }
@@ -435,9 +435,9 @@ std::string MCTPDEndpoint::path(const std::shared_ptr<MCTPEndpoint>& ep)
 
 void MCTPDEndpoint::onMctpEndpointChange(sdbusplus::message_t& msg)
 {
-    auto [iface, changed,
-          _] = msg.unpack<std::string, std::map<std::string, BasicVariantType>,
-                          std::vector<std::string>>();
+    auto [iface, changed, _] =
+        msg.unpack<std::string, std::map<std::string, BasicVariantType>,
+                   std::vector<std::string>>();
     if (iface != mctpdEndpointControlInterface)
     {
         return;
@@ -498,46 +498,47 @@ void MCTPDEndpoint::subscribe(Event&& degraded, Event&& available,
 
     try
     {
-        connectivityMatch.emplace(static_cast<sdbusplus::bus_t&>(*connection),
-                                  matchSpec,
-                                  [weak{weak_from_this()}, path{objpath.str}](
-                                      sdbusplus::message_t& msg) {
-            if (auto self = weak.lock())
-            {
-                self->onMctpEndpointChange(msg);
-            }
-            else
-            {
-                info(
-                    "The endpoint for the device at inventory path '{INVENTORY_PATH}' was destroyed concurrent to the removal of its state change match",
-                    "INVENTORY_PATH", path);
-            }
-        });
+        connectivityMatch.emplace(
+            static_cast<sdbusplus::bus_t&>(*connection), matchSpec,
+            [weak{weak_from_this()},
+             path{objpath.str}](sdbusplus::message_t& msg) {
+                if (auto self = weak.lock())
+                {
+                    self->onMctpEndpointChange(msg);
+                }
+                else
+                {
+                    info(
+                        "The endpoint for the device at inventory path '{INVENTORY_PATH}' was destroyed concurrent to the removal of its state change match",
+                        "INVENTORY_PATH", path);
+                }
+            });
         connection->async_method_call(
             [weak{weak_from_this()},
              path{objpath.str}](const boost::system::error_code& ec,
                                 const std::variant<std::string>& value) {
-            if (ec)
-            {
-                debug(
-                    "Failed to get current connectivity state: {ERROR_MESSAGE}",
-                    "ERROR_MESSAGE", ec.message(), "ERROR_CATEGORY",
-                    ec.category().name(), "ERROR_CODE", ec.value());
-                return;
-            }
+                if (ec)
+                {
+                    debug(
+                        "Failed to get current connectivity state: {ERROR_MESSAGE}",
+                        "ERROR_MESSAGE", ec.message(), "ERROR_CATEGORY",
+                        ec.category().name(), "ERROR_CODE", ec.value());
+                    return;
+                }
 
-            if (auto self = weak.lock())
-            {
-                const std::string& connectivity = std::get<std::string>(value);
-                self->updateEndpointConnectivity(connectivity);
-            }
-            else
-            {
-                info(
-                    "The endpoint for the device at inventory path '{INVENTORY_PATH}' was destroyed concurrent to the completion of its connectivity state query",
-                    "INVENTORY_PATH", path);
-            }
-        },
+                if (auto self = weak.lock())
+                {
+                    const std::string& connectivity =
+                        std::get<std::string>(value);
+                    self->updateEndpointConnectivity(connectivity);
+                }
+                else
+                {
+                    info(
+                        "The endpoint for the device at inventory path '{INVENTORY_PATH}' was destroyed concurrent to the completion of its connectivity state query",
+                        "INVENTORY_PATH", path);
+                }
+            },
             mctpdBusName, objpath.str, "org.freedesktop.DBus.Properties", "Get",
             mctpdEndpointControlInterface, "Connectivity");
     }
@@ -555,13 +556,14 @@ void MCTPDEndpoint::remove()
 {
     connection->async_method_call(
         [self{shared_from_this()}](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            debug("Failed to remove endpoint @ [ {MCTP_ENDPOINT} ]",
-                  "MCTP_ENDPOINT", self->describe());
-            return;
-        }
-    }, mctpdBusName, objpath.str, mctpdEndpointControlInterface, "Remove");
+            if (ec)
+            {
+                debug("Failed to remove endpoint @ [ {MCTP_ENDPOINT} ]",
+                      "MCTP_ENDPOINT", self->describe());
+                return;
+            }
+        },
+        mctpdBusName, objpath.str, mctpdEndpointControlInterface, "Remove");
 }
 
 void MCTPDEndpoint::removed()
@@ -605,8 +607,8 @@ std::optional<SensorBaseConfigMap> I3CMCTPDDevice::match(
     return iface->second;
 }
 
-std::optional<SensorBaseConfigMap>
-    I3CMCTPDDevice::match(const SensorData& config)
+std::optional<SensorBaseConfigMap> I3CMCTPDDevice::match(
+    const SensorData& config)
 {
     auto iface = config.find(configInterfaceName(configType));
     if (iface == config.end())
@@ -665,8 +667,8 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
 
     auto sBus = std::visit(VariantToStringVisitor(), mBus->second);
     int bus{};
-    auto [bptr, bec] = std::from_chars(sBus.data(), sBus.data() + sBus.size(),
-                                       bus);
+    auto [bptr,
+          bec] = std::from_chars(sBus.data(), sBus.data() + sBus.size(), bus);
     if (bec != std::errc{})
     {
         throw std::invalid_argument("Bad bus index");
@@ -680,8 +682,8 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
     }
     else
     {
-        auto sStaticEndpointID = std::visit(VariantToStringVisitor(),
-                                            mStaticEndpointID->second);
+        auto sStaticEndpointID =
+            std::visit(VariantToStringVisitor(), mStaticEndpointID->second);
         std::uint8_t parsedEID{};
         auto [cptr, cec] = std::from_chars(
             sStaticEndpointID.data(),
@@ -701,13 +703,13 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
     }
     else
     {
-        auto sbridgePoolStartEid = std::visit(VariantToStringVisitor(),
-                                              mbridgePoolStartEid->second);
+        auto sbridgePoolStartEid =
+            std::visit(VariantToStringVisitor(), mbridgePoolStartEid->second);
         std::uint8_t parsedbridgePoolStartEid{};
-        auto [dptr, dec] = std::from_chars(sbridgePoolStartEid.data(),
-                                           sbridgePoolStartEid.data() +
-                                               sbridgePoolStartEid.size(),
-                                           parsedbridgePoolStartEid);
+        auto [dptr, dec] = std::from_chars(
+            sbridgePoolStartEid.data(),
+            sbridgePoolStartEid.data() + sbridgePoolStartEid.size(),
+            parsedbridgePoolStartEid);
         if (dec != std::errc{})
         {
             throw std::invalid_argument("Bad BridgePool Start address");
@@ -719,9 +721,9 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
     {
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
-            return std::make_shared<I2CMCTPDDevice>(connection, bus, address,
-                                                    staticEID.value(),
-                                                    bridgePoolStartEid.value());
+            return std::make_shared<I2CMCTPDDevice>(
+                connection, bus, address, staticEID.value(),
+                bridgePoolStartEid.value());
         }
         if (staticEID.has_value())
         {
@@ -791,8 +793,8 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
     }
     else
     {
-        auto sStaticEndpointID = std::visit(VariantToStringVisitor(),
-                                            mStaticEndpointID->second);
+        auto sStaticEndpointID =
+            std::visit(VariantToStringVisitor(), mStaticEndpointID->second);
         std::uint8_t parsedEID{};
         auto [cptr, cec] = std::from_chars(
             sStaticEndpointID.data(),
@@ -812,13 +814,13 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
     }
     else
     {
-        auto sbridgePoolStartEid = std::visit(VariantToStringVisitor(),
-                                              mbridgePoolStartEid->second);
+        auto sbridgePoolStartEid =
+            std::visit(VariantToStringVisitor(), mbridgePoolStartEid->second);
         std::uint8_t parsedbridgePoolStartEid{};
-        auto [dptr, dec] = std::from_chars(sbridgePoolStartEid.data(),
-                                           sbridgePoolStartEid.data() +
-                                               sbridgePoolStartEid.size(),
-                                           parsedbridgePoolStartEid);
+        auto [dptr, dec] = std::from_chars(
+            sbridgePoolStartEid.data(),
+            sbridgePoolStartEid.data() + sbridgePoolStartEid.size(),
+            parsedbridgePoolStartEid);
         if (dec != std::errc{})
         {
             throw std::invalid_argument("Bad BridgePool Start address");
@@ -830,9 +832,9 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
     {
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
-            return std::make_shared<I3CMCTPDDevice>(connection, bus, address,
-                                                    staticEID.value(),
-                                                    bridgePoolStartEid.value());
+            return std::make_shared<I3CMCTPDDevice>(
+                connection, bus, address, staticEID.value(),
+                bridgePoolStartEid.value());
         }
         if (staticEID.has_value())
         {
@@ -907,8 +909,8 @@ void I3CMCTPDDevice::startHealthMonitoring()
             connection->get_io_context());
     }
     healthTimer->expires_after(pollingInterval);
-    healthTimer->async_wait(
-        [weak = weak_from_this()](const boost::system::error_code& ec) {
+    healthTimer->async_wait([weak = weak_from_this()](
+                                const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
             return;
@@ -939,49 +941,50 @@ void I3CMCTPDDevice::performHealthCheck()
     connection->async_method_call(
         [weak = weak_from_this()](const boost::system::error_code& ec,
                                   uint8_t eid, uint8_t, uint8_t) {
-        auto self = std::static_pointer_cast<I3CMCTPDDevice>(weak.lock());
-        if (!self)
-        {
-            return;
-        }
-
-        if (ec || eid == 0)
-        {
-            if (self->inRecoveryMode)
+            auto self = std::static_pointer_cast<I3CMCTPDDevice>(weak.lock());
+            if (!self)
             {
-                // Already in recovery, just keep trying setup
-                if (self->requestSetupCallback)
+                return;
+            }
+
+            if (ec || eid == 0)
+            {
+                if (self->inRecoveryMode)
                 {
-                    self->requestSetupCallback(
-                        std::static_pointer_cast<MCTPDDevice>(self));
+                    // Already in recovery, just keep trying setup
+                    if (self->requestSetupCallback)
+                    {
+                        self->requestSetupCallback(
+                            std::static_pointer_cast<MCTPDDevice>(self));
+                    }
+                }
+                else
+                {
+                    // Normal mode - check retry count
+                    self->retryCount++;
+                    error(
+                        "GetEndpointID failed on {INTERFACE} (retry {RETRY}/{MAX})",
+                        "INTERFACE", self->interface, "RETRY", self->retryCount,
+                        "MAX", maxRetries);
+                    if (self->retryCount >= maxRetries)
+                    {
+                        self->recover();
+                    }
                 }
             }
             else
             {
-                // Normal mode - check retry count
-                self->retryCount++;
-                error(
-                    "GetEndpointID failed on {INTERFACE} (retry {RETRY}/{MAX})",
-                    "INTERFACE", self->interface, "RETRY", self->retryCount,
-                    "MAX", maxRetries);
-                if (self->retryCount >= maxRetries)
-                {
-                    self->recover();
-                }
+                // D-Bus call succeeded - device is healthy
+                debug("I3C device on {INTERFACE} is healthy (EID={EID})",
+                      "INTERFACE", self->interface, "EID",
+                      static_cast<int>(eid));
+
+                self->inRecoveryMode = false;
+                self->retryCount = 0;
             }
-        }
-        else
-        {
-            // D-Bus call succeeded - device is healthy
-            debug("I3C device on {INTERFACE} is healthy (EID={EID})",
-                  "INTERFACE", self->interface, "EID", static_cast<int>(eid));
 
-            self->inRecoveryMode = false;
-            self->retryCount = 0;
-        }
-
-        self->startHealthMonitoring();
-    },
+            self->startHealthMonitoring();
+        },
         mctpdBusName,
         std::string(mctpdControlPath) + "/interfaces/" + interface,
         mctpdControlInterface, "GetEndpointID", physaddr);
@@ -1001,24 +1004,26 @@ void I3CMCTPDDevice::recover()
 
         connection->async_method_call(
             [weak = weak_from_this()](const boost::system::error_code& ec) {
-            auto self = std::static_pointer_cast<I3CMCTPDDevice>(weak.lock());
-            if (!self)
-            {
-                return;
-            }
+                auto self =
+                    std::static_pointer_cast<I3CMCTPDDevice>(weak.lock());
+                if (!self)
+                {
+                    return;
+                }
 
-            if (ec)
-            {
-                error("Failed to call Recover on endpoint: {ERROR}", "ERROR",
-                      ec.message());
-            }
-            else
-            {
-                info("Successfully called Recover on I3C endpoint");
-            }
+                if (ec)
+                {
+                    error("Failed to call Recover on endpoint: {ERROR}",
+                          "ERROR", ec.message());
+                }
+                else
+                {
+                    info("Successfully called Recover on I3C endpoint");
+                }
 
-            self->startHealthMonitoring();
-        }, mctpdBusName, endpointPath, "au.com.codeconstruct.MCTP.Endpoint1",
+                self->startHealthMonitoring();
+            },
+            mctpdBusName, endpointPath, "au.com.codeconstruct.MCTP.Endpoint1",
             "Recover");
     }
     else
@@ -1029,8 +1034,8 @@ void I3CMCTPDDevice::recover()
 
 /* Changes for MCTPUSB */
 
-std::optional<SensorBaseConfigMap>
-    USBMCTPDDevice::match(const SensorData& config)
+std::optional<SensorBaseConfigMap> USBMCTPDDevice::match(
+    const SensorData& config)
 {
     auto iface = config.find(configInterfaceName(configType));
     if (iface == config.end())
@@ -1085,8 +1090,8 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     }
     else
     {
-        auto sStaticEndpointID = std::visit(VariantToStringVisitor(),
-                                            mStaticEndpointID->second);
+        auto sStaticEndpointID =
+            std::visit(VariantToStringVisitor(), mStaticEndpointID->second);
         std::uint8_t parsedEID{};
         auto [cptr, cec] = std::from_chars(
             sStaticEndpointID.data(),
@@ -1106,13 +1111,13 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     }
     else
     {
-        auto sbridgePoolStartEid = std::visit(VariantToStringVisitor(),
-                                              mbridgePoolStartEid->second);
+        auto sbridgePoolStartEid =
+            std::visit(VariantToStringVisitor(), mbridgePoolStartEid->second);
         std::uint8_t parsedbridgePoolStartEid{};
-        auto [dptr, dec] = std::from_chars(sbridgePoolStartEid.data(),
-                                           sbridgePoolStartEid.data() +
-                                               sbridgePoolStartEid.size(),
-                                           parsedbridgePoolStartEid);
+        auto [dptr, dec] = std::from_chars(
+            sbridgePoolStartEid.data(),
+            sbridgePoolStartEid.data() + sbridgePoolStartEid.size(),
+            parsedbridgePoolStartEid);
         if (dec != std::errc{})
         {
             throw std::invalid_argument("Bad BridgePool Start address");
@@ -1131,8 +1136,8 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     {
         try
         {
-            auto ignoreEidsStr = std::visit(VariantToStringVisitor(),
-                                            mIgnoreEids->second);
+            auto ignoreEidsStr =
+                std::visit(VariantToStringVisitor(), mIgnoreEids->second);
             if (!ignoreEidsStr.empty())
             {
                 ignoreEids = std::vector<std::uint8_t>{};
@@ -1213,8 +1218,8 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
 }
 
 /* MCTP SPI*/
-std::optional<SensorBaseConfigMap>
-    SPIMCTPDDevice::match(const SensorData& config)
+std::optional<SensorBaseConfigMap> SPIMCTPDDevice::match(
+    const SensorData& config)
 {
     auto iface = config.find(configInterfaceName(configType));
     if (iface == config.end())
@@ -1259,19 +1264,19 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
 
     auto sBus = std::visit(VariantToStringVisitor(), mBus->second);
     int bus{};
-    auto [bptr, bec] = std::from_chars(sBus.data(), sBus.data() + sBus.size(),
-                                       bus);
+    auto [bptr,
+          bec] = std::from_chars(sBus.data(), sBus.data() + sBus.size(), bus);
     if (bec != std::errc{})
     {
         throw std::invalid_argument("Bad bus index");
     }
 
-    auto sChipselect = std::visit(VariantToStringVisitor(),
-                                  mChipselect->second);
+    auto sChipselect =
+        std::visit(VariantToStringVisitor(), mChipselect->second);
     int chipselect{};
-    auto [cptr, cec] = std::from_chars(sChipselect.data(),
-                                       sChipselect.data() + sChipselect.size(),
-                                       chipselect);
+    auto [cptr, cec] =
+        std::from_chars(sChipselect.data(),
+                        sChipselect.data() + sChipselect.size(), chipselect);
     if (cec != std::errc{})
     {
         throw std::invalid_argument("Bad chip select");
@@ -1285,8 +1290,8 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
     }
     else
     {
-        auto sStaticEndpointID = std::visit(VariantToStringVisitor(),
-                                            mStaticEndpointID->second);
+        auto sStaticEndpointID =
+            std::visit(VariantToStringVisitor(), mStaticEndpointID->second);
         std::uint8_t parsedEID{};
         auto [cptr, cec] = std::from_chars(
             sStaticEndpointID.data(),
@@ -1341,7 +1346,6 @@ std::string I3CMCTPDDevice::interfaceFromBus(int bus)
           "I3C_BUS", bus, "NET_DEVICE", netdir);
     throw MCTPException("No matching net device found for the specified bus");
 }
-
 
 std::string SPIMCTPDDevice::interfaceFromBusCs(int bus, int chipselect)
 {

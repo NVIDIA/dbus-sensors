@@ -893,12 +893,14 @@ void addEventLog(const std::shared_ptr<sdbusplus::asio::connection>& conn,
 {
     conn->async_method_call(
         [](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            std::cerr << "Failed to log event due to " << ec.message() << "\n";
-            return;
-        }
-    }, "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
+            if (ec)
+            {
+                std::cerr << "Failed to log event due to " << ec.message()
+                          << "\n";
+                return;
+            }
+        },
+        "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
         "xyz.openbmc_project.Logging.Create", "Create", messageId, severity,
         addData);
 }
@@ -917,14 +919,14 @@ void parseSensorParamFromConfig(const SensorData& sensorData,
         auto minValueFind = cfg.find("MinValue");
         if (maxValueFind != cfg.end())
         {
-            maxValue = std::visit(VariantToDoubleVisitor(),
-                                  maxValueFind->second);
+            maxValue =
+                std::visit(VariantToDoubleVisitor(), maxValueFind->second);
             sensorParamMap.emplace("maxValue", maxValue);
         }
         if (minValueFind != cfg.end())
         {
-            minValue = std::visit(VariantToDoubleVisitor(),
-                                  minValueFind->second);
+            minValue =
+                std::visit(VariantToDoubleVisitor(), minValueFind->second);
             sensorParamMap.emplace("minValue", minValue);
         }
     }
@@ -960,8 +962,8 @@ void updateTelemetry(const std::string& objPath, const std::string& ifaceName,
             .count();
     std::vector<uint8_t> rawPropValue = {};
 
-    tal::TelemetryAggregator::updateTelemetry(objPath, ifaceName, propertyName,
-                                              rawPropValue, timestamp, retCode,
-                                              propValue, parentChassis);
+    tal::TelemetryAggregator::updateTelemetry(
+        objPath, ifaceName, propertyName, rawPropValue, timestamp, retCode,
+        propValue, parentChassis);
 }
 #endif

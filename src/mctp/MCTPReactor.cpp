@@ -166,13 +166,13 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
             mctpDevice->setRequestSetupCallback(
                 [weak{weak_from_this()}](
                     const std::shared_ptr<MCTPDDevice>& requestingDevice) {
-                auto self = weak.lock();
-                if (!self)
-                {
-                    return;
-                }
-                self->setupEndpoint(requestingDevice);
-            });
+                    auto self = weak.lock();
+                    if (!self)
+                    {
+                        return;
+                    }
+                    self->setupEndpoint(requestingDevice);
+                });
         }
 
         setupEndpoint(device);

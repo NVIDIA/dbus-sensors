@@ -52,10 +52,10 @@ using OnInterfaceRemovedCallback = std::function<void(std::string_view)>;
 Config getConfig(const SensorBaseConfigMap& properties)
 {
     auto name = loadVariant<std::string>(properties, properties::propertyName);
-    auto gpioLine = loadVariant<std::string>(properties,
-                                             properties::propertyGpioLine);
-    auto gpioPolarity = loadVariant<std::string>(properties,
-                                                 properties::propertyPolarity);
+    auto gpioLine =
+        loadVariant<std::string>(properties, properties::propertyGpioLine);
+    auto gpioPolarity =
+        loadVariant<std::string>(properties, properties::propertyPolarity);
     bool activeLow = false;
     if (gpioPolarity == "active_low")
     {
@@ -70,54 +70,55 @@ void setupInterfaceAdded(sdbusplus::asio::connection* conn,
     auto callback = std::move(cb);
     std::function<void(sdbusplus::message::message & msg)> handler =
         [callback](sdbusplus::message::message& msg) {
-        sdbusplus::message::object_path objPath;
-        SensorData ifcAndProperties;
-        msg.read(objPath, ifcAndProperties);
-        auto found = ifcAndProperties.find(interfaces::emGPIOCableSensingIfc);
-        if (found != ifcAndProperties.end())
-        {
-            Config config;
-            try
-            {
-                config = getConfig(found->second);
-                callback(objPath.str, found->first, config);
-            }
-            catch (std::exception& e)
-            {
-                std::cerr << "Incomplete config found: " << e.what()
-                          << " obj = " << objPath.str << std::endl;
-            }
-        }
-    };
-
-    // call the user callback for all the device that is already available
-    conn->async_method_call(
-        [callback](const boost::system::error_code ec,
-                   const ManagedObjectType& managedObjs) {
-        if (ec)
-        {
-            return;
-        }
-        for (const auto& obj : managedObjs)
-        {
-            const auto& item = obj.second;
-            auto found = item.find(interfaces::emGPIOCableSensingIfc);
-            if (found != item.end())
+            sdbusplus::message::object_path objPath;
+            SensorData ifcAndProperties;
+            msg.read(objPath, ifcAndProperties);
+            auto found =
+                ifcAndProperties.find(interfaces::emGPIOCableSensingIfc);
+            if (found != ifcAndProperties.end())
             {
                 Config config;
                 try
                 {
                     config = getConfig(found->second);
-                    callback(obj.first.str, found->first, config);
+                    callback(objPath.str, found->first, config);
                 }
                 catch (std::exception& e)
                 {
                     std::cerr << "Incomplete config found: " << e.what()
-                              << " obj = " << obj.first.str << std::endl;
+                              << " obj = " << objPath.str << std::endl;
                 }
             }
-        }
-    },
+        };
+
+    // call the user callback for all the device that is already available
+    conn->async_method_call(
+        [callback](const boost::system::error_code ec,
+                   const ManagedObjectType& managedObjs) {
+            if (ec)
+            {
+                return;
+            }
+            for (const auto& obj : managedObjs)
+            {
+                const auto& item = obj.second;
+                auto found = item.find(interfaces::emGPIOCableSensingIfc);
+                if (found != item.end())
+                {
+                    Config config;
+                    try
+                    {
+                        config = getConfig(found->second);
+                        callback(obj.first.str, found->first, config);
+                    }
+                    catch (std::exception& e)
+                    {
+                        std::cerr << "Incomplete config found: " << e.what()
+                                  << " obj = " << obj.first.str << std::endl;
+                    }
+                }
+            }
+        },
         "xyz.openbmc_project.EntityManager", "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 
@@ -139,10 +140,10 @@ void setupInterfaceRemoved(sdbusplus::asio::connection* conn,
     // Listen to the interface removed event.
     std::function<void(sdbusplus::message::message & msg)> handler =
         [callback = std::move(cb)](sdbusplus::message::message msg) {
-        sdbusplus::message::object_path objPath;
-        msg.read(objPath);
-        callback(objPath.str);
-    };
+            sdbusplus::message::object_path objPath;
+            msg.read(objPath);
+            callback(objPath.str);
+        };
     ifcRemoved = std::make_unique<sdbusplus::bus::match::match>(
         static_cast<sdbusplus::bus::bus&>(*conn),
         sdbusplus::bus::match::rules::interfacesRemoved() +
@@ -161,8 +162,8 @@ void addInventoryObject(
     sdbusplus::message::object_path inventoryCableObjPath(
         gpio_presence_sensing::inventoryCableObjPath);
     sdbusplus::message::object_path objPath = inventoryPath / config.name;
-    sdbusplus::message::object_path objCablePath = inventoryCableObjPath /
-                                                   config.name;
+    sdbusplus::message::object_path objCablePath =
+        inventoryCableObjPath / config.name;
     std::cout << "New config received " << objPath.str << std::endl;
     if (controller->hasObj(objPath.str))
     {
@@ -171,8 +172,8 @@ void addInventoryObject(
     // Status
     auto statusIfc = objectServer.add_unique_interface(
         objCablePath, gpio_presence_sensing::interfaces::statusIfc);
-    auto cableIfc = objectServer.add_interface(objCablePath,
-                                               interfaces::statusCableIfc);
+    auto cableIfc =
+        objectServer.add_interface(objCablePath, interfaces::statusCableIfc);
     statusIfc->register_property(
         gpio_presence_sensing::properties::propertyPresent, false);
     statusIfc->initialize();
@@ -192,14 +193,14 @@ void startMain(
     timer.expires_after(std::chrono::seconds(delay));
     timer.async_wait(
         [bus, controller, &gpioContext](const boost::system::error_code ec) {
-        if (ec == boost::asio::error::operation_aborted)
-        {
-            std::cout << "Delaying update loop" << std::endl;
-            return;
-        }
-        controller->startGPIOEventMonitor(gpioContext);
-        std::cout << "Update loop started" << std::endl;
-    });
+            if (ec == boost::asio::error::operation_aborted)
+            {
+                std::cout << "Delaying update loop" << std::endl;
+                return;
+            }
+            controller->startGPIOEventMonitor(gpioContext);
+            std::cout << "Update loop started" << std::endl;
+        });
 }
 
 int main()
@@ -215,15 +216,15 @@ int main()
         systemBus.get(), [&controller, &systemBus, &objectServer,
                           &io](std::string_view, std::string_view,
                                const gpio_presence_sensing::Config& config) {
-        gpio_presence_sensing::addInventoryObject(controller, objectServer,
-                                                  config);
-        startMain(/*delay=*/10, systemBus, controller, io);
-    });
+            gpio_presence_sensing::addInventoryObject(controller, objectServer,
+                                                      config);
+            startMain(/*delay=*/10, systemBus, controller, io);
+        });
 
     gpio_presence_sensing::setupInterfaceRemoved(
         systemBus.get(), [&controller](std::string_view objPath) {
-        controller->removeObj(std::string(objPath));
-    });
+            controller->removeObj(std::string(objPath));
+        });
 
     io.run();
 }

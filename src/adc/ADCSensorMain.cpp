@@ -34,6 +34,7 @@
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
+#include <tal.hpp>
 
 #include <array>
 #include <chrono>
@@ -49,7 +50,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-#include <tal.hpp>
 
 static constexpr bool debug = false;
 static constexpr float pollRateDefault = 0.5;

@@ -23,14 +23,13 @@
 
 namespace fs = std::filesystem;
 
-GPUStatus::GPUStatus(sdbusplus::asio::object_server& objectServer,
-                     std::shared_ptr<sdbusplus::asio::connection>& conn,
-                     const std::string& sensorName,
-                     const std::string& gpuService,
-                     const std::string& gpuObject,
-                     const std::string& gpuInterface,
-                     const std::string& gpuProperty, int totalGPU,
-                     const std::string& sensorConfiguration) :
+GPUStatus::GPUStatus(
+    sdbusplus::asio::object_server& objectServer,
+    std::shared_ptr<sdbusplus::asio::connection>& conn,
+    const std::string& sensorName, const std::string& gpuService,
+    const std::string& gpuObject, const std::string& gpuInterface,
+    const std::string& gpuProperty, int totalGPU,
+    const std::string& sensorConfiguration) :
     AssocInterface(
         static_cast<sdbusplus::bus::bus&>(*conn),
         ("/xyz/openbmc_project/sensors/GPU/" + escapeName(sensorName)).c_str(),
@@ -76,46 +75,46 @@ GPUStatus::GPUStatus(sdbusplus::asio::object_server& objectServer,
         "GPUResetReq", gpuStatus,
         [&](const std::map<std::string, bool>& newStatus,
             std::map<std::string, bool>& oldStatus) {
-        oldStatus = newStatus;
-        gpuStatus = newStatus;
-        return 1;
-    });
+            oldStatus = newStatus;
+            gpuStatus = newStatus;
+            return 1;
+        });
 
     if (!sensorInterface->initialize())
     {
         std::cerr << "error initializing value interface\n";
     }
 
-    auto gpuEventMatcherCallback = [this,
-                                    conn](sdbusplus::message::message& msg) {
-        bool resetRequired = false;
-        try
-        {
-            msg.read(resetRequired);
-        }
-        catch (const sdbusplus::exception_t&)
-        {
-            std::cerr << "error getting resetRequired data from "
-                      << msg.get_path() << "\n";
-            return;
-        }
-        std::string path = msg.get_path();
+    auto gpuEventMatcherCallback =
+        [this, conn](sdbusplus::message::message& msg) {
+            bool resetRequired = false;
+            try
+            {
+                msg.read(resetRequired);
+            }
+            catch (const sdbusplus::exception_t&)
+            {
+                std::cerr << "error getting resetRequired data from "
+                          << msg.get_path() << "\n";
+                return;
+            }
+            std::string path = msg.get_path();
 
-        uint8_t gpuIndex = 1;
-        std::size_t indexLast = path.size();
-        std::size_t indexFirst = path.find_last_not_of("0123456789");
-        if (indexFirst == std::string::npos)
-        {
-            return;
-        }
-        indexFirst++;
-        if (indexFirst != indexLast)
-        {
-            gpuIndex = std::stoi(path.substr(indexFirst, indexLast));
-        }
-        std::string gpuName = "GPU" + std::to_string(gpuIndex);
-        gpuStatus[gpuName] = resetRequired;
-    };
+            uint8_t gpuIndex = 1;
+            std::size_t indexLast = path.size();
+            std::size_t indexFirst = path.find_last_not_of("0123456789");
+            if (indexFirst == std::string::npos)
+            {
+                return;
+            }
+            indexFirst++;
+            if (indexFirst != indexLast)
+            {
+                gpuIndex = std::stoi(path.substr(indexFirst, indexLast));
+            }
+            std::string gpuName = "GPU" + std::to_string(gpuIndex);
+            gpuStatus[gpuName] = resetRequired;
+        };
 
     std::size_t indexLast = gpuObject.find_last_of('/');
     if (indexLast == std::string::npos)

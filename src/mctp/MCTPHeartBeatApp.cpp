@@ -147,8 +147,8 @@ static int waitFdTimeout(int fd, short events, uint64_t timeoutUsec)
 static int readMessage(int sd, std::vector<uint8_t>& retBuf,
                        sockaddr_mctp* retAddr)
 {
-    ssize_t len = recvfrom(sd, nullptr, 0, MSG_PEEK | MSG_TRUNC, nullptr,
-                           nullptr);
+    ssize_t len =
+        recvfrom(sd, nullptr, 0, MSG_PEEK | MSG_TRUNC, nullptr, nullptr);
     if (len < 0)
     {
         lg2::error("readMessage returned error: {ERROR}", "ERROR",
@@ -200,10 +200,9 @@ static int readMessage(int sd, std::vector<uint8_t>& retBuf,
  *
  * Extended addressing is used optionally, depending on extAddr arg. */
 
-static int mctpQueryVdmCommand(int sd, const struct sockaddr_mctp* reqAddr,
-                               bool extAddr, const void* req, size_t reqLen,
-                               std::vector<uint8_t>& resp,
-                               struct sockaddr_mctp* respAddr)
+static int mctpQueryVdmCommand(
+    int sd, const struct sockaddr_mctp* reqAddr, bool extAddr, const void* req,
+    size_t reqLen, std::vector<uint8_t>& resp, struct sockaddr_mctp* respAddr)
 {
     resp.clear();
 
@@ -230,9 +229,9 @@ static int mctpQueryVdmCommand(int sd, const struct sockaddr_mctp* reqAddr,
     }
 
     printHex("TX", static_cast<const uint8_t*>(req), reqLen);
-    ssize_t rc = sendto(sd, req, reqLen, 0,
-                        reinterpret_cast<const struct sockaddr*>(reqAddr),
-                        reqAddrLen);
+    ssize_t rc =
+        sendto(sd, req, reqLen, 0,
+               reinterpret_cast<const struct sockaddr*>(reqAddr), reqAddrLen);
     if (rc < 0)
     {
         lg2::error("sendto failed: {ERROR}", "ERROR", strerror(errno));
@@ -719,18 +718,18 @@ static void checkExistingEndpoint(
     systemBus->async_method_call(
         [systemBus, eid, &io, objpath](const boost::system::error_code& ec,
                                        const std::variant<std::string>& value) {
-        (void)value;
-        if (ec)
-        {
-            lg2::info("Failed to get EID assuing missing: {ERROR_MESSAGE}",
-                      "ERROR_MESSAGE", ec.message(), "ERROR_CATEGORY",
-                      ec.category().name(), "ERROR_CODE", ec.value());
-            return;
-        }
+            (void)value;
+            if (ec)
+            {
+                lg2::info("Failed to get EID assuing missing: {ERROR_MESSAGE}",
+                          "ERROR_MESSAGE", ec.message(), "ERROR_CATEGORY",
+                          ec.category().name(), "ERROR_CODE", ec.value());
+                return;
+            }
 
-        lg2::info("Found existing SPI endpoint {EID}", "EID", eid);
-        addedSPIEndpoint(systemBus, eid, io);
-    },
+            lg2::info("Found existing SPI endpoint {EID}", "EID", eid);
+            addedSPIEndpoint(systemBus, eid, io);
+        },
         mctpdBusName, objpath, "org.freedesktop.DBus.Properties", "Get",
         mctpdEndpointControlInterface, "EID");
 }
@@ -764,20 +763,20 @@ int main()
             rules::interfacesAddedAtPath(path);
 
         // Fix the match object creation - update to use gIo instead of io
-        auto interfacesAddedMatch = match(*systemBus, interfacesAddedMatchSpec,
-                                          [systemBus, eid](auto&) {
-            lg2::info("interfacesAddedMatch for SPI endpoint {EID}", "EID",
-                      eid);
-            addedSPIEndpoint(systemBus, eid, gIo);
-        });
+        auto interfacesAddedMatch = match(
+            *systemBus, interfacesAddedMatchSpec, [systemBus, eid](auto&) {
+                lg2::info("interfacesAddedMatch for SPI endpoint {EID}", "EID",
+                          eid);
+                addedSPIEndpoint(systemBus, eid, gIo);
+            });
         auto interfacesRemovedMatch =
             match(*systemBus, interfacesRemovedMatchSpec, [](auto&) {
-            lg2::info("interfacesRemovedMatch for SPI endpoint");
-            if (gHeartbeatService)
-            {
-                gHeartbeatService->stop(false);
-            }
-        });
+                lg2::info("interfacesRemovedMatch for SPI endpoint");
+                if (gHeartbeatService)
+                {
+                    gHeartbeatService->stop(false);
+                }
+            });
 
         // Setup signal handler for process termination
         struct sigaction sa{};
@@ -792,25 +791,25 @@ int main()
         boost::asio::steady_timer clock(gIo);
         std::function<void(const boost::system::error_code&)> alarm =
             [&](const boost::system::error_code& ec) {
-            if (ec)
-            {
-                return;
-            }
-
-            // We still check gRunning as a backup to avoid race condition
-            if (!gRunning)
-            {
-                lg2::info("Stopping IO context due to termination signal");
-                gIo.stop();
-                if (gHeartbeatService)
+                if (ec)
                 {
-                    gHeartbeatService->stop(true);
+                    return;
                 }
-                return;
-            }
-            clock.expires_after(period);
-            clock.async_wait(alarm);
-        };
+
+                // We still check gRunning as a backup to avoid race condition
+                if (!gRunning)
+                {
+                    lg2::info("Stopping IO context due to termination signal");
+                    gIo.stop();
+                    if (gHeartbeatService)
+                    {
+                        gHeartbeatService->stop(true);
+                    }
+                    return;
+                }
+                clock.expires_after(period);
+                clock.async_wait(alarm);
+            };
         clock.expires_after(period);
         clock.async_wait(alarm);
         gIo.run();

@@ -40,18 +40,18 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
     sensorInterface->register_property(
         "Status", status,
         [&](const std::string& newStatus, std::string& oldStatus) {
-        oldStatus = newStatus;
-        status = newStatus;
-        return 1;
-    });
+            oldStatus = newStatus;
+            status = newStatus;
+            return 1;
+        });
 
     sensorInterface->register_property(
         "RedundancyLost", redundancyLost,
         [&](const bool& newStatus, bool& oldStatus) {
-        oldStatus = newStatus;
-        redundancyLost = newStatus;
-        return 1;
-    });
+            oldStatus = newStatus;
+            redundancyLost = newStatus;
+            return 1;
+        });
 
     fs::path p(sensorConfiguration);
     AssociationList assocs = {};
@@ -92,42 +92,42 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
     }
     setStatus();
 
-    auto psuEventMatcherCallback = [this,
-                                    conn](sdbusplus::message::message& msg) {
-        std::string objectName;
-        boost::container::flat_map<std::string, std::variant<bool>> values;
-        try
-        {
-            msg.read(objectName, values);
-        }
-        catch (const sdbusplus::exception_t& e)
-        {
-            std::cerr << "Failed to read message from PSU Event\n";
-            return;
-        }
-
-        std::string psuEventName = "Functional";
-        auto findEvent = values.find(psuEventName);
-        if (findEvent != values.end())
-        {
-            bool* functional = std::get_if<bool>(&(findEvent->second));
-            if (functional == nullptr)
+    auto psuEventMatcherCallback =
+        [this, conn](sdbusplus::message::message& msg) {
+            std::string objectName;
+            boost::container::flat_map<std::string, std::variant<bool>> values;
+            try
             {
-                std::cerr << "Unable to get valid functional status\n";
+                msg.read(objectName, values);
+            }
+            catch (const sdbusplus::exception_t& e)
+            {
+                std::cerr << "Failed to read message from PSU Event\n";
                 return;
             }
-            if (*functional)
-            {
-                workablePSU++;
-            }
-            else
-            {
-                workablePSU--;
-            }
-        }
 
-        setStatus();
-    };
+            std::string psuEventName = "Functional";
+            auto findEvent = values.find(psuEventName);
+            if (findEvent != values.end())
+            {
+                bool* functional = std::get_if<bool>(&(findEvent->second));
+                if (functional == nullptr)
+                {
+                    std::cerr << "Unable to get valid functional status\n";
+                    return;
+                }
+                if (*functional)
+                {
+                    workablePSU++;
+                }
+                else
+                {
+                    workablePSU--;
+                }
+            }
+
+            setStatus();
+        };
 
     /* create properties changed signal handler for the status change*/
     psuEventMatcher = std::make_shared<sdbusplus::bus::match::match>(

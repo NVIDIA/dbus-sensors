@@ -32,15 +32,13 @@
 static constexpr double maxReading = 127;
 static constexpr double minReading = -128;
 
-PLXTempSensor::PLXTempSensor(const std::string& objectType,
-                             sdbusplus::asio::object_server& objectServer,
-                             std::shared_ptr<sdbusplus::asio::connection>& conn,
-                             boost::asio::io_context& io,
-                             const std::string& sensorName,
-                             std::vector<thresholds::Threshold>&& thresholdsIn,
-                             const std::string& sensorConfiguration,
-                             const PowerState powerState, uint8_t deviceBus,
-                             uint8_t deviceAddress, const float pollRate) :
+PLXTempSensor::PLXTempSensor(
+    const std::string& objectType, sdbusplus::asio::object_server& objectServer,
+    std::shared_ptr<sdbusplus::asio::connection>& conn,
+    boost::asio::io_context& io, const std::string& sensorName,
+    std::vector<thresholds::Threshold>&& thresholdsIn,
+    const std::string& sensorConfiguration, const PowerState powerState,
+    uint8_t deviceBus, uint8_t deviceAddress, const float pollRate) :
     Sensor(boost::replace_all_copy(sensorName, " ", "_"),
            std::move(thresholdsIn), sensorConfiguration, objectType, false,
            false, maxReading, minReading, conn, powerState),

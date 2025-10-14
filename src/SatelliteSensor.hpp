@@ -41,16 +41,15 @@ int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading,
 
 struct SatelliteSensor : public Sensor
 {
-    SatelliteSensor(std::shared_ptr<sdbusplus::asio::connection>& conn,
-                    boost::asio::io_context& io, const std::string& name,
-                    const std::string& sensorConfiguration,
-                    const std::string& objType,
-                    sdbusplus::asio::object_server& objectServer,
-                    std::vector<thresholds::Threshold>&& thresholdData,
-                    uint8_t busId, uint8_t addr, uint16_t offset,
-                    std::string& sensorType, std::string& valueType,
-                    size_t pollTime, double minVal, double maxVal,
-                    PowerState powerState);
+    SatelliteSensor(
+        std::shared_ptr<sdbusplus::asio::connection>& conn,
+        boost::asio::io_context& io, const std::string& name,
+        const std::string& sensorConfiguration, const std::string& objType,
+        sdbusplus::asio::object_server& objectServer,
+        std::vector<thresholds::Threshold>&& thresholdData, uint8_t busId,
+        uint8_t addr, uint16_t offset, std::string& sensorType,
+        std::string& valueType, size_t pollTime, double minVal, double maxVal,
+        PowerState powerState);
     ~SatelliteSensor() override;
 
     void checkThresholds() override;

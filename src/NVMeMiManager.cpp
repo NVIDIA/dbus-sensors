@@ -201,9 +201,9 @@ void NVMeMiManager::processContextCommand(ContextCommInfo& commInfo)
     if (pollResult > 0 && ((pfd.revents & POLLIN) != 0))
     {
         // Process the command
-        ssize_t rc = processMiCommand(commInfo.context->getRequestPipe(),
-                                      commInfo.context->getResponsePipe(),
-                                      commInfo.eid);
+        ssize_t rc =
+            processMiCommand(commInfo.context->getRequestPipe(),
+                             commInfo.context->getResponsePipe(), commInfo.eid);
         if (rc < 0)
         {
             std::cerr << "Error processing command for eid: "

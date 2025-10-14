@@ -342,33 +342,33 @@ void NVMeBasicContext::readAndProcessNVMeSensor()
                 return len + 1 - n;
             }
 
-        response->prepare(len);
-        return len;
-    },
+            response->prepare(len);
+            return len;
+        },
         [weakSelf{weak_from_this()}, weakSensor{weakPtr}, response](
             const boost::system::error_code& ec, std::size_t length) mutable {
-        // Check if this is a cancellation error (stream closed)
-        if (ec == boost::asio::error::operation_aborted)
-        {
-            std::cerr
-                << "NVMeBasicContext: Operation cancelled (stream closed)\n";
-            return;
-        }
+            // Check if this is a cancellation error (stream closed)
+            if (ec == boost::asio::error::operation_aborted)
+            {
+                std::cerr
+                    << "NVMeBasicContext: Operation cancelled (stream closed)\n";
+                return;
+            }
 
-        // Safely lock the weak pointer to get the sensor
-        auto sensor = weakSensor.lock();
-        if (!sensor)
-        {
-            std::cerr
-                << "NVMeBasicContext: Sensor no longer exists, skipping response processing\n";
-            return;
-        }
+            // Safely lock the weak pointer to get the sensor
+            auto sensor = weakSensor.lock();
+            if (!sensor)
+            {
+                std::cerr
+                    << "NVMeBasicContext: Sensor no longer exists, skipping response processing\n";
+                return;
+            }
 
-        if (ec)
-        {
-            std::cerr << "Got error reading basic query: " << ec << "\n";
-            return;
-        }
+            if (ec)
+            {
+                std::cerr << "Got error reading basic query: " << ec << "\n";
+                return;
+            }
 
             if (length == 0)
             {

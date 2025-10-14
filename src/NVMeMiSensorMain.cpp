@@ -110,9 +110,8 @@ static uint8_t extractAddress(const SensorBaseConfigMap& properties)
     return std::visit(VariantToUnsignedIntVisitor(), findSlaveAddr->second);
 }
 
-static std::optional<std::string>
-    extractSensorName(const std::string& path,
-                      const SensorBaseConfigMap& properties)
+static std::optional<std::string> extractSensorName(
+    const std::string& path, const SensorBaseConfigMap& properties)
 {
     auto findSensorName = properties.find("Name");
     if (findSensorName == properties.end())
@@ -248,8 +247,8 @@ static MctpDiscoveryHandler handleMctpDiscovery(
     };
 }
 
-static std::shared_ptr<NVMeContext>
-    provideMiContext(boost::asio::io_context& io, NVMEMap& map, uint8_t eid)
+static std::shared_ptr<NVMeContext> provideMiContext(
+    boost::asio::io_context& io, NVMEMap& map, uint8_t eid)
 {
     auto findRoot = map.find(eid);
     if (findRoot != map.end())
@@ -257,8 +256,8 @@ static std::shared_ptr<NVMeContext>
         return findRoot->second;
     }
 
-    std::shared_ptr<NVMeContext> context = std::make_shared<NVMeMiContext>(io,
-                                                                           eid);
+    std::shared_ptr<NVMeContext> context =
+        std::make_shared<NVMeMiContext>(io, eid);
     map[eid] = context;
 
     return context;
@@ -360,91 +359,96 @@ static void handleSensorConfigurations(
     // Start MCTP discovery for each unique EID
     for (const auto& [eid, sensorConfigs] : sensorsByEid)
     {
-        discoverMctpEndpoint(eid, dbusConnection,
-                             [&io, &objectServer, &dbusConnection,
-                              sensorConfigs,
-                              eid](uint8_t discoveredEid, int net) {
-            // Check if discovered EID matches expected EID
-            if (discoveredEid != eid)
-            {
-                lg2::debug("EID mismatch: expected {EXPECTED}, found {FOUND}",
-                           "EXPECTED", eid, "FOUND", discoveredEid);
-                return;
-            }
-
-            std::shared_ptr<NVMeContext> context =
-                provideMiContext(io, nvmeDeviceMap, discoveredEid);
-
-            auto nvmeContext = std::static_pointer_cast<NVMeMiContext>(context);
-
-            if (commManager)
-            {
-                if (!commManager->addContext(nvmeContext, net, discoveredEid))
+        discoverMctpEndpoint(
+            eid, dbusConnection,
+            [&io, &objectServer, &dbusConnection, sensorConfigs,
+             eid](uint8_t discoveredEid, int net) {
+                // Check if discovered EID matches expected EID
+                if (discoveredEid != eid)
                 {
-                    lg2::error(
-                        "Failed to add context in NVMeMiManager for eid: {EID}",
-                        "EID", discoveredEid);
+                    lg2::debug(
+                        "EID mismatch: expected {EXPECTED}, found {FOUND}",
+                        "EXPECTED", eid, "FOUND", discoveredEid);
                     return;
                 }
-            }
 
-            try
-            {
-                // Find minimum poll rate from all sensors for this EID
-                uint8_t minPollRate = UINT8_MAX;
-                for (const auto& sensorConfig : sensorConfigs)
+                std::shared_ptr<NVMeContext> context =
+                    provideMiContext(io, nvmeDeviceMap, discoveredEid);
+
+                auto nvmeContext =
+                    std::static_pointer_cast<NVMeMiContext>(context);
+
+                if (commManager)
                 {
-                    if (sensorConfig.pollRate < minPollRate)
+                    if (!commManager->addContext(nvmeContext, net,
+                                                 discoveredEid))
                     {
-                        minPollRate = sensorConfig.pollRate;
+                        lg2::error(
+                            "Failed to add context in NVMeMiManager for eid: {EID}",
+                            "EID", discoveredEid);
+                        return;
                     }
                 }
 
-                // Configure context with minimum poll rate
-                nvmeContext->setPollRate(minPollRate);
-
-                // Create both temperature and status sensors for this EID
-                for (const auto& sensorConfig : sensorConfigs)
+                try
                 {
-                    if (!sensorConfig.thresholds.empty())
+                    // Find minimum poll rate from all sensors for this EID
+                    uint8_t minPollRate = UINT8_MAX;
+                    for (const auto& sensorConfig : sensorConfigs)
                     {
-                        // Create temperature sensor (has thresholds)
-                        auto thresholds =
-                            sensorConfig.thresholds; // Make a copy
-                        std::shared_ptr<NVMeSensor> sensorPtr =
-                            std::make_shared<NVMeSensor>(
-                                objectServer, io, dbusConnection,
-                                sensorConfig.sensorName, std::move(thresholds),
-                                sensorConfig.interfacePath, discoveredEid);
-
-                        context->addSensor<NVMeSensor>(sensorPtr);
+                        if (sensorConfig.pollRate < minPollRate)
+                        {
+                            minPollRate = sensorConfig.pollRate;
+                        }
                     }
-                    else
+
+                    // Configure context with minimum poll rate
+                    nvmeContext->setPollRate(minPollRate);
+
+                    // Create both temperature and status sensors for this EID
+                    for (const auto& sensorConfig : sensorConfigs)
                     {
-                        // Create status sensor (no thresholds)
-                        std::shared_ptr<NVMeStatusSensor> statusSensorPtr =
-                            std::make_shared<NVMeStatusSensor>(
-                                objectServer, io, dbusConnection,
-                                sensorConfig.sensorName,
-                                sensorConfig.interfacePath, discoveredEid);
+                        if (!sensorConfig.thresholds.empty())
+                        {
+                            // Create temperature sensor (has thresholds)
+                            auto thresholds =
+                                sensorConfig.thresholds; // Make a copy
+                            std::shared_ptr<NVMeSensor> sensorPtr =
+                                std::make_shared<NVMeSensor>(
+                                    objectServer, io, dbusConnection,
+                                    sensorConfig.sensorName,
+                                    std::move(thresholds),
+                                    sensorConfig.interfacePath, discoveredEid);
 
-                        context->addSensor<NVMeStatusSensor>(statusSensorPtr);
+                            context->addSensor<NVMeSensor>(sensorPtr);
+                        }
+                        else
+                        {
+                            // Create status sensor (no thresholds)
+                            std::shared_ptr<NVMeStatusSensor> statusSensorPtr =
+                                std::make_shared<NVMeStatusSensor>(
+                                    objectServer, io, dbusConnection,
+                                    sensorConfig.sensorName,
+                                    sensorConfig.interfacePath, discoveredEid);
+
+                            context->addSensor<NVMeStatusSensor>(
+                                statusSensorPtr);
+                        }
                     }
+
+                    lg2::debug(
+                        "polling nvme devices for eid: {EID} with {COUNT} sensors poll rate: {RATE} seconds",
+                        "EID", static_cast<int>(discoveredEid), "COUNT",
+                        sensorConfigs.size(), "RATE",
+                        static_cast<int>(minPollRate));
+                    context->pollNVMeDevices();
                 }
-
-                lg2::debug(
-                    "polling nvme devices for eid: {EID} with {COUNT} sensors poll rate: {RATE} seconds",
-                    "EID", static_cast<int>(discoveredEid), "COUNT",
-                    sensorConfigs.size(), "RATE",
-                    static_cast<int>(minPollRate));
-                context->pollNVMeDevices();
-            }
-            catch (const std::invalid_argument& ex)
-            {
-                lg2::error("Failed to add sensors for eid {EID} {ERROR}", "EID",
-                           discoveredEid, "ERROR", ex.what());
-            }
-        });
+                catch (const std::invalid_argument& ex)
+                {
+                    lg2::error("Failed to add sensors for eid {EID} {ERROR}",
+                               "EID", discoveredEid, "ERROR", ex.what());
+                }
+            });
     }
 
     lg2::debug(
@@ -459,9 +463,9 @@ void createSensors(boost::asio::io_context& io,
     auto getter = std::make_shared<GetSensorConfiguration>(
         dbusConnection, [&io, &objectServer, &dbusConnection](
                             const ManagedObjectType& sensorConfigurations) {
-        handleSensorConfigurations(io, objectServer, dbusConnection,
-                                   sensorConfigurations);
-    });
+            handleSensorConfigurations(io, objectServer, dbusConnection,
+                                       sensorConfigurations);
+        });
     getter->getConfiguration(std::vector<std::string>{
         NVMeSensor::sensorType, NVMeStatusSensor::sensorType});
 }
@@ -530,24 +534,24 @@ int main()
     boost::asio::steady_timer filterTimer(io);
     std::function<void(sdbusplus::message_t&)> eventHandler =
         [&filterTimer, &io, &objectServer, &systemBus](sdbusplus::message_t&) {
-        // this implicitly cancels the timer
-        filterTimer.expires_after(std::chrono::seconds(1));
+            // this implicitly cancels the timer
+            filterTimer.expires_after(std::chrono::seconds(1));
 
-        filterTimer.async_wait([&](const boost::system::error_code& ec) {
-            if (ec == boost::asio::error::operation_aborted)
-            {
-                return; // we're being canceled
-            }
+            filterTimer.async_wait([&](const boost::system::error_code& ec) {
+                if (ec == boost::asio::error::operation_aborted)
+                {
+                    return; // we're being canceled
+                }
 
-            if (ec)
-            {
-                lg2::error("Error: {ERROR}", "ERROR", ec.message());
-                return;
-            }
+                if (ec)
+                {
+                    lg2::error("Error: {ERROR}", "ERROR", ec.message());
+                    return;
+                }
 
-            createSensors(io, objectServer, systemBus);
-        });
-    };
+                createSensors(io, objectServer, systemBus);
+            });
+        };
 
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
         setupPropertiesChangedMatches(
@@ -563,8 +567,8 @@ int main()
         "type='signal',member='InterfacesRemoved',arg0path='" +
             std::string(inventoryPath) + "/'",
         [](sdbusplus::message_t& msg) {
-        interfaceRemoved(msg, nvmeDeviceMap);
-    });
+            interfaceRemoved(msg, nvmeDeviceMap);
+        });
 
     setupManufacturingModeMatch(*systemBus);
 #ifdef NVIDIA_SHMEM

@@ -47,10 +47,10 @@ Config getConfig(const SensorBaseConfigMap& properties,
                  const std::string& chassisId)
 {
     auto name = loadVariant<std::string>(properties, properties::propertyName);
-    auto gpioLine = loadVariant<std::string>(properties,
-                                             properties::propertyGpioLine);
-    auto gpioPolarity = loadVariant<std::string>(properties,
-                                                 properties::propertyPolarity);
+    auto gpioLine =
+        loadVariant<std::string>(properties, properties::propertyGpioLine);
+    auto gpioPolarity =
+        loadVariant<std::string>(properties, properties::propertyPolarity);
     bool activeLow = false;
     if (gpioPolarity == "active_low")
     {
@@ -100,8 +100,8 @@ void catchSignal(sdbusplus::message::message& msg, Callback&& callback)
         std::filesystem::path emObjPath = objPath.str;
         try
         {
-            config = getConfig(found->second,
-                               emObjPath.parent_path().filename());
+            config =
+                getConfig(found->second, emObjPath.parent_path().filename());
             std::forward<Callback>(callback)(config);
         }
         catch (std::exception& e)
@@ -122,22 +122,22 @@ void setupInterfaceAdded(sdbusplus::asio::connection* conn,
 
     std::function<void(sdbusplus::message::message & msg)> handler =
         [callbackIn](sdbusplus::message::message& msg) {
-        catchSignal(msg, callbackIn);
-    };
+            catchSignal(msg, callbackIn);
+        };
 
     conn->async_method_call(
         [callback{std::move(callbackIn)}](
             const boost::system::error_code& ec,
             const ManagedObjectType& managedObjs) {
-        if (ec)
-        {
-            std::cerr
-                << "Failed to retrieve Entity Manager WriteProtect Interface: "
-                << ec << std::endl;
-            return;
-        }
-        getEmWriteProtectIf(managedObjs, callback);
-    },
+            if (ec)
+            {
+                std::cerr
+                    << "Failed to retrieve Entity Manager WriteProtect Interface: "
+                    << ec << std::endl;
+                return;
+            }
+            getEmWriteProtectIf(managedObjs, callback);
+        },
         "xyz.openbmc_project.EntityManager", "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 
@@ -159,10 +159,10 @@ void setupInterfaceRemoved(sdbusplus::asio::connection* conn,
 
     std::function<void(sdbusplus::message::message & msg)> handler =
         [callback{std::move(callbackIn)}](sdbusplus::message::message msg) {
-        sdbusplus::message::object_path objPath;
-        msg.read(objPath);
-        callback(objPath.filename());
-    };
+            sdbusplus::message::object_path objPath;
+            msg.read(objPath);
+            callback(objPath.filename());
+        };
 
     ifcRemoved = std::make_unique<sdbusplus::bus::match::match>(
         static_cast<sdbusplus::bus::bus&>(*conn),
@@ -202,13 +202,13 @@ int main()
     write_protect::setupInterfaceAdded(
         systemBus.get(),
         [&writeprotector](const write_protect::Config& config) {
-        write_protect::addSoftwareObject(writeprotector, config);
-    });
+            write_protect::addSoftwareObject(writeprotector, config);
+        });
 
     write_protect::setupInterfaceRemoved(
         systemBus.get(), [&writeprotector](std::string_view name) {
-        writeprotector->removeObj(std::string(name));
-    });
+            writeprotector->removeObj(std::string(name));
+        });
 
     io.run();
 }

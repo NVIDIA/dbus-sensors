@@ -86,20 +86,20 @@ LeakDetectSensor::LeakDetectSensor(
     sensorInterface->register_property(
         "Value", detectorValue,
         [this](const double& newValue, double& oldValue) {
-        if (!internalValueSet)
-        {
-            detectorValue = newValue;
-            sensorOverride = true;
-        }
-        else if (!sensorOverride)
-        {
-            detectorValue = newValue;
-        }
+            if (!internalValueSet)
+            {
+                detectorValue = newValue;
+                sensorOverride = true;
+            }
+            else if (!sensorOverride)
+            {
+                detectorValue = newValue;
+            }
 
-        determineDetectorState(detectorValue);
-        oldValue = detectorValue;
-        return true;
-    });
+            determineDetectorState(detectorValue);
+            oldValue = detectorValue;
+            return true;
+        });
     sensorInterface->register_property("Unit", sensor_paths::unitVolts);
     sensorInterface->register_property("MinValue", sensorMin);
     sensorInterface->register_property("MaxValue", sensorMax);
@@ -119,11 +119,11 @@ LeakDetectSensor::LeakDetectSensor(
     thresholdInterface->register_property(
         "CriticalLow", leakThreshold,
         [this](const double& newValue, double& oldValue) {
-        leakThreshold = newValue;
-        persistThreshold(leakThreshold);
-        oldValue = leakThreshold;
-        return true;
-    });
+            leakThreshold = newValue;
+            persistThreshold(leakThreshold);
+            oldValue = leakThreshold;
+            return true;
+        });
 
     if (!thresholdInterface->initialize())
     {
@@ -131,8 +131,8 @@ LeakDetectSensor::LeakDetectSensor(
                   << name << "\n";
     }
 
-    sensorAssociation = objectServer.add_interface(sensorObjPath,
-                                                   association::interface);
+    sensorAssociation =
+        objectServer.add_interface(sensorObjPath, association::interface);
     createAssociation(sensorAssociation, configurationPath);
 
     sdbusplus::message::object_path inventoryObjPath(
@@ -154,8 +154,8 @@ LeakDetectSensor::LeakDetectSensor(
     // Add association of the inventory object to the chassis.  This is required
     // for other applications such as bmcweb to determine which chassis this
     // particular Leak Detector belongs to.
-    inventoryAssociation = objectServer.add_interface(inventoryObjPath,
-                                                      association::interface);
+    inventoryAssociation =
+        objectServer.add_interface(inventoryObjPath, association::interface);
     std::vector<Association> inventoryAssociations;
     inventoryAssociations.emplace_back(
         "chassis", "contained_by",
@@ -200,8 +200,8 @@ LeakDetectSensor::LeakDetectSensor(
     // Add association of the state object to the invetory object that describes
     // the leak detector.  Other application such as bmcweb may use this to
     // determine which leak detector the state is describing.
-    stateAssociation = objectServer.add_interface(stateObjPath,
-                                                  association::interface);
+    stateAssociation =
+        objectServer.add_interface(stateObjPath, association::interface);
     std::vector<Association> stateAssociations;
     stateAssociations.emplace_back("inventory", "leak_detecting",
                                    inventoryObjPath);
@@ -259,12 +259,12 @@ void LeakDetectSensor::setupRead()
     inputDev.async_read_some_at(
         0, boost::asio::buffer(readBuf),
         [weakRef](const boost::system::error_code& ec, std::size_t bytesRead) {
-        std::shared_ptr<LeakDetectSensor> self = weakRef.lock();
-        if (self)
-        {
-            self->handleResponse(ec, bytesRead);
-        }
-    });
+            std::shared_ptr<LeakDetectSensor> self = weakRef.lock();
+            if (self)
+            {
+                self->handleResponse(ec, bytesRead);
+            }
+        });
 }
 
 // Based on the detector value, determine the current detector state
@@ -350,8 +350,8 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
     {
         double rawValue = 0.0;
         const char* bufEnd = readBuf.data() + bytesRead;
-        std::from_chars_result ret = std::from_chars(readBuf.data(), bufEnd,
-                                                     rawValue);
+        std::from_chars_result ret =
+            std::from_chars(readBuf.data(), bufEnd, rawValue);
         if (ret.ec != std::errc())
         {
             std::cerr << "Unable to get value.\n";
@@ -517,13 +517,14 @@ void LeakDetectSensor::executeShutdown()
 
     dbusConnection->async_method_call(
         [](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            std::cerr << "Failed to execute shutdown due to " << ec.message()
-                      << "\n";
-            return;
-        }
-    }, "xyz.openbmc_project.State.Chassis",
+            if (ec)
+            {
+                std::cerr << "Failed to execute shutdown due to "
+                          << ec.message() << "\n";
+                return;
+            }
+        },
+        "xyz.openbmc_project.State.Chassis",
         "/xyz/openbmc_project/state/chassis0",
         "org.freedesktop.DBus.Properties", "Set",
         "xyz.openbmc_project.State.Chassis", "RequestedPowerTransition",
@@ -554,48 +555,52 @@ void LeakDetectSensor::blinkFaultLed()
     // new parameters to take effect.
     dbusConnection->async_method_call(
         [](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            std::cerr << "Failed to set fault LED to Off due to "
-                      << ec.message() << "\n";
-            return;
-        }
-    }, ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+            if (ec)
+            {
+                std::cerr << "Failed to set fault LED to Off due to "
+                          << ec.message() << "\n";
+                return;
+            }
+        },
+        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
         ledInterface, "State", ledActionOff);
 
     // LED parameters such as Duty and Period must be set before enabling the
     // blink action on the LED.
     dbusConnection->async_method_call(
         [](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            std::cerr << "Failed to set fault LED Duty due to " << ec.message()
-                      << "\n";
-            return;
-        }
-    }, ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+            if (ec)
+            {
+                std::cerr << "Failed to set fault LED Duty due to "
+                          << ec.message() << "\n";
+                return;
+            }
+        },
+        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
         ledInterface, "DutyOn", dutyOn);
 
     dbusConnection->async_method_call(
         [](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            std::cerr << "Failed to set fault LED Period due to "
-                      << ec.message() << "\n";
-            return;
-        }
-    }, ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+            if (ec)
+            {
+                std::cerr << "Failed to set fault LED Period due to "
+                          << ec.message() << "\n";
+                return;
+            }
+        },
+        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
         ledInterface, "Period", period);
 
     dbusConnection->async_method_call(
         [](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            std::cerr << "Failed to set fault LED to Blink due to "
-                      << ec.message() << "\n";
-            return;
-        }
-    }, ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
+            if (ec)
+            {
+                std::cerr << "Failed to set fault LED to Blink due to "
+                          << ec.message() << "\n";
+                return;
+            }
+        },
+        ledService, ledPath, "org.freedesktop.DBus.Properties", "Set",
         ledInterface, "State", ledActionBlink);
 }
 
@@ -609,21 +614,22 @@ void LeakDetectSensor::persistThreshold(double newThreshold)
 
     dbusConnection->async_method_call(
         [](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            std::cerr << "Failed to set leak threshold due to " << ec.message()
-                      << "\n";
-            return;
-        }
-    }, entityManagerName, configurationPath, "org.freedesktop.DBus.Properties",
+            if (ec)
+            {
+                std::cerr << "Failed to set leak threshold due to "
+                          << ec.message() << "\n";
+                return;
+            }
+        },
+        entityManagerName, configurationPath, "org.freedesktop.DBus.Properties",
         "Set", "xyz.openbmc_project.Configuration.VoltageLeakDetector",
         "LeakThresholdVolts", threshold);
 }
 
 // Converts the current detector state into the corresponding Health Status
 // string as defined in the schema
-std::string
-    LeakDetectSensor::getDetectorStatusString(DetectorState detectorState)
+std::string LeakDetectSensor::getDetectorStatusString(
+    DetectorState detectorState)
 {
     switch (detectorState)
     {
@@ -641,8 +647,8 @@ std::string
 
 // Converts the current detector state into the corresponding resource State
 // string as defined in the schema
-std::string
-    LeakDetectSensor::getDetectorStateString(DetectorState detectorState)
+std::string LeakDetectSensor::getDetectorStateString(
+    DetectorState detectorState)
 {
     switch (detectorState)
     {

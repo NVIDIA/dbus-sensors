@@ -52,8 +52,8 @@ static const I2CDeviceTypeMap i2CDeviceTypes{
     {"MAX1363", I2CDeviceType{"max1363", false}},
     {"ADS7142", I2CDeviceType{"ads7142", false}}};
 
-static std::shared_ptr<I2CDeviceParams>
-    getI2CParams(const SensorBaseConfigMap& cfg)
+static std::shared_ptr<I2CDeviceParams> getI2CParams(
+    const SensorBaseConfigMap& cfg)
 {
     auto findDeviceType = cfg.find("DeviceType");
     auto findBus = cfg.find("Bus");
@@ -65,8 +65,8 @@ static std::shared_ptr<I2CDeviceParams>
         return nullptr;
     }
 
-    std::string deviceType = std::visit(VariantToStringVisitor(),
-                                        findDeviceType->second);
+    std::string deviceType =
+        std::visit(VariantToStringVisitor(), findDeviceType->second);
     auto findI2CDevType = i2CDeviceTypes.find(deviceType);
     if (findI2CDevType == i2CDeviceTypes.end())
     {
@@ -74,10 +74,10 @@ static std::shared_ptr<I2CDeviceParams>
         return nullptr;
     }
 
-    std::uint64_t bus = std::visit(VariantToUnsignedIntVisitor(),
-                                   findBus->second);
-    std::uint64_t address = std::visit(VariantToUnsignedIntVisitor(),
-                                       findAddress->second);
+    std::uint64_t bus =
+        std::visit(VariantToUnsignedIntVisitor(), findBus->second);
+    std::uint64_t address =
+        std::visit(VariantToUnsignedIntVisitor(), findAddress->second);
 
     return std::make_shared<I2CDeviceParams>(findI2CDevType->second, bus,
                                              address);
@@ -95,8 +95,8 @@ static std::string getReadPath(const SensorBaseConfigMap& cfg,
         return "";
     }
 
-    std::uint64_t channel = std::visit(VariantToUnsignedIntVisitor(),
-                                       findChannel->second);
+    std::uint64_t channel =
+        std::visit(VariantToUnsignedIntVisitor(), findChannel->second);
     std::string sensorFile = "in_voltage" + std::to_string(channel) + "_raw";
 
     std::string devicePath = params.devicePath();
@@ -206,8 +206,8 @@ static std::shared_ptr<I2CDevice> getI2CDevice(const I2CDeviceParams& params)
 
 // Attempts to instantiate the device assocated with the sensor.  Returns
 // nullptr if device does not exist or instantiation unsuccessful
-static std::shared_ptr<I2CDevice>
-    instantiateI2CDevice(const SensorData& sensorData, std::string& readPath)
+static std::shared_ptr<I2CDevice> instantiateI2CDevice(
+    const SensorData& sensorData, std::string& readPath)
 {
     for (const auto& [intf, cfg] : sensorData)
     {
@@ -282,8 +282,8 @@ static void handleSensorConfigurations(
                       << *interfacePath << "\n";
             continue;
         }
-        std::string sensorName = std::visit(VariantToStringVisitor(),
-                                            findSensorName->second);
+        std::string sensorName =
+            std::visit(VariantToStringVisitor(), findSensorName->second);
         std::cout << "Found sensor configuration with name " << sensorName
                   << "\n";
 
@@ -311,8 +311,8 @@ static void handleSensorConfigurations(
         }
 
         std::string readPath;
-        std::shared_ptr<I2CDevice> i2cDev = instantiateI2CDevice(configData,
-                                                                 readPath);
+        std::shared_ptr<I2CDevice> i2cDev =
+            instantiateI2CDevice(configData, readPath);
         if (i2cDev == nullptr)
         {
             // Allow sensor creation to continue so that dbus interfaces may be
@@ -320,8 +320,8 @@ static void handleSensorConfigurations(
             std::cerr << "No valid i2c device found for " << sensorName << "\n";
         }
 
-        float pollRate = getPollRate(baseConfiguration->second,
-                                     pollRateDefault);
+        float pollRate =
+            getPollRate(baseConfiguration->second, pollRateDefault);
 
         auto findLeakThreshold =
             baseConfiguration->second.find("LeakThresholdVolts");
@@ -331,8 +331,8 @@ static void handleSensorConfigurations(
                       << "\n";
             continue;
         }
-        double leakThreshold = std::visit(VariantToDoubleVisitor(),
-                                          findLeakThreshold->second);
+        double leakThreshold =
+            std::visit(VariantToDoubleVisitor(), findLeakThreshold->second);
         if (!std::isfinite(leakThreshold))
         {
             std::cerr << "Invalid leak threshold config for " << sensorName
@@ -348,8 +348,8 @@ static void handleSensorConfigurations(
                       << "\n";
             continue;
         }
-        double sensorMax = std::visit(VariantToDoubleVisitor(),
-                                      findSensorValidMax->second);
+        double sensorMax =
+            std::visit(VariantToDoubleVisitor(), findSensorValidMax->second);
         if (!std::isfinite(sensorMax))
         {
             std::cerr << "Invalid sensor max config for " << sensorName << "\n";
@@ -364,8 +364,8 @@ static void handleSensorConfigurations(
                       << "\n";
             continue;
         }
-        double sensorMin = std::visit(VariantToDoubleVisitor(),
-                                      findSensorValidMin->second);
+        double sensorMin =
+            std::visit(VariantToDoubleVisitor(), findSensorValidMin->second);
         if (!std::isfinite(sensorMin))
         {
             std::cerr << "Invalid sensor min config for " << sensorName << "\n";
@@ -425,10 +425,10 @@ void createSensors(
         dbusConnection,
         [&io, &objectServer, &dbusConnection, &sensorsChanged,
          &sensors](const ManagedObjectType& sensorConfigurations) {
-        handleSensorConfigurations(io, objectServer, dbusConnection,
-                                   sensorsChanged, sensors,
-                                   sensorConfigurations);
-    });
+            handleSensorConfigurations(io, objectServer, dbusConnection,
+                                       sensorsChanged, sensors,
+                                       sensorConfigurations);
+        });
 
     getter->getConfiguration(
         std::vector<std::string>{LeakDetectSensor::entityMgrConfigType});
@@ -469,34 +469,36 @@ int main()
     std::function<void(sdbusplus::message_t&)> eventHandler =
         [&io, &objectServer, &systemBus, &sensorsChanged, &sensors,
          &filterTimer](sdbusplus::message_t& message) {
-        if (message.is_method_error())
-        {
-            std::cerr << "callback method error\n";
-            return;
-        }
-        sensorsChanged->insert(message.get_path());
-
-        std::cout << "LeakDetectSensor change event received: "
-                  << message.get_path() << "\n";
-
-        // this implicitly cancels the timer
-        filterTimer.expires_after(std::chrono::seconds(1));
-
-        filterTimer.async_wait([&io, &objectServer, &systemBus, &sensorsChanged,
-                                &sensors](const boost::system::error_code& ec) {
-            if (ec != boost::system::errc::success)
+            if (message.is_method_error())
             {
-                if (ec != boost::asio::error::operation_aborted)
-                {
-                    std::cerr << "Time callback error: " << ec.message()
-                              << "\n";
-                }
+                std::cerr << "callback method error\n";
                 return;
             }
+            sensorsChanged->insert(message.get_path());
 
-            createSensors(io, objectServer, systemBus, sensorsChanged, sensors);
-        });
-    };
+            std::cout << "LeakDetectSensor change event received: "
+                      << message.get_path() << "\n";
+
+            // this implicitly cancels the timer
+            filterTimer.expires_after(std::chrono::seconds(1));
+
+            filterTimer.async_wait(
+                [&io, &objectServer, &systemBus, &sensorsChanged,
+                 &sensors](const boost::system::error_code& ec) {
+                    if (ec != boost::system::errc::success)
+                    {
+                        if (ec != boost::asio::error::operation_aborted)
+                        {
+                            std::cerr << "Time callback error: " << ec.message()
+                                      << "\n";
+                        }
+                        return;
+                    }
+
+                    createSensors(io, objectServer, systemBus, sensorsChanged,
+                                  sensors);
+                });
+        };
 
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
         setupPropertiesChangedMatches(

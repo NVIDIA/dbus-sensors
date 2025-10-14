@@ -43,16 +43,16 @@ class LeakDetectSensor : public std::enable_shared_from_this<LeakDetectSensor>
   public:
     static constexpr const char* entityMgrConfigType = "VoltageLeakDetector";
 
-    LeakDetectSensor(const std::string& readPath,
-                     sdbusplus::asio::object_server& objectServer,
-                     boost::asio::io_context& io,
-                     std::shared_ptr<sdbusplus::asio::connection>& conn,
-                     const std::string& sensorName,
-                     const std::shared_ptr<I2CDevice>& i2cDevice,
-                     float pollRate, double configLeakThreshold,
-                     double sensorMax, double sensorMin,
-                     const std::string& configurationPath, bool shutdownOnLeak,
-                     unsigned int shutdownDelaySeconds);
+    LeakDetectSensor(
+        const std::string& readPath,
+        sdbusplus::asio::object_server& objectServer,
+        boost::asio::io_context& io,
+        std::shared_ptr<sdbusplus::asio::connection>& conn,
+        const std::string& sensorName,
+        const std::shared_ptr<I2CDevice>& i2cDevice, float pollRate,
+        double configLeakThreshold, double sensorMax, double sensorMin,
+        const std::string& configurationPath, bool shutdownOnLeak,
+        unsigned int shutdownDelaySeconds);
     ~LeakDetectSensor();
     std::string getSensorName();
     void setupRead();

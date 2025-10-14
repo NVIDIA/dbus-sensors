@@ -35,13 +35,12 @@ extern "C"
 
 namespace fs = std::filesystem;
 
-NVMeStatus::NVMeStatus(sdbusplus::asio::object_server& objectServer,
-                       std::shared_ptr<sdbusplus::asio::connection>& conn,
-                       boost::asio::io_context& io,
-                       const std::string& sensorName,
-                       const std::string& sensorConfiguration,
-                       unsigned int pollRate, uint8_t index, uint8_t busId,
-                       uint8_t cpldAddress, uint8_t statusReg) :
+NVMeStatus::NVMeStatus(
+    sdbusplus::asio::object_server& objectServer,
+    std::shared_ptr<sdbusplus::asio::connection>& conn,
+    boost::asio::io_context& io, const std::string& sensorName,
+    const std::string& sensorConfiguration, unsigned int pollRate,
+    uint8_t index, uint8_t busId, uint8_t cpldAddress, uint8_t statusReg) :
     ItemInterface(
         static_cast<sdbusplus::bus::bus&>(*conn),
         ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))
