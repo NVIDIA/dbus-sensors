@@ -51,7 +51,6 @@
 #include <vector>
 
 constexpr const bool debug = false;
-static constexpr uint8_t meAddress = 1;
 static constexpr uint8_t meAddressDefault = 1;
 static constexpr uint8_t lun = 0;
 static constexpr uint8_t hostSMbusIndexDefault = 0x03;

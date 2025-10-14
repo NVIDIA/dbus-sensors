@@ -44,8 +44,10 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <optional>
+#include <ostream>
 #include <regex>
 #include <string>
 #include <system_error>

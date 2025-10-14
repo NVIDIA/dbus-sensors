@@ -169,10 +169,12 @@ option(
 )
 option(
     'shmem',
-    'leakdetector',
     type: 'feature',
     value: 'enabled',
     description: 'Use NVIDIA Shared-Memory IPC.',
+)
+option(
+    'leakdetector',
     type: 'feature',
     value: 'enabled',
     description: 'Enable Liquid Leak Detector.',
@@ -182,12 +184,6 @@ option(
     type: 'feature',
     value: 'disabled',
     description: 'Enable Leak Detect sensor.',
-)
-option(
-    'discrete-leak-detect',
-    type: 'feature',
-    value: 'disabled',
-    description: 'Enable Discrete Leak Detect sensor.',
 )
 option(
     'smbpbi',

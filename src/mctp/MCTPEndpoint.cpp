@@ -5,6 +5,8 @@
 
 #include <bits/fs_dir.h>
 
+#include <boost/asio/error.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/system/detail/errc.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
@@ -25,6 +27,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -586,17 +589,6 @@ std::shared_ptr<MCTPDevice> MCTPDEndpoint::device() const
 }
 
 std::optional<SensorBaseConfigMap> I2CMCTPDDevice::match(
-    const SensorData& config)
-{
-    auto iface = config.find(configInterfaceName(configType));
-    if (iface == config.end())
-    {
-        return std::nullopt;
-    }
-    return iface->second;
-}
-
-std::optional<SensorBaseConfigMap> I3CMCTPDDevice::match(
     const SensorData& config)
 {
     auto iface = config.find(configInterfaceName(configType));
@@ -1319,32 +1311,6 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
             "SPI_BUS", bus, "SPI_CS", chipselect, "EXCEPTION", ex);
         return {};
     }
-}
-
-std::string I3CMCTPDDevice::interfaceFromBus(int bus)
-{
-    std::filesystem::path netdir = std::format("/sys/devices/virtual/net");
-    std::error_code ec;
-    std::filesystem::directory_iterator it(netdir, ec);
-    if (ec || it == std::filesystem::end(it))
-    {
-        error("No net device associated with I3C bus {I3C_BUS} at {NET_DEVICE}",
-              "I3C_BUS", bus, "NET_DEVICE", netdir);
-        throw MCTPException("Bus is not configured as an MCTP interface");
-    }
-
-    std::string targetInterface = std::format("mctpi3c{}", bus);
-    for (const auto& entry : std::filesystem::directory_iterator(netdir))
-    {
-        if (entry.is_directory() && entry.path().filename() == targetInterface)
-        {
-            return targetInterface;
-        }
-    }
-
-    error("No matching net device found for I3C bus {I3C_BUS} at {NET_DEVICE}",
-          "I3C_BUS", bus, "NET_DEVICE", netdir);
-    throw MCTPException("No matching net device found for the specified bus");
 }
 
 std::string SPIMCTPDDevice::interfaceFromBusCs(int bus, int chipselect)

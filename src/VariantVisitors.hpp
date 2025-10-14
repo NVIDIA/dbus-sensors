@@ -112,27 +112,3 @@ struct VariantToNumArrayVisitor
             boost::typeindex::type_id<T>().pretty_name() + " to vector<U>");
     }
 };
-
-template <std::integral V, std::integral U>
-struct VariantToNumArrayVisitor
-{
-    template <typename T>
-    std::vector<V> operator()(const T& t) const
-    {
-        if constexpr (std::is_same_v<T, std::vector<U>>)
-        {
-            std::vector<V> output;
-            output.reserve(t.size());
-
-            for (const auto& value : t)
-            {
-                output.push_back(static_cast<V>(value));
-            }
-
-            return output;
-        }
-        throw std::invalid_argument(
-            "Cannot handle type " +
-            boost::typeindex::type_id<T>().pretty_name() + " to vector<U>");
-    }
-};

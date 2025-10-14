@@ -43,7 +43,7 @@ void GPIOPresence::addObj(
 
 void GPIOPresence::removeObj(const std::string& objPath)
 {
-    if (objIfaces.find(objPath) != objIfaces.end())
+    if (objIfaces.contains(objPath))
     {
         std::cerr << "Remove objPath " << objPath << std::endl;
         objIfaces.erase(objPath);
@@ -52,7 +52,7 @@ void GPIOPresence::removeObj(const std::string& objPath)
 
 bool GPIOPresence::hasObj(const std::string& objPath)
 {
-    return objIfaces.find(objPath) != objIfaces.end();
+    return objIfaces.contains(objPath);
 }
 
 void GPIOPresence::waitForGPIOEvent(
@@ -143,7 +143,7 @@ void GPIOPresence::updatePresence(const std::string& gpioLine, bool state)
 
 void GPIOPresence::addInputLine(const std::string& lineLabel)
 {
-    if (gpioLines.find(lineLabel) == gpioLines.end())
+    if (!gpioLines.contains(lineLabel))
     {
         ::gpiod::line line = ::gpiod::find_line(lineLabel);
         line.request({service, ::gpiod::line_request::DIRECTION_INPUT,
@@ -154,7 +154,7 @@ void GPIOPresence::addInputLine(const std::string& lineLabel)
 
 int GPIOPresence::readLine(const std::string& lineLabel)
 {
-    if (gpioLines.find(lineLabel) == gpioLines.end())
+    if (!gpioLines.contains(lineLabel))
     {
         addInputLine(lineLabel);
     }
@@ -163,7 +163,7 @@ int GPIOPresence::readLine(const std::string& lineLabel)
 
 void GPIOPresence::releaseLine(const std::string& lineLabel)
 {
-    if (gpioLines.find(lineLabel) != gpioLines.end())
+    if (gpioLines.contains(lineLabel))
     {
         ::gpiod::line line = ::gpiod::find_line(lineLabel);
         line.release();
