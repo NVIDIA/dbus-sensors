@@ -2,6 +2,7 @@
 Description=Presence detect
 Requires=xyz.openbmc_project.EntityManager.service
 After=xyz.openbmc_project.EntityManager.service
+After=phosphor-multi-gpio-monitor.service
 
 [Service]
 Restart=always
