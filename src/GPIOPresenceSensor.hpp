@@ -107,7 +107,7 @@ class GPIOPresence : public std::enable_shared_from_this<GPIOPresence>
 
     void waitForGPIOEvent(const std::string& name,
                           const std::function<void(bool)>& eventHandler,
-                          gpiod::line& line,
+                          const std::shared_ptr<gpiod::line>& linePtr,
                           boost::asio::posix::stream_descriptor& event);
 
     void addInputLine(const std::string& lineLabel);

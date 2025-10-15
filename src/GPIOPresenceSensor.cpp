@@ -57,11 +57,12 @@ bool GPIOPresence::hasObj(const std::string& objPath)
 
 void GPIOPresence::waitForGPIOEvent(
     const std::string& name, const std::function<void(bool)>& eventHandler,
-    gpiod::line& line, boost::asio::posix::stream_descriptor& event)
+    const std::shared_ptr<gpiod::line>& linePtr,
+    boost::asio::posix::stream_descriptor& event)
 {
     event.async_wait(
         boost::asio::posix::stream_descriptor::wait_read,
-        [ref{this}, &name, eventHandler, &line,
+        [ref{this}, &name, eventHandler, linePtr,
          &event](const boost::system::error_code ec) {
             if (ec)
             {
@@ -70,11 +71,11 @@ void GPIOPresence::waitForGPIOEvent(
                           << std::endl;
                 return;
             }
-            gpiod::line_event lineEvent = line.event_read();
+            gpiod::line_event lineEvent = linePtr->event_read();
             bool present = true;
             present = !(lineEvent.event_type == gpiod::line_event::RISING_EDGE);
             eventHandler(present);
-            ref->waitForGPIOEvent(name, eventHandler, line, event);
+            ref->waitForGPIOEvent(name, eventHandler, linePtr, event);
         });
 }
 
@@ -82,18 +83,19 @@ bool GPIOPresence::requestGPIOEvents(const std::string& name,
                                      const std::function<void(bool)>& handler,
                                      boost::asio::io_context& gpioContext)
 {
-    // Find the GPIO line
-    gpiod::line gpioLine = gpiod::find_line(name);
     std::shared_ptr<boost::asio::posix::stream_descriptor> gpioEventDescriptor =
         std::make_shared<boost::asio::posix::stream_descriptor>(gpioContext);
-
-    lines.push_back(gpioLine);
     linesSD.push_back(gpioEventDescriptor);
+
+    // Find the GPIO line
+    gpiod::line gpioLine = gpiod::find_line(name);
+
     if (!gpioLine)
     {
         std::cout << "Failed to find the {GPIO_NAME} line" << name << std::endl;
         return false;
     }
+    lines.push_back(gpioLine);
 
     try
     {
@@ -114,7 +116,8 @@ bool GPIOPresence::requestGPIOEvents(const std::string& name,
 
     gpioEventDescriptor->assign(gpioLineFd);
 
-    waitForGPIOEvent(name, handler, gpioLine, *gpioEventDescriptor);
+    auto gpioLinePtr = std::make_shared<gpiod::line>(std::move(gpioLine));
+    waitForGPIOEvent(name, handler, gpioLinePtr, *gpioEventDescriptor);
     return true;
 }
 
@@ -165,8 +168,7 @@ void GPIOPresence::releaseLine(const std::string& lineLabel)
 {
     if (gpioLines.contains(lineLabel))
     {
-        ::gpiod::line line = ::gpiod::find_line(lineLabel);
-        line.release();
+        gpioLines[lineLabel].release();
         gpioLines.erase(lineLabel);
     }
 }
