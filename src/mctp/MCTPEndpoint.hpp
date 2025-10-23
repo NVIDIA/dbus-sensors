@@ -270,7 +270,8 @@ class MCTPDDevice :
                 const std::vector<uint8_t>& physaddr,
                 std::optional<std::uint8_t> staticEID,
                 std::optional<std::uint8_t> bridgePoolStartEid,
-                const std::optional<std::vector<uint8_t>>& ignoreEids);
+                const std::optional<std::vector<uint8_t>>& ignoreEids,
+                std::optional<std::uint8_t> pollingInterval = std::nullopt);
     MCTPDDevice(const MCTPDDevice& other) = delete;
     MCTPDDevice(MCTPDDevice&& other) = delete;
     ~MCTPDDevice() override = default;
@@ -294,7 +295,20 @@ class MCTPDDevice :
      * @brief Virtual hook called after endpoint is successfully established.
      *        Derived classes can override to add transport-specific behavior.
      */
-    virtual void onEndpointEstablished() {}
+    virtual void onEndpointEstablished();
+
+    /**
+     * @brief Start health monitoring for direct attached endpoints.
+     * Only monitors if pollingInterval is specified, > 0, and StaticEndpointID
+     * is defined. Continues monitoring even if endpoint is removed to detect
+     * recovery.
+     */
+    void startHealthMonitoring();
+
+    /**
+     * @brief Stop health monitoring
+     */
+    void stopHealthMonitoring();
 
     std::shared_ptr<sdbusplus::asio::connection> connection;
     const std::string interface;
@@ -313,11 +327,18 @@ class MCTPDDevice :
     const std::optional<std::uint8_t> staticEID;
     const std::optional<std::uint8_t> bridgePoolStartEid;
     const std::optional<std::vector<uint8_t>> ignoreEids;
+    const std::optional<std::uint8_t> pollingInterval;
     std::unique_ptr<sdbusplus::bus::match_t> removeMatch;
     std::unique_ptr<sdbusplus::bus::match_t> discoveryNotifyMatch;
     bool discoveryNeeded = false;
     std::unique_ptr<boost::asio::steady_timer> discoveryCheckTimer;
     void performDiscovery();
+
+    // Health monitoring members
+    std::unique_ptr<boost::asio::steady_timer> healthTimer;
+    bool inHealthRecoveryMode = false;
+    void performHealthCheck();
+    void recover();
 
     /**
      * @brief Actions to perform once endpoint setup has succeeded
@@ -348,9 +369,10 @@ class I2CMCTPDDevice : public MCTPDDevice
     I2CMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection, int bus,
         uint8_t physaddr, std::optional<uint8_t> staticEID = std::nullopt,
-        std::optional<uint8_t> bridgePoolStartEid = std::nullopt) :
+        std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
+        std::optional<uint8_t> pollingInterval = std::nullopt) :
         MCTPDDevice(connection, interfaceFromBus(bus), {physaddr}, staticEID,
-                    bridgePoolStartEid, std::nullopt)
+                    bridgePoolStartEid, std::nullopt, pollingInterval)
     {}
     ~I2CMCTPDDevice() override = default;
 
@@ -374,32 +396,17 @@ class I3CMCTPDDevice : public MCTPDDevice
         const std::shared_ptr<sdbusplus::asio::connection>& connection, int bus,
         const std::vector<uint8_t>& physaddr,
         std::optional<uint8_t> staticEID = std::nullopt,
-        std::optional<uint8_t> bridgePoolStartEid = std::nullopt) :
+        std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
+        std::optional<uint8_t> pollingInterval = std::nullopt) :
         MCTPDDevice(connection, interfaceFromBus(bus), physaddr, staticEID,
-                    bridgePoolStartEid, std::nullopt)
+                    bridgePoolStartEid, std::nullopt, pollingInterval)
     {}
     ~I3CMCTPDDevice() override = default;
 
-  protected:
-    void onEndpointEstablished() override;
-
   private:
     static constexpr const char* configType = "MCTPI3CTarget";
-    // TODO: These should be configurable in Entity Manager
-    static constexpr std::chrono::seconds pollingInterval{5};
-    static constexpr int maxRetries = 3;
 
     static std::string interfaceFromBus(int bus);
-
-    std::unique_ptr<boost::asio::steady_timer> healthTimer;
-    int retryCount = 0;
-    bool inRecoveryMode = false;
-
-    // Health monitoring for I3C hotplug support
-    void startHealthMonitoring();
-    void stopHealthMonitoring();
-    void performHealthCheck();
-    void recover();
 };
 
 class USBMCTPDDevice : public MCTPDDevice
@@ -417,9 +424,10 @@ class USBMCTPDDevice : public MCTPDDevice
         const std::string& interface, const std::vector<uint8_t>& physaddr,
         std::optional<uint8_t> staticEID = std::nullopt,
         std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
-        const std::optional<std::vector<uint8_t>>& ignoreEids = std::nullopt) :
+        const std::optional<std::vector<uint8_t>>& ignoreEids = std::nullopt,
+        std::optional<uint8_t> pollingInterval = std::nullopt) :
         MCTPDDevice(connection, interface, physaddr, staticEID,
-                    bridgePoolStartEid, ignoreEids)
+                    bridgePoolStartEid, ignoreEids, pollingInterval)
     {}
     ~USBMCTPDDevice() override = default;
 
@@ -439,10 +447,11 @@ class SPIMCTPDDevice : public MCTPDDevice
     SPIMCTPDDevice() = delete;
     SPIMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection, int bus,
-        int chipselect, std::optional<uint8_t> staticEID = std::nullopt) :
+        int chipselect, std::optional<uint8_t> staticEID = std::nullopt,
+        std::optional<uint8_t> pollingInterval = std::nullopt) :
         MCTPDDevice(connection, interfaceFromBusCs(bus, chipselect),
                     std::vector<uint8_t>{}, staticEID, std::nullopt,
-                    std::nullopt)
+                    std::nullopt, pollingInterval)
     {}
     ~SPIMCTPDDevice() override = default;
 
@@ -465,9 +474,10 @@ class XROTMCTPDDevice : public MCTPDDevice
     XROTMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
         const std::string& name,
-        std::optional<std::uint8_t> staticEID = std::nullopt) :
+        std::optional<std::uint8_t> staticEID = std::nullopt,
+        std::optional<std::uint8_t> pollingInterval = std::nullopt) :
         MCTPDDevice(connection, name, std::vector<uint8_t>{}, staticEID,
-                    std::nullopt, std::nullopt)
+                    std::nullopt, std::nullopt, pollingInterval)
     {}
     ~XROTMCTPDDevice() override = default;
 

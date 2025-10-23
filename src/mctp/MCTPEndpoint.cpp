@@ -37,6 +37,31 @@
 
 PHOSPHOR_LOG2_USING;
 
+static std::optional<uint8_t> getPollingInterval(
+    const SensorBaseConfigMap& iface)
+{
+    std::optional<uint8_t> interval;
+
+    if (auto it = iface.find("PollingInterval"); it != iface.end())
+    {
+        try
+        {
+            auto val =
+                std::stoul(std::visit(VariantToStringVisitor(), it->second));
+            if (val <= 180) // Accept 0 (disabled) or valid interval (1-180)
+            {
+                interval = val;
+            }
+        }
+        catch (...)
+        {
+            debug("Invalid PollingInterval value in configuration, ignoring");
+        }
+    }
+
+    return interval;
+}
+
 static constexpr const char* mctpdBusName = "au.com.codeconstruct.MCTP1";
 static constexpr const char* mctpdControlPath = "/au/com/codeconstruct/mctp1";
 static constexpr const char* mctpdEndpointPath =
@@ -53,10 +78,11 @@ MCTPDDevice::MCTPDDevice(
     const std::string& interface, const std::vector<uint8_t>& physaddr,
     std::optional<std::uint8_t> staticEID,
     std::optional<std::uint8_t> bridgePoolStartEid,
-    const std::optional<std::vector<uint8_t>>& ignoreEids) :
+    const std::optional<std::vector<uint8_t>>& ignoreEids,
+    std::optional<std::uint8_t> pollingInterval) :
     connection(connection), interface(interface), physaddr(physaddr),
     staticEID(staticEID), bridgePoolStartEid(bridgePoolStartEid),
-    ignoreEids(ignoreEids)
+    ignoreEids(ignoreEids), pollingInterval(pollingInterval)
 {}
 
 void MCTPDDevice::onDiscoveryMatchRule()
@@ -333,10 +359,133 @@ void MCTPDDevice::finaliseEndpoint(
     endpoint = std::make_shared<MCTPDEndpoint>(shared_from_this(), connection,
                                                objpath, network, eid);
 
-    // Call virtual hook for transport-specific initialization
     onEndpointEstablished();
 
     added({}, endpoint);
+}
+
+void MCTPDDevice::onEndpointEstablished()
+{
+    startHealthMonitoring();
+}
+
+void MCTPDDevice::startHealthMonitoring()
+{
+    // Only enable polling if interval is specified and > 0
+    if (!pollingInterval.has_value() || pollingInterval.value() == 0 ||
+        !staticEID.has_value())
+    {
+        return;
+    }
+
+    if (endpoint && endpoint->eid() != staticEID.value())
+    {
+        warning(
+            "Endpoint EID {ENDPOINT_EID} does not match static EID {STATIC_EID}",
+            "ENDPOINT_EID", endpoint->eid(), "STATIC_EID", staticEID.value());
+        return;
+    }
+
+    if (!healthTimer)
+    {
+        healthTimer = std::make_unique<boost::asio::steady_timer>(
+            connection->get_io_context());
+    }
+
+    healthTimer->expires_after(std::chrono::seconds{pollingInterval.value()});
+    healthTimer->async_wait(
+        [weak = weak_from_this()](const boost::system::error_code& ec) {
+            if (!ec)
+            {
+                if (auto self = weak.lock())
+                {
+                    self->performHealthCheck();
+                }
+            }
+        });
+}
+
+void MCTPDDevice::stopHealthMonitoring()
+{
+    if (healthTimer)
+    {
+        healthTimer->cancel();
+    }
+}
+
+void MCTPDDevice::performHealthCheck()
+{
+    // Poll device health via GetEndpointID
+    connection->async_method_call(
+        [weak = weak_from_this()](const boost::system::error_code& ec,
+                                  uint8_t eid, uint8_t, uint8_t) {
+            auto self = weak.lock();
+            if (!self)
+            {
+                return;
+            }
+
+            if (ec || !eid)
+            {
+                // Device not responding - only log on first failure
+                if (!self->inHealthRecoveryMode && self->endpoint)
+                {
+                    info("Health error: Device not responsive, EID {EID}",
+                         "EID", self->endpoint->eid());
+                    self->recover();
+                }
+            }
+            else
+            {
+                // Device responding
+                if (!self->endpoint)
+                {
+                    // Trigger re-establishment if recovering
+                    if (self->inHealthRecoveryMode &&
+                        self->requestSetupCallback)
+                    {
+                        self->requestSetupCallback(self);
+                    }
+                }
+                else if (self->inHealthRecoveryMode)
+                {
+                    // Recovery complete
+                    info("Health recovery: Device responsive, EID {EID}", "EID",
+                         self->endpoint->eid());
+                    self->inHealthRecoveryMode = false;
+                }
+            }
+
+            // Reschedule next health check
+            self->healthTimer->expires_after(
+                std::chrono::seconds{self->pollingInterval.value()});
+            self->healthTimer->async_wait(
+                [weak](const boost::system::error_code& ec) {
+                    if (!ec)
+                    {
+                        if (auto self = weak.lock())
+                        {
+                            self->performHealthCheck();
+                        }
+                    }
+                });
+        },
+        mctpdBusName,
+        std::string(mctpdControlPath) + "/interfaces/" + interface,
+        mctpdControlInterface, "GetEndpointID", physaddr);
+}
+
+void MCTPDDevice::recover()
+{
+    inHealthRecoveryMode = true;
+
+    if (endpoint)
+    {
+        connection->async_method_call(
+            [](const boost::system::error_code&) {}, mctpdBusName,
+            MCTPDEndpoint::path(endpoint), mctpdEndpointControlInterface,
+            "Recover");
+    }
 }
 
 void MCTPDDevice::setup(
@@ -709,20 +858,25 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
         bridgePoolStartEid = parsedbridgePoolStartEid;
     }
 
+    auto pollingInterval = getPollingInterval(iface);
+
     try
     {
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
             return std::make_shared<I2CMCTPDDevice>(
                 connection, bus, address, staticEID.value(),
-                bridgePoolStartEid.value());
+                bridgePoolStartEid.value(), pollingInterval);
         }
         if (staticEID.has_value())
         {
-            return std::make_shared<I2CMCTPDDevice>(connection, bus, address,
-                                                    staticEID.value());
+            return std::make_shared<I2CMCTPDDevice>(
+                connection, bus, address, staticEID.value(), std::nullopt,
+                pollingInterval);
         }
-        return std::make_shared<I2CMCTPDDevice>(connection, bus, address);
+        return std::make_shared<I2CMCTPDDevice>(
+            connection, bus, address, std::nullopt, std::nullopt,
+            pollingInterval);
     }
     catch (const MCTPException& ex)
     {
@@ -820,20 +974,25 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
         bridgePoolStartEid = parsedbridgePoolStartEid;
     }
 
+    auto pollingInterval = getPollingInterval(iface);
+
     try
     {
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
             return std::make_shared<I3CMCTPDDevice>(
                 connection, bus, address, staticEID.value(),
-                bridgePoolStartEid.value());
+                bridgePoolStartEid.value(), pollingInterval);
         }
         if (staticEID.has_value())
         {
-            return std::make_shared<I3CMCTPDDevice>(connection, bus, address,
-                                                    staticEID.value());
+            return std::make_shared<I3CMCTPDDevice>(
+                connection, bus, address, staticEID.value(), std::nullopt,
+                pollingInterval);
         }
-        return std::make_shared<I3CMCTPDDevice>(connection, bus, address);
+        return std::make_shared<I3CMCTPDDevice>(
+            connection, bus, address, std::nullopt, std::nullopt,
+            pollingInterval);
     }
     catch (const MCTPException& ex)
     {
@@ -884,144 +1043,6 @@ std::string I3CMCTPDDevice::interfaceFromBus(int bus)
     error("No matching net device found for I3C bus {I3C_BUS} at {NET_DEVICE}",
           "I3C_BUS", bus, "NET_DEVICE", netdir);
     throw MCTPException("No matching net device found for the specified bus");
-}
-
-void I3CMCTPDDevice::onEndpointEstablished()
-{
-    inRecoveryMode = false;
-    retryCount = 0;
-    startHealthMonitoring();
-}
-
-void I3CMCTPDDevice::startHealthMonitoring()
-{
-    if (!healthTimer)
-    {
-        healthTimer = std::make_unique<boost::asio::steady_timer>(
-            connection->get_io_context());
-    }
-    healthTimer->expires_after(pollingInterval);
-    healthTimer->async_wait([weak = weak_from_this()](
-                                const boost::system::error_code& ec) {
-        if (ec == boost::asio::error::operation_aborted)
-        {
-            return;
-        }
-        if (auto self = std::static_pointer_cast<I3CMCTPDDevice>(weak.lock()))
-        {
-            self->performHealthCheck();
-        }
-    });
-}
-
-void I3CMCTPDDevice::stopHealthMonitoring()
-{
-    if (healthTimer)
-    {
-        healthTimer->cancel();
-    }
-}
-
-void I3CMCTPDDevice::performHealthCheck()
-{
-    /* Monitors I3C device health and handles hotplug.
-     * We use GetEndpointID as a health check - if the D-Bus call succeeds,
-     * the device is responding (regardless of completion codes).
-     * If it fails, device may be unplugged or unresponsive.
-     */
-
-    connection->async_method_call(
-        [weak = weak_from_this()](const boost::system::error_code& ec,
-                                  uint8_t eid, uint8_t, uint8_t) {
-            auto self = std::static_pointer_cast<I3CMCTPDDevice>(weak.lock());
-            if (!self)
-            {
-                return;
-            }
-
-            if (ec || eid == 0)
-            {
-                if (self->inRecoveryMode)
-                {
-                    // Already in recovery, just keep trying setup
-                    if (self->requestSetupCallback)
-                    {
-                        self->requestSetupCallback(
-                            std::static_pointer_cast<MCTPDDevice>(self));
-                    }
-                }
-                else
-                {
-                    // Normal mode - check retry count
-                    self->retryCount++;
-                    error(
-                        "GetEndpointID failed on {INTERFACE} (retry {RETRY}/{MAX})",
-                        "INTERFACE", self->interface, "RETRY", self->retryCount,
-                        "MAX", maxRetries);
-                    if (self->retryCount >= maxRetries)
-                    {
-                        self->recover();
-                    }
-                }
-            }
-            else
-            {
-                // D-Bus call succeeded - device is healthy
-                debug("I3C device on {INTERFACE} is healthy (EID={EID})",
-                      "INTERFACE", self->interface, "EID",
-                      static_cast<int>(eid));
-
-                self->inRecoveryMode = false;
-                self->retryCount = 0;
-            }
-
-            self->startHealthMonitoring();
-        },
-        mctpdBusName,
-        std::string(mctpdControlPath) + "/interfaces/" + interface,
-        mctpdControlInterface, "GetEndpointID", physaddr);
-}
-
-void I3CMCTPDDevice::recover()
-{
-    inRecoveryMode = true;
-    retryCount = 0;
-
-    if (endpoint)
-    {
-        info("Calling Recover on I3C endpoint {EID} on {INTERFACE}", "EID",
-             static_cast<int>(endpoint->eid()), "INTERFACE", interface);
-
-        std::string endpointPath = MCTPDEndpoint::path(endpoint);
-
-        connection->async_method_call(
-            [weak = weak_from_this()](const boost::system::error_code& ec) {
-                auto self =
-                    std::static_pointer_cast<I3CMCTPDDevice>(weak.lock());
-                if (!self)
-                {
-                    return;
-                }
-
-                if (ec)
-                {
-                    error("Failed to call Recover on endpoint: {ERROR}",
-                          "ERROR", ec.message());
-                }
-                else
-                {
-                    info("Successfully called Recover on I3C endpoint");
-                }
-
-                self->startHealthMonitoring();
-            },
-            mctpdBusName, endpointPath, "au.com.codeconstruct.MCTP.Endpoint1",
-            "Recover");
-    }
-    else
-    {
-        startHealthMonitoring();
-    }
 }
 
 /* Changes for MCTPUSB */
@@ -1185,20 +1206,25 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
         }
     }
 
+    auto pollingInterval = getPollingInterval(iface);
+
     try
     {
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
             return std::make_shared<USBMCTPDDevice>(
                 connection, interface, address, staticEID.value(),
-                bridgePoolStartEid.value(), ignoreEids);
+                bridgePoolStartEid.value(), ignoreEids, pollingInterval);
         }
         if (staticEID.has_value())
         {
-            return std::make_shared<USBMCTPDDevice>(connection, interface,
-                                                    address, staticEID.value());
+            return std::make_shared<USBMCTPDDevice>(
+                connection, interface, address, staticEID.value(), std::nullopt,
+                std::nullopt, pollingInterval);
         }
-        return std::make_shared<USBMCTPDDevice>(connection, interface, address);
+        return std::make_shared<USBMCTPDDevice>(
+            connection, interface, address, std::nullopt, std::nullopt,
+            std::nullopt, pollingInterval);
     }
     catch (const MCTPException& ex)
     {
@@ -1295,14 +1321,18 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
         staticEID = parsedEID;
     }
 
+    auto pollingInterval = getPollingInterval(iface);
+
     try
     {
         if (staticEID.has_value())
         {
-            return std::make_shared<SPIMCTPDDevice>(connection, bus, chipselect,
-                                                    staticEID.value());
+            return std::make_shared<SPIMCTPDDevice>(
+                connection, bus, chipselect, staticEID.value(),
+                pollingInterval);
         }
-        return std::make_shared<SPIMCTPDDevice>(connection, bus, chipselect);
+        return std::make_shared<SPIMCTPDDevice>(connection, bus, chipselect,
+                                                std::nullopt, pollingInterval);
     }
     catch (const MCTPException& ex)
     {
@@ -1397,14 +1427,17 @@ std::shared_ptr<XROTMCTPDDevice> XROTMCTPDDevice::from(
         staticEID = parsedEID;
     }
 
+    auto pollingInterval = getPollingInterval(iface);
+
     try
     {
         if (staticEID.has_value())
         {
-            return std::make_shared<XROTMCTPDDevice>(connection, interface,
-                                                     staticEID.value());
+            return std::make_shared<XROTMCTPDDevice>(
+                connection, interface, staticEID.value(), pollingInterval);
         }
-        return std::make_shared<XROTMCTPDDevice>(connection, interface);
+        return std::make_shared<XROTMCTPDDevice>(connection, interface,
+                                                 std::nullopt, pollingInterval);
     }
     catch (const MCTPException& ex)
     {
