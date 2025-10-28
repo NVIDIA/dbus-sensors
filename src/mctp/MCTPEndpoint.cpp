@@ -356,14 +356,14 @@ void MCTPDDevice::setup(
             return;
         }
 
-        if (!allocated)
-        {
-            added({}, {});
-            return;
-        }
-
         if (auto self = weak.lock())
         {
+            if (!allocated && self->endpoint)
+            {
+                added({}, {});
+                return;
+            }
+
             self->finaliseEndpoint(objpath, eid, network, added);
         }
         else
