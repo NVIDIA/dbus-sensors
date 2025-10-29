@@ -293,6 +293,11 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
                 "Failed to get health status for eid: {EID}, error: {ERR}",
                 "EID", static_cast<int>(eid), "ERR", rc);
         }
+        else
+        {
+            // Copy the updated log data back into the response buffer
+            std::memcpy(resp.data(), &log, sizeof(log));
+        }
     }
     else
     {
