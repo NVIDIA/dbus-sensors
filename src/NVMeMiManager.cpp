@@ -289,7 +289,7 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
 
         if (rc != 0)
         {
-            lg2::error(
+            lg2::debug(
                 "Failed to get health status for eid: {EID}, error: {ERR}",
                 "EID", static_cast<int>(eid), "ERR", rc);
         }
@@ -307,8 +307,6 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
 
     if (rc != 0)
     {
-        lg2::error("smartlog command error: {ERR} for eid: {EID}", "ERR", rc,
-                   "EID", static_cast<int>(eid));
         return handleError(0);
     }
 

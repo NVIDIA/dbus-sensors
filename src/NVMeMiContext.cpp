@@ -324,13 +324,18 @@ void NVMeMiContext::processResponse(void* msg, size_t len)
     if (msg == nullptr || len < sizeof(struct nvme_mi_nvm_ss_health_status))
     {
         consecutiveFailures++;
-        lg2::warning("Consecutive failures for eid: {EID}: {FAILURES}/{MAX}",
-                     "EID", eid, "FAILURES", consecutiveFailures, "MAX",
-                     maxConsecutiveFailures);
+        lg2::debug("Consecutive failures for eid: {EID}: {FAILURES}/{MAX}",
+                   "EID", eid, "FAILURES", consecutiveFailures, "MAX",
+                   maxConsecutiveFailures);
 
         if (consecutiveFailures < maxConsecutiveFailures)
         {
             pollNVMeDevices();
+        }
+        else
+        {
+            lg2::error("Max consecutive failures reached for eid: {EID}", "EID",
+                       eid);
         }
         return;
     }
