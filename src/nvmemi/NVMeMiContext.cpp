@@ -328,15 +328,14 @@ void NVMeMiContext::processResponse(void* msg, size_t len)
                    "EID", eid, "FAILURES", consecutiveFailures, "MAX",
                    maxConsecutiveFailures);
 
-        if (consecutiveFailures < maxConsecutiveFailures)
+        if (consecutiveFailures >= maxConsecutiveFailures)
         {
-            pollNVMeDevices();
-        }
-        else
-        {
+            // keep polling and log error when max consecutive failures is
+            // reached prevent stopping the polling during drive firmware update
             lg2::error("Max consecutive failures reached for eid: {EID}", "EID",
                        eid);
         }
+        pollNVMeDevices();
         return;
     }
 
