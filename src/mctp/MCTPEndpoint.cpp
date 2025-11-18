@@ -1,5 +1,6 @@
 #include "MCTPEndpoint.hpp"
 
+#include "MCTPEndpointUtils.hpp"
 #include "Utils.hpp"
 #include "VariantVisitors.hpp"
 
@@ -18,6 +19,7 @@
 
 #include <cassert>
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -37,31 +39,6 @@
 
 PHOSPHOR_LOG2_USING;
 
-static std::optional<uint8_t> getPollingInterval(
-    const SensorBaseConfigMap& iface)
-{
-    std::optional<uint8_t> interval;
-
-    if (auto it = iface.find("PollingInterval"); it != iface.end())
-    {
-        try
-        {
-            auto val =
-                std::stoul(std::visit(VariantToStringVisitor(), it->second));
-            if (val <= 180) // Accept 0 (disabled) or valid interval (1-180)
-            {
-                interval = val;
-            }
-        }
-        catch (...)
-        {
-            debug("Invalid PollingInterval value in configuration, ignoring");
-        }
-    }
-
-    return interval;
-}
-
 static constexpr const char* mctpdBusName = "au.com.codeconstruct.MCTP1";
 static constexpr const char* mctpdControlPath = "/au/com/codeconstruct/mctp1";
 static constexpr const char* mctpdEndpointPath =
@@ -70,18 +47,25 @@ static constexpr const char* mctpdControlInterface =
     "au.com.codeconstruct.MCTP.BusOwner1";
 static constexpr const char* mctpdEndpointControlInterface =
     "au.com.codeconstruct.MCTP.Endpoint1";
+static constexpr const char* mctpdNetworkInterface =
+    "au.com.codeconstruct.MCTP.Network1";
+static constexpr const char* mctpdNetworkPath =
+    "/au/com/codeconstruct/mctp1/networks/1";
 static constexpr const char* mctpdBridgeInterface =
     "au.com.codeconstruct.MCTP.Bridge1";
 
 MCTPDDevice::MCTPDDevice(
     const std::shared_ptr<sdbusplus::asio::connection>& connection,
-    const std::string& interface, const std::vector<uint8_t>& physaddr,
-    std::optional<std::uint8_t> staticEID,
+    const std::string& name, const std::string& interface,
+    const std::vector<uint8_t>& physaddr, std::optional<std::uint8_t> staticEID,
     std::optional<std::uint8_t> bridgePoolStartEid,
+    std::optional<std::uint8_t> bridgePoolEndEid,
     const std::optional<std::vector<uint8_t>>& ignoreEids,
-    std::optional<std::uint8_t> pollingInterval) :
-    connection(connection), interface(interface), physaddr(physaddr),
-    staticEID(staticEID), bridgePoolStartEid(bridgePoolStartEid),
+    std::optional<std::uint8_t> pollingInterval,
+    const std::vector<std::string>& deviceNames) :
+    connection(connection), name(name), deviceNames(deviceNames),
+    interface(interface), physaddr(physaddr), staticEID(staticEID),
+    bridgePoolStartEid(bridgePoolStartEid), bridgePoolEndEid(bridgePoolEndEid),
     ignoreEids(ignoreEids), pollingInterval(pollingInterval)
 {}
 
@@ -366,6 +350,8 @@ void MCTPDDevice::finaliseEndpoint(
 
 void MCTPDDevice::onEndpointEstablished()
 {
+    // Clear recovery mode flag when endpoint is successfully established
+    inHealthRecoveryMode = false;
     startHealthMonitoring();
 }
 
@@ -415,76 +401,157 @@ void MCTPDDevice::stopHealthMonitoring()
 
 void MCTPDDevice::performHealthCheck()
 {
-    // Poll device health via GetEndpointID
+    if (!staticEID.has_value() || !pollingInterval.has_value())
+    {
+        return; // Health monitoring not properly configured
+    }
+
+    // Suppress generic GetUUID timeout logs for this health check ping
+    suppressedHealthCheckEids.insert(*staticEID);
+
+    // Poll main device health via EndpointPing (which internally does GetUUID)
     connection->async_method_call(
-        [weak = weak_from_this()](const boost::system::error_code& ec,
-                                  uint8_t eid, uint8_t, uint8_t) {
+        [weak = weak_from_this()](const boost::system::error_code& ec) {
             auto self = weak.lock();
             if (!self)
             {
                 return;
             }
 
-            if (ec || !eid)
+            bool isResponsive = !ec;
+
+            if (!isResponsive)
             {
-                // Device not responding - only log on first failure
-                if (!self->inHealthRecoveryMode && self->endpoint)
+                // Device Failure Handling
+                if (!self->inHealthRecoveryMode)
                 {
-                    info("Health error: Device not responsive, EID {EID}",
-                         "EID", self->endpoint->eid());
-                    self->recover();
+                    // First failure: Log & Start Recovery
+                    if (self->endpoint)
+                    {
+                        info("Health error: Device not responsive, EID {EID}",
+                             "EID", self->endpoint->eid());
+
+                        // Log the MCTP ping failure for Redfish
+                        logMCTPPingFailure(self->name, self->endpoint->eid());
+                        self->recover();
+                    }
                 }
             }
             else
             {
-                // Device responding
-                if (!self->endpoint)
+                // Device Responsive - Reset suppression flag
+                suppressedHealthCheckEids.erase(self->staticEID.value());
+
+                // Device Responsive Handling
+                if (self->inHealthRecoveryMode)
                 {
-                    // Trigger re-establishment if recovering
-                    if (self->inHealthRecoveryMode &&
-                        self->requestSetupCallback)
+                    if (self->endpoint)
                     {
+                        // Recovery Complete
+                        info("Health recovery: Device responsive, EID {EID}",
+                             "EID", self->endpoint->eid());
+                        self->inHealthRecoveryMode = false;
+                    }
+                    else if (self->requestSetupCallback)
+                    {
+                        // Responsive but endpoint object missing?
+                        // Trigger setup to restore object.
                         self->requestSetupCallback(self);
                     }
                 }
-                else if (self->inHealthRecoveryMode)
-                {
-                    // Recovery complete
-                    info("Health recovery: Device responsive, EID {EID}", "EID",
-                         self->endpoint->eid());
-                    self->inHealthRecoveryMode = false;
-                }
             }
+        },
+        mctpdBusName, mctpdNetworkPath, mctpdNetworkInterface, "EndpointPing",
+        *staticEID);
 
-            // Reschedule next health check
-            self->healthTimer->expires_after(
-                std::chrono::seconds{self->pollingInterval.value()});
-            self->healthTimer->async_wait(
-                [weak](const boost::system::error_code& ec) {
-                    if (!ec)
+    // For bridge devices, also check pool range (in parallel with main device)
+    if (bridgePoolStartEid.has_value() && bridgePoolEndEid.has_value())
+    {
+        uint8_t start = bridgePoolStartEid.value();
+        uint8_t end = bridgePoolEndEid.value();
+        // Ping each EID in the pool
+        size_t nameIndex = 1;
+        for (uint8_t eid = start; eid <= end; eid++)
+        {
+            std::string deviceName;
+            if (nameIndex < deviceNames.size())
+            {
+                deviceName = deviceNames[nameIndex];
+            }
+            nameIndex++;
+
+            connection->async_method_call(
+                [weak = weak_from_this(), eid,
+                 deviceName](const boost::system::error_code& ec) {
+                    auto self = weak.lock();
+                    if (!self)
                     {
-                        if (auto self = weak.lock())
+                        return;
+                    }
+
+                    if (ec)
+                    {
+                        if (!self->unresponsiveBridgePoolEids.contains(eid))
                         {
-                            self->performHealthCheck();
+                            info("Bridge pool EID {EID} not responsive", "EID",
+                                 eid);
+
+                            // Log the MCTP ping failure for bridge pool device
+                            logMCTPPingFailure(deviceName, eid);
+                            self->unresponsiveBridgePoolEids.insert(eid);
+
+                            // Attempt to recover the specific bridge pool
+                            // endpoint
+                            self->recover(eid);
                         }
                     }
-                });
-        },
-        mctpdBusName,
-        std::string(mctpdControlPath) + "/interfaces/" + interface,
-        mctpdControlInterface, "GetEndpointID", physaddr);
+                    else
+                    {
+                        if (self->unresponsiveBridgePoolEids.contains(eid))
+                        {
+                            info("Bridge pool EID {EID} recovered", "EID", eid);
+                            self->unresponsiveBridgePoolEids.erase(eid);
+                        }
+                    }
+                },
+                mctpdBusName, mctpdNetworkPath, mctpdNetworkInterface,
+                "EndpointPing", eid);
+        }
+    }
+
+    // Reschedule next health check (after initiating all pings)
+    healthTimer->expires_after(std::chrono::seconds{*pollingInterval});
+    healthTimer->async_wait(
+        [weak = weak_from_this()](const boost::system::error_code& ec) {
+            if (!ec)
+            {
+                if (auto self = weak.lock())
+                {
+                    self->performHealthCheck();
+                }
+            }
+        });
+}
+
+void MCTPDDevice::recover(uint8_t eid)
+{
+    std::string path = mctpdEndpointPath + std::to_string(eid);
+    connection->async_method_call([](const boost::system::error_code&) {},
+                                  mctpdBusName, path,
+                                  mctpdEndpointControlInterface, "Recover");
 }
 
 void MCTPDDevice::recover()
 {
     inHealthRecoveryMode = true;
 
+    // Stop health monitoring while in recovery mode to avoid wasteful pings.
+    // It will restart automatically when device is successfully set up again.
+    stopHealthMonitoring();
+
     if (endpoint)
     {
-        connection->async_method_call(
-            [](const boost::system::error_code&) {}, mctpdBusName,
-            MCTPDEndpoint::path(endpoint), mctpdEndpointControlInterface,
-            "Recover");
+        recover(endpoint->eid());
     }
 }
 
@@ -791,11 +858,15 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
     auto mName = iface.find("Name");
     auto mStaticEndpointID = iface.find("StaticEndpointID");
     auto mbridgePoolStartEid = iface.find("BridgePoolStartEid");
+    auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
     if (mAddress == iface.end() || mBus == iface.end() || mName == iface.end())
     {
         throw std::invalid_argument(
             "Configuration object violates MCTPI2CTarget schema");
     }
+
+    std::vector<std::string> names = getDeviceNames(iface);
+    std::string name = names[0];
 
     auto sAddress = std::visit(VariantToStringVisitor(), mAddress->second);
     std::uint8_t address{};
@@ -858,6 +929,23 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
         bridgePoolStartEid = parsedbridgePoolStartEid;
     }
 
+    std::optional<std::uint8_t> bridgePoolEndEid{};
+    if (mbridgePoolEndEid != iface.end())
+    {
+        auto sbridgePoolEndEid =
+            std::visit(VariantToStringVisitor(), mbridgePoolEndEid->second);
+        std::uint8_t parsedbridgePoolEndEid{};
+        auto [eptr, eec] =
+            std::from_chars(sbridgePoolEndEid.data(),
+                            sbridgePoolEndEid.data() + sbridgePoolEndEid.size(),
+                            parsedbridgePoolEndEid);
+        if (eec != std::errc{})
+        {
+            throw std::invalid_argument("Bad BridgePool End address");
+        }
+        bridgePoolEndEid = parsedbridgePoolEndEid;
+    }
+
     auto pollingInterval = getPollingInterval(iface);
 
     try
@@ -865,18 +953,19 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
             return std::make_shared<I2CMCTPDDevice>(
-                connection, bus, address, staticEID.value(),
-                bridgePoolStartEid.value(), pollingInterval);
+                connection, name, bus, address, staticEID.value(),
+                bridgePoolStartEid.value(), bridgePoolEndEid, pollingInterval,
+                names);
         }
         if (staticEID.has_value())
         {
             return std::make_shared<I2CMCTPDDevice>(
-                connection, bus, address, staticEID.value(), std::nullopt,
-                pollingInterval);
+                connection, name, bus, address, staticEID.value(), std::nullopt,
+                bridgePoolEndEid, pollingInterval, names);
         }
         return std::make_shared<I2CMCTPDDevice>(
-            connection, bus, address, std::nullopt, std::nullopt,
-            pollingInterval);
+            connection, name, bus, address, std::nullopt, std::nullopt,
+            bridgePoolEndEid, pollingInterval, names);
     }
     catch (const MCTPException& ex)
     {
@@ -909,11 +998,15 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
     auto mName = iface.find("Name");
     auto mStaticEndpointID = iface.find("StaticEndpointID");
     auto mbridgePoolStartEid = iface.find("BridgePoolStartEid");
+    auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
     if (mAddress == iface.end() || mBus == iface.end() || mName == iface.end())
     {
         throw std::invalid_argument(
             "Configuration object violates MCTPI3CTarget schema");
     }
+
+    std::vector<std::string> names = getDeviceNames(iface);
+    std::string name = names[0];
 
     auto address = std::visit(VariantToNumArrayVisitor<uint8_t, uint64_t>(),
                               mAddress->second);
@@ -974,6 +1067,23 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
         bridgePoolStartEid = parsedbridgePoolStartEid;
     }
 
+    std::optional<std::uint8_t> bridgePoolEndEid{};
+    if (mbridgePoolEndEid != iface.end())
+    {
+        auto sbridgePoolEndEid =
+            std::visit(VariantToStringVisitor(), mbridgePoolEndEid->second);
+        std::uint8_t parsedbridgePoolEndEid{};
+        auto [eptr, eec] =
+            std::from_chars(sbridgePoolEndEid.data(),
+                            sbridgePoolEndEid.data() + sbridgePoolEndEid.size(),
+                            parsedbridgePoolEndEid);
+        if (eec != std::errc{})
+        {
+            throw std::invalid_argument("Bad BridgePool End address");
+        }
+        bridgePoolEndEid = parsedbridgePoolEndEid;
+    }
+
     auto pollingInterval = getPollingInterval(iface);
 
     try
@@ -981,18 +1091,19 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
             return std::make_shared<I3CMCTPDDevice>(
-                connection, bus, address, staticEID.value(),
-                bridgePoolStartEid.value(), pollingInterval);
+                connection, name, bus, address, staticEID.value(),
+                bridgePoolStartEid.value(), bridgePoolEndEid, pollingInterval,
+                names);
         }
         if (staticEID.has_value())
         {
             return std::make_shared<I3CMCTPDDevice>(
-                connection, bus, address, staticEID.value(), std::nullopt,
-                pollingInterval);
+                connection, name, bus, address, staticEID.value(), std::nullopt,
+                bridgePoolEndEid, pollingInterval, names);
         }
         return std::make_shared<I3CMCTPDDevice>(
-            connection, bus, address, std::nullopt, std::nullopt,
-            pollingInterval);
+            connection, name, bus, address, std::nullopt, std::nullopt,
+            bridgePoolEndEid, pollingInterval, names);
     }
     catch (const MCTPException& ex)
     {
@@ -1073,6 +1184,7 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     auto mInterface = iface.find("Interface");
     auto mStaticEndpointID = iface.find("StaticEndpointID");
     auto mbridgePoolStartEid = iface.find("BridgePoolStartEID");
+    auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
     auto mIgnoreEids = iface.find("IgnoreEIDs");
     if (mType == iface.end())
     {
@@ -1093,6 +1205,8 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
             "Configuration object violates MCTPUSBTarget schema");
     }
 
+    std::vector<std::string> names = getDeviceNames(iface);
+    const auto* name = names[0].c_str();
     auto interface = std::visit(VariantToStringVisitor(), mInterface->second);
 
     std::optional<std::uint8_t> staticEID{};
@@ -1136,6 +1250,23 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
             throw std::invalid_argument("Bad BridgePool Start address");
         }
         bridgePoolStartEid = parsedbridgePoolStartEid;
+    }
+
+    std::optional<std::uint8_t> bridgePoolEndEid{};
+    if (mbridgePoolEndEid != iface.end())
+    {
+        auto sbridgePoolEndEid =
+            std::visit(VariantToStringVisitor(), mbridgePoolEndEid->second);
+        std::uint8_t parsedbridgePoolEndEid{};
+        auto [eptr, eec] =
+            std::from_chars(sbridgePoolEndEid.data(),
+                            sbridgePoolEndEid.data() + sbridgePoolEndEid.size(),
+                            parsedbridgePoolEndEid);
+        if (eec != std::errc{})
+        {
+            throw std::invalid_argument("Bad BridgePool End address");
+        }
+        bridgePoolEndEid = parsedbridgePoolEndEid;
     }
 
     std::optional<std::vector<std::uint8_t>> ignoreEids{};
@@ -1213,18 +1344,20 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
             return std::make_shared<USBMCTPDDevice>(
-                connection, interface, address, staticEID.value(),
-                bridgePoolStartEid.value(), ignoreEids, pollingInterval);
+                connection, name, interface, address, staticEID.value(),
+                bridgePoolStartEid.value(), bridgePoolEndEid, ignoreEids,
+                pollingInterval, names);
         }
         if (staticEID.has_value())
         {
             return std::make_shared<USBMCTPDDevice>(
-                connection, interface, address, staticEID.value(), std::nullopt,
-                std::nullopt, pollingInterval);
+                connection, name, interface, address, staticEID.value(),
+                std::nullopt, bridgePoolEndEid, std::nullopt, pollingInterval,
+                names);
         }
         return std::make_shared<USBMCTPDDevice>(
-            connection, interface, address, std::nullopt, std::nullopt,
-            std::nullopt, pollingInterval);
+            connection, name, interface, address, std::nullopt, std::nullopt,
+            bridgePoolEndEid, std::nullopt, pollingInterval, names);
     }
     catch (const MCTPException& ex)
     {
@@ -1280,6 +1413,8 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
             "Configuration object violates MCTPSPIDevice schema");
     }
 
+    std::vector<std::string> names = getDeviceNames(iface);
+    const auto* name = names[0].c_str();
     auto sBus = std::visit(VariantToStringVisitor(), mBus->second);
     int bus{};
     auto [bptr,
@@ -1328,11 +1463,12 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
         if (staticEID.has_value())
         {
             return std::make_shared<SPIMCTPDDevice>(
-                connection, bus, chipselect, staticEID.value(),
-                pollingInterval);
+                connection, name, bus, chipselect, staticEID.value(),
+                pollingInterval, names);
         }
-        return std::make_shared<SPIMCTPDDevice>(connection, bus, chipselect,
-                                                std::nullopt, pollingInterval);
+        return std::make_shared<SPIMCTPDDevice>(
+            connection, name, bus, chipselect, std::nullopt, pollingInterval,
+            names);
     }
     catch (const MCTPException& ex)
     {
@@ -1403,8 +1539,8 @@ std::shared_ptr<XROTMCTPDDevice> XROTMCTPDDevice::from(
             "Configuration object violates MCTPXROTTarget schema");
     }
 
-    auto name = std::visit(VariantToStringVisitor(), mName->second);
-    auto interface = std::visit(VariantToStringVisitor(), mInterface->second);
+    std::vector<std::string> names = getDeviceNames(iface);
+    const auto* name = names[0].c_str();
 
     std::optional<std::uint8_t> staticEID{};
     if (mStaticEndpointID == iface.end())
@@ -1434,10 +1570,10 @@ std::shared_ptr<XROTMCTPDDevice> XROTMCTPDDevice::from(
         if (staticEID.has_value())
         {
             return std::make_shared<XROTMCTPDDevice>(
-                connection, interface, staticEID.value(), pollingInterval);
+                connection, name, staticEID.value(), pollingInterval, names);
         }
-        return std::make_shared<XROTMCTPDDevice>(connection, interface,
-                                                 std::nullopt, pollingInterval);
+        return std::make_shared<XROTMCTPDDevice>(connection, name, std::nullopt,
+                                                 pollingInterval, names);
     }
     catch (const MCTPException& ex)
     {

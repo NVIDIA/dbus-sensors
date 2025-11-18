@@ -266,12 +266,14 @@ class MCTPDDevice :
   public:
     MCTPDDevice() = delete;
     MCTPDDevice(const std::shared_ptr<sdbusplus::asio::connection>& connection,
-                const std::string& interface,
+                const std::string& name, const std::string& interface,
                 const std::vector<uint8_t>& physaddr,
                 std::optional<std::uint8_t> staticEID,
                 std::optional<std::uint8_t> bridgePoolStartEid,
+                std::optional<std::uint8_t> bridgePoolEndEid,
                 const std::optional<std::vector<uint8_t>>& ignoreEids,
-                std::optional<std::uint8_t> pollingInterval = std::nullopt);
+                std::optional<std::uint8_t> pollingInterval = std::nullopt,
+                const std::vector<std::string>& deviceNames = {});
     MCTPDDevice(const MCTPDDevice& other) = delete;
     MCTPDDevice(MCTPDDevice&& other) = delete;
     ~MCTPDDevice() override = default;
@@ -290,6 +292,25 @@ class MCTPDDevice :
         requestSetupCallback = std::move(callback);
     }
 
+    std::string getName() const
+    {
+        return name;
+    }
+
+    std::string getInterface() const
+    {
+        return interface;
+    }
+
+    std::optional<uint8_t> getEid() const
+    {
+        if (endpoint)
+        {
+            return endpoint->eid();
+        }
+        return staticEID;
+    }
+
   protected:
     /**
      * @brief Virtual hook called after endpoint is successfully established.
@@ -300,8 +321,8 @@ class MCTPDDevice :
     /**
      * @brief Start health monitoring for direct attached endpoints.
      * Only monitors if pollingInterval is specified, > 0, and StaticEndpointID
-     * is defined. Continues monitoring even if endpoint is removed to detect
-     * recovery.
+     * is defined. Monitoring is stopped during recovery mode and automatically
+     * restarted when the device is successfully set up again.
      */
     void startHealthMonitoring();
 
@@ -311,6 +332,8 @@ class MCTPDDevice :
     void stopHealthMonitoring();
 
     std::shared_ptr<sdbusplus::asio::connection> connection;
+    const std::string name;
+    const std::vector<std::string> deviceNames;
     const std::string interface;
     const std::vector<uint8_t> physaddr;
     std::shared_ptr<MCTPDEndpoint> endpoint;
@@ -326,6 +349,7 @@ class MCTPDDevice :
 
     const std::optional<std::uint8_t> staticEID;
     const std::optional<std::uint8_t> bridgePoolStartEid;
+    const std::optional<std::uint8_t> bridgePoolEndEid;
     const std::optional<std::vector<uint8_t>> ignoreEids;
     const std::optional<std::uint8_t> pollingInterval;
     std::unique_ptr<sdbusplus::bus::match_t> removeMatch;
@@ -337,8 +361,10 @@ class MCTPDDevice :
     // Health monitoring members
     std::unique_ptr<boost::asio::steady_timer> healthTimer;
     bool inHealthRecoveryMode = false;
+    std::set<uint8_t> unresponsiveBridgePoolEids;
     void performHealthCheck();
     void recover();
+    void recover(uint8_t eid);
 
     /**
      * @brief Actions to perform once endpoint setup has succeeded
@@ -367,12 +393,16 @@ class I2CMCTPDDevice : public MCTPDDevice
 
     I2CMCTPDDevice() = delete;
     I2CMCTPDDevice(
-        const std::shared_ptr<sdbusplus::asio::connection>& connection, int bus,
-        uint8_t physaddr, std::optional<uint8_t> staticEID = std::nullopt,
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const std::string& name, int bus, uint8_t physaddr,
+        std::optional<uint8_t> staticEID = std::nullopt,
         std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
-        std::optional<uint8_t> pollingInterval = std::nullopt) :
-        MCTPDDevice(connection, interfaceFromBus(bus), {physaddr}, staticEID,
-                    bridgePoolStartEid, std::nullopt, pollingInterval)
+        std::optional<uint8_t> bridgePoolEndEid = std::nullopt,
+        std::optional<uint8_t> pollingInterval = std::nullopt,
+        const std::vector<std::string>& deviceNames = {}) :
+        MCTPDDevice(connection, name, interfaceFromBus(bus), {physaddr},
+                    staticEID, bridgePoolStartEid, bridgePoolEndEid,
+                    std::nullopt, pollingInterval, deviceNames)
     {}
     ~I2CMCTPDDevice() override = default;
 
@@ -393,13 +423,16 @@ class I3CMCTPDDevice : public MCTPDDevice
 
     I3CMCTPDDevice() = delete;
     I3CMCTPDDevice(
-        const std::shared_ptr<sdbusplus::asio::connection>& connection, int bus,
-        const std::vector<uint8_t>& physaddr,
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const std::string& name, int bus, const std::vector<uint8_t>& physaddr,
         std::optional<uint8_t> staticEID = std::nullopt,
         std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
-        std::optional<uint8_t> pollingInterval = std::nullopt) :
-        MCTPDDevice(connection, interfaceFromBus(bus), physaddr, staticEID,
-                    bridgePoolStartEid, std::nullopt, pollingInterval)
+        std::optional<uint8_t> bridgePoolEndEid = std::nullopt,
+        std::optional<uint8_t> pollingInterval = std::nullopt,
+        const std::vector<std::string>& deviceNames = {}) :
+        MCTPDDevice(connection, name, interfaceFromBus(bus), physaddr,
+                    staticEID, bridgePoolStartEid, bridgePoolEndEid,
+                    std::nullopt, pollingInterval, deviceNames)
     {}
     ~I3CMCTPDDevice() override = default;
 
@@ -421,13 +454,17 @@ class USBMCTPDDevice : public MCTPDDevice
     USBMCTPDDevice() = delete;
     USBMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
-        const std::string& interface, const std::vector<uint8_t>& physaddr,
+        const std::string& name, const std::string& interface,
+        const std::vector<uint8_t>& physaddr,
         std::optional<uint8_t> staticEID = std::nullopt,
         std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
+        std::optional<uint8_t> bridgePoolEndEid = std::nullopt,
         const std::optional<std::vector<uint8_t>>& ignoreEids = std::nullopt,
-        std::optional<uint8_t> pollingInterval = std::nullopt) :
-        MCTPDDevice(connection, interface, physaddr, staticEID,
-                    bridgePoolStartEid, ignoreEids, pollingInterval)
+        std::optional<uint8_t> pollingInterval = std::nullopt,
+        const std::vector<std::string>& deviceNames = {}) :
+        MCTPDDevice(connection, name, interface, physaddr, staticEID,
+                    bridgePoolStartEid, bridgePoolEndEid, ignoreEids,
+                    pollingInterval, deviceNames)
     {}
     ~USBMCTPDDevice() override = default;
 
@@ -446,12 +483,14 @@ class SPIMCTPDDevice : public MCTPDDevice
 
     SPIMCTPDDevice() = delete;
     SPIMCTPDDevice(
-        const std::shared_ptr<sdbusplus::asio::connection>& connection, int bus,
-        int chipselect, std::optional<uint8_t> staticEID = std::nullopt,
-        std::optional<uint8_t> pollingInterval = std::nullopt) :
-        MCTPDDevice(connection, interfaceFromBusCs(bus, chipselect),
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const std::string& name, int bus, int chipselect,
+        std::optional<uint8_t> staticEID = std::nullopt,
+        std::optional<uint8_t> pollingInterval = std::nullopt,
+        const std::vector<std::string>& deviceNames = {}) :
+        MCTPDDevice(connection, name, interfaceFromBusCs(bus, chipselect),
                     std::vector<uint8_t>{}, staticEID, std::nullopt,
-                    std::nullopt, pollingInterval)
+                    std::nullopt, std::nullopt, pollingInterval, deviceNames)
     {}
     ~SPIMCTPDDevice() override = default;
 
@@ -475,9 +514,11 @@ class XROTMCTPDDevice : public MCTPDDevice
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
         const std::string& name,
         std::optional<std::uint8_t> staticEID = std::nullopt,
-        std::optional<std::uint8_t> pollingInterval = std::nullopt) :
-        MCTPDDevice(connection, name, std::vector<uint8_t>{}, staticEID,
-                    std::nullopt, std::nullopt, pollingInterval)
+        std::optional<std::uint8_t> pollingInterval = std::nullopt,
+        const std::vector<std::string>& deviceNames = {}) :
+        MCTPDDevice(connection, name, name, std::vector<uint8_t>{}, staticEID,
+                    std::nullopt, std::nullopt, std::nullopt, pollingInterval,
+                    deviceNames)
     {}
     ~XROTMCTPDDevice() override = default;
 

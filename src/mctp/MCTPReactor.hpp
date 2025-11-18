@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -37,10 +38,15 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
     MCTPReactor& operator=(MCTPReactor&&) = delete;
 
     void tick();
+    bool isRetrying() const;
 
     void manageMCTPDevice(const std::string& path,
                           const std::shared_ptr<MCTPDevice>& device);
     void unmanageMCTPDevice(const std::string& path);
+
+    std::optional<std::string> getDeviceName(uint8_t eid);
+    std::optional<uint8_t> getStaticEidFromInterface(
+        const std::string& interface);
 
   private:
     static std::optional<std::string> findSMBusInterface(int bus);
@@ -50,6 +56,9 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
 
     // Tracks MCTP devices that have failed their setup
     std::set<std::shared_ptr<MCTPDevice>> deferred;
+
+    // Map to track failure counts for each device
+    std::map<std::shared_ptr<MCTPDevice>, int> failureCounts;
 
     void deferSetup(const std::shared_ptr<MCTPDevice>& dev);
     void setupEndpoint(const std::shared_ptr<MCTPDevice>& dev);

@@ -82,4 +82,35 @@ class MCTPDeviceRepository
         }
         return entry->second;
     }
+
+    std::optional<std::string> getNameForEid(uint8_t eid)
+    {
+        for (const auto& [path, device] : devices)
+        {
+            auto mctpDevice = std::dynamic_pointer_cast<MCTPDDevice>(device);
+            if (mctpDevice)
+            {
+                auto deviceEid = mctpDevice->getEid();
+                if (deviceEid && deviceEid.value() == eid)
+                {
+                    return mctpDevice->getName();
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<uint8_t> getStaticEidFromInterface(
+        const std::string& interface)
+    {
+        for (const auto& [path, device] : devices)
+        {
+            auto mctpDevice = std::dynamic_pointer_cast<MCTPDDevice>(device);
+            if (mctpDevice && mctpDevice->getInterface() == interface)
+            {
+                return mctpDevice->getEid();
+            }
+        }
+        return std::nullopt;
+    }
 };

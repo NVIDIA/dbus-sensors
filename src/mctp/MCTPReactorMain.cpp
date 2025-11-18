@@ -5,6 +5,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <phosphor-logging/device_error_log.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -13,7 +14,9 @@
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
 
+#include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <format>
 #include <functional>
@@ -22,10 +25,39 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <system_error>
 #include <vector>
 
+extern std::set<uint8_t> suppressedHealthCheckEids;
+
+// MCTP Control Message Type
+enum
+{
+    MCTP_CTRL_HDR_MSG_TYPE = 0x00
+};
+
+// MCTP Control Command Codes (from DSP0236)
+enum
+{
+    MCTP_CTRL_CMD_SET_ENDPOINT_ID = 0x01,
+    MCTP_CTRL_CMD_GET_ENDPOINT_ID = 0x02,
+    MCTP_CTRL_CMD_GET_ENDPOINT_UUID = 0x03,
+    MCTP_CTRL_CMD_ALLOCATE_ENDPOINT_IDS = 0x08
+};
+
+// MCTP Direction value
+enum
+{
+    MCTP_DIR_TX = 0,
+    MCTP_DIR_RX = 1
+};
+
 PHOSPHOR_LOG2_USING;
+
+// Use the nv::lg2 namespace for error logging
+using nv::lg2::CommitDeviceError;
+using nv::lg2::ErrorClass;
 
 class DBusAssociationServer : public AssociationServer
 {
@@ -220,6 +252,31 @@ static void exitReactor(boost::asio::io_context* io, sdbusplus::message_t& msg)
     io->stop();
 }
 
+static void logMCTPError(const std::shared_ptr<MCTPReactor>& reactor,
+                         uint8_t destEid, int errorCode,
+                         const std::string& errorMessage)
+{
+    auto deviceNameOpt = reactor->getDeviceName(destEid);
+    std::string deviceName =
+        deviceNameOpt.value_or("EID_" + std::to_string(destEid));
+    if (deviceName.empty())
+    {
+        deviceName = "EID_" + std::to_string(destEid);
+    }
+
+    std::string resolution =
+        "If problem persists, perform power cycle of the system to recover the device.";
+
+    std::map<std::string, std::string> additionalData = {
+        {"REDFISH_MESSAGE_ID", "ResourceEvent.1.0.ResourceErrorsDetected"},
+        {"REDFISH_MESSAGE_ARGS", deviceName + ", " + errorMessage},
+        {"REDFISH_RESOLUTION", resolution},
+        {"REDFISH_SEVERITY", "Critical"},
+        {"REDFISH_ORIGIN_OF_CONDITION", deviceName}};
+
+    CommitDeviceError(destEid, errorCode, ErrorClass::MCTP, additionalData);
+}
+
 int main()
 {
     constexpr std::chrono::seconds period(5);
@@ -276,6 +333,100 @@ int main()
     auto interfacesAddedMatch = sdbusplus::bus::match_t(
         static_cast<sdbusplus::bus_t&>(*systemBus), interfacesAddedMatchSpec,
         std::bind_front(addInventory, systemBus, reactor));
+
+    const std::string transportErrorMatchSpec =
+        rules::type::signal() + rules::sender("au.com.codeconstruct.MCTP1") +
+        rules::interface("au.com.codeconstruct.MCTP.BusOwner1") +
+        rules::member("TransportError");
+
+    auto transportErrorMatch = sdbusplus::bus::match_t(
+        static_cast<sdbusplus::bus_t&>(*systemBus), transportErrorMatchSpec,
+        [reactor](sdbusplus::message_t& msg) {
+            uint32_t errorCode = 0;
+            uint8_t direction = 0;
+            uint8_t binding = 0;
+            uint8_t srcEid = 0;
+            uint8_t destEid = 0;
+            uint8_t tag = 0;
+            uint8_t msgType = 0;
+            uint8_t commandCode = 0;
+            std::string interface;
+
+            msg.read(errorCode, direction, binding, srcEid, destEid, tag,
+                     msgType, commandCode, interface);
+
+            if (destEid == 0)
+            {
+                auto staticEid = reactor->getStaticEidFromInterface(interface);
+                if (staticEid)
+                {
+                    destEid = *staticEid;
+                }
+                // Supress the 5sec SETEID timeout error logs from flooding when
+                // the tick is running and trying to setup a failing device.
+                if (reactor->isRetrying())
+                {
+                    return;
+                }
+            }
+
+            // Suppress errors during recovery
+            if ((suppressedHealthCheckEids.contains(destEid) ||
+                 !suppressedHealthCheckEids.empty()) &&
+                errorCode == ETIMEDOUT && direction == MCTP_DIR_RX)
+            {
+                return;
+            }
+
+            if (errorCode == ETIMEDOUT && direction == MCTP_DIR_RX)
+            {
+                if (msgType == MCTP_CTRL_HDR_MSG_TYPE)
+                {
+                    std::string timeoutType;
+                    std::string errorMessage;
+
+                    // Map command codes to timeout types and error messages
+                    switch (commandCode)
+                    {
+                        case MCTP_CTRL_CMD_SET_ENDPOINT_ID:
+                            timeoutType = "SetEID Timeout";
+                            errorMessage =
+                                "MCTP device discovery failed due to device error SetEID Timeout";
+                            break;
+                        case MCTP_CTRL_CMD_GET_ENDPOINT_UUID:
+                            timeoutType = "Get UUID Timeout";
+                            errorMessage =
+                                "MCTP device discovery failed due to device error Get UUID Timeout";
+                            break;
+                        case MCTP_CTRL_CMD_ALLOCATE_ENDPOINT_IDS:
+                            timeoutType = "Allocate EID Timeout";
+                            errorMessage =
+                                "MCTP device discovery failed due to device error Allocate EID Timeout";
+                            break;
+                        default:
+                            timeoutType = "MCTP Control Timeout";
+                            errorMessage =
+                                "MCTP communication failed due to timeout";
+                            break;
+                    }
+
+                    info("MCTP {TYPE} on EID {EID}", "TYPE", timeoutType, "EID",
+                         destEid);
+                    logMCTPError(reactor, destEid, errorCode, errorMessage);
+                }
+            }
+            else if (direction == MCTP_DIR_TX)
+            {
+                info("MCTP TX error {ERROR} on EID {EID}", "ERROR", errorCode,
+                     "EID", destEid);
+
+                std::string errorMessage =
+                    "MCTP communication failed due to Tx error (errno=" +
+                    std::to_string(errorCode) + ")";
+
+                logMCTPError(reactor, destEid, errorCode, errorMessage);
+            }
+        });
 
     systemBus->request_name("xyz.openbmc_project.MCTPReactor");
 

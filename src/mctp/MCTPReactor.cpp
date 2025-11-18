@@ -7,6 +7,7 @@
 #include <boost/system/detail/error_code.hpp>
 #include <phosphor-logging/lg2.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -21,6 +22,8 @@ void MCTPReactor::deferSetup(const std::shared_ptr<MCTPDevice>& dev)
     debug("Deferring setup for MCTP device at [ {MCTP_DEVICE} ]", "MCTP_DEVICE",
           dev->describe());
 
+    // Track failures so we can suppress logs in the signal handler
+    failureCounts[dev]++;
     deferred.emplace(dev);
 }
 
@@ -114,6 +117,9 @@ void MCTPReactor::setupEndpoint(const std::shared_ptr<MCTPDevice>& dev)
             return;
         }
 
+        // Clear failure count on success
+        self->failureCounts.erase(dev);
+
         if (!ep)
         {
             info(
@@ -133,6 +139,11 @@ void MCTPReactor::setupEndpoint(const std::shared_ptr<MCTPDevice>& dev)
             self->deferSetup(dev);
         }
     });
+}
+
+bool MCTPReactor::isRetrying() const
+{
+    return !failureCounts.empty();
 }
 
 void MCTPReactor::tick()
@@ -222,6 +233,7 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
           "INVENTORY_PATH", path);
 
     deferred.erase(device);
+    failureCounts.erase(device);
 
     // Remove the device from the repository before notifying the device itself
     // of removal so we don't defer its setup
@@ -231,4 +243,15 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
           "MCTP_DEVICE", device->describe());
 
     device->remove();
+}
+
+std::optional<std::string> MCTPReactor::getDeviceName(uint8_t eid)
+{
+    return devices.getNameForEid(eid);
+}
+
+std::optional<uint8_t> MCTPReactor::getStaticEidFromInterface(
+    const std::string& interface)
+{
+    return devices.getStaticEidFromInterface(interface);
 }

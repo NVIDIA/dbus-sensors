@@ -3,6 +3,7 @@ executable(
     'MCTPReactorMain.cpp',
     'MCTPReactor.cpp',
     'MCTPEndpoint.cpp',
+    'MCTPEndpointUtils.cpp',
     dependencies: [default_deps, utils_dep],
     install: true,
     install_dir: '/usr/libexec/dbus-sensors',
