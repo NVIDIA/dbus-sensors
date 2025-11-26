@@ -58,6 +58,7 @@ extern "C"
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -66,6 +67,8 @@ extern "C"
 
 static NVMEMap nvmeDeviceMap;
 static std::unique_ptr<NVMeMiManager> commManager;
+// Map to store MCTP endpoint paths by EID for monitoring
+static std::map<uint8_t, std::string> eidToMctpPath;
 
 NVMEMap& getNVMEMap()
 {
@@ -98,6 +101,15 @@ static MctpDiscoveryHandler handleMctpDiscovery(
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
     const HandlerType& handleEidProperties, uint8_t expectedEid,
     const char* mctpEndpointInterface);
+
+// Stop polling for an EID
+static void stopPollingForEid(uint8_t eid);
+
+// Resume polling for an EID
+static void resumePollingForEid(
+    uint8_t eid, boost::asio::io_context& io,
+    sdbusplus::asio::object_server& objectServer,
+    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection);
 
 static uint8_t extractAddress(const SensorBaseConfigMap& properties)
 {
@@ -209,6 +221,10 @@ static EidPropertiesCreator handleEidProperties(
                     }
                 }
             }
+
+            // Store the MCTP endpoint path for this EID
+            eidToMctpPath[eid] = path;
+
             onMctpFound(eid, net);
         };
     };
@@ -470,50 +486,132 @@ void createSensors(boost::asio::io_context& io,
         NVMeSensor::sensorType, NVMeStatusSensor::sensorType});
 }
 
-static void interfaceRemoved(sdbusplus::message_t& message, NVMEMap& contexts)
+// Stop polling for an EID
+static void stopPollingForEid(uint8_t eid)
+{
+    auto findContext = nvmeDeviceMap.find(eid);
+    if (findContext != nvmeDeviceMap.end())
+    {
+        lg2::info(
+            "Stopping polling for EID {EID} due to connectivity degradation",
+            "EID", eid);
+        // Stop polling by closing the context (closes timer and streams)
+        findContext->second->close();
+    }
+}
+
+// Resume polling for an EID - trigger full sensor rediscovery
+// to properly reinitialize the MCTP connection after it was closed
+static void resumePollingForEid(
+    uint8_t eid, boost::asio::io_context& io,
+    sdbusplus::asio::object_server& objectServer,
+    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
+{
+    lg2::info("Resuming polling for EID {EID} - connectivity restored, "
+              "triggering sensor rediscovery",
+              "EID", eid);
+
+    // Trigger full sensor rediscovery to reinitialize the MCTP context
+    // This will recreate the communication pipes that were closed
+    boost::asio::post(io, [&io, &objectServer, &dbusConnection]() {
+        createSensors(io, objectServer, dbusConnection);
+    });
+}
+
+// Handle MCTP endpoint connectivity property changes
+static void handleMctpConnectivityChange(
+    sdbusplus::message_t& message, boost::asio::io_context& io,
+    sdbusplus::asio::object_server& objectServer,
+    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
 {
     if (message.is_method_error())
     {
-        lg2::error("interfacesRemoved callback method error");
+        lg2::error("PropertiesChanged callback method error");
         return;
     }
 
-    sdbusplus::message::object_path path;
-    std::vector<std::string> interfaces;
+    std::string interface;
+    std::map<std::string, std::variant<std::string>> changedProperties;
+    std::vector<std::string> invalidatedProperties;
 
-    message.read(path, interfaces);
+    message.read(interface, changedProperties, invalidatedProperties);
 
-    for (auto& [eid, context] : contexts)
+    // Check if Connectivity property changed
+    auto connectivityIt = changedProperties.find("Connectivity");
+    if (connectivityIt == changedProperties.end())
     {
-        // Check for temperature sensors
-        std::optional<std::shared_ptr<NVMeSensor>> sensor =
-            context->getSensorAtPath<NVMeSensor>(path);
-        if (sensor)
+        return;
+    }
+
+    std::string connectivity = std::get<std::string>(connectivityIt->second);
+    std::string path = message.get_path();
+
+    lg2::info("MCTP endpoint {PATH} Connectivity changed to {STATE}", "PATH",
+              path, "STATE", connectivity);
+
+    // Expected Connectivity values: "Available" or "Degraded"
+    // Find the EID for this endpoint path
+    uint8_t foundEid = 0;
+    for (const auto& [eid, storedPath] : eidToMctpPath)
+    {
+        if (storedPath == path)
         {
-            auto interface = std::find(interfaces.begin(), interfaces.end(),
-                                       (*sensor)->configInterface);
-            if (interface != interfaces.end())
+            foundEid = eid;
+            break;
+        }
+    }
+
+    if (foundEid == 0)
+    {
+        // Endpoint not found in our mapping - ignore this change
+        // This can happen if we haven't discovered this endpoint yet
+        lg2::debug(
+            "Ignoring Connectivity change for unknown endpoint {PATH} - {STATE}",
+            "PATH", path, "STATE", connectivity);
+        return;
+    }
+
+    // Handle connectivity state changes
+    // "Degraded" - Device is unresponsive (e.g., during power transition)
+    //              Stop polling immediately to avoid communication errors
+    // "Available" - Device is responsive, resume normal polling
+    if (connectivity == "Degraded")
+    {
+        stopPollingForEid(foundEid);
+    }
+    else if (connectivity == "Available")
+    {
+        resumePollingForEid(foundEid, io, objectServer, dbusConnection);
+    }
+}
+
+// Cleanup MCTP endpoint contexts for removed EIDs
+static void handleMctpEndpointRemoved(const std::set<uint8_t>& removedEids)
+{
+    lg2::info("Processing MCTP endpoint removal for {COUNT} endpoints", "COUNT",
+              removedEids.size());
+
+    // Process all pending removals
+    for (uint8_t eid : removedEids)
+    {
+        // Stop polling and remove context
+        auto findContext = nvmeDeviceMap.find(eid);
+        if (findContext != nvmeDeviceMap.end())
+        {
+            lg2::info("Removing context for EID {EID}", "EID", eid);
+            findContext->second->close();
+
+            // Remove from communication manager
+            if (commManager)
             {
-                context->removeSensor<NVMeSensor>(sensor.value());
-                continue;
+                commManager->removeContext(eid);
             }
+
+            nvmeDeviceMap.erase(findContext);
         }
 
-        // Check for status sensors
-        std::optional<std::shared_ptr<NVMeStatusSensor>> statusSensor =
-            context->getSensorAtPath<NVMeStatusSensor>(path);
-        if (statusSensor)
-        {
-            // Use the correct interface name for status sensors
-            std::string statusConfigInterface =
-                configInterfaceName(NVMeStatusSensor::sensorType);
-            auto interface = std::find(interfaces.begin(), interfaces.end(),
-                                       statusConfigInterface);
-            if (interface != interfaces.end())
-            {
-                context->removeSensor<NVMeStatusSensor>(statusSensor.value());
-            }
-        }
+        // Remove from path mapping
+        eidToMctpPath.erase(eid);
     }
 }
 
@@ -553,6 +651,13 @@ int main()
             });
         };
 
+    // Debounce timers for MCTP endpoint add/remove events
+    boost::asio::steady_timer mctpEndpointAddedDebounceTimer(io);
+    boost::asio::steady_timer mctpEndpointRemovedDebounceTimer(io);
+
+    // Track EIDs pending removal during debounce period
+    auto pendingRemovedEids = std::make_shared<std::set<uint8_t>>();
+
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
         setupPropertiesChangedMatches(
             *systemBus,
@@ -560,14 +665,138 @@ int main()
                 {NVMeSensor::sensorType, NVMeStatusSensor::sensorType}),
             eventHandler);
 
-    // Watch for entity-manager to remove configuration interfaces
-    // so the corresponding sensors can be removed.
-    auto ifaceRemovedMatch = std::make_unique<sdbusplus::bus::match_t>(
+    // Watch for MCTP endpoint additions on codeconstruct MCTP stack
+    auto mctpEndpointAddedMatch = std::make_unique<sdbusplus::bus::match_t>(
         static_cast<sdbusplus::bus_t&>(*systemBus),
-        "type='signal',member='InterfacesRemoved',arg0path='" +
-            std::string(inventoryPath) + "/'",
-        [](sdbusplus::message_t& msg) {
-            interfaceRemoved(msg, nvmeDeviceMap);
+        "type='signal',member='InterfacesAdded',path_namespace='/au/com/"
+        "codeconstruct/mctp1'",
+        [&mctpEndpointAddedDebounceTimer, &io, &objectServer,
+         &systemBus](sdbusplus::message_t&) {
+            // Debounce: cancel any existing timer and start a new 3-second
+            // delay. No need to parse the message - createSensors() will
+            // rediscover all endpoints and skip already-created sensors.
+            mctpEndpointAddedDebounceTimer.expires_after(
+                std::chrono::seconds(3));
+
+            mctpEndpointAddedDebounceTimer.async_wait(
+                [&io, &objectServer,
+                 &systemBus](const boost::system::error_code& ec) {
+                    if (ec == boost::asio::error::operation_aborted)
+                    {
+                        return; // Timer was canceled
+                    }
+
+                    if (ec)
+                    {
+                        lg2::error("MCTP endpoint added debounce timer error: "
+                                   "{ERROR}",
+                                   "ERROR", ec.message());
+                        return;
+                    }
+
+                    lg2::info("Processing debounced MCTP endpoint added event");
+                    // Re-discover sensors to handle the new endpoint
+                    boost::asio::post(io, [&io, &objectServer, &systemBus]() {
+                        createSensors(io, objectServer, systemBus);
+                    });
+                });
+        });
+
+    // Watch for MCTP endpoint removals on codeconstruct MCTP stack
+    auto mctpEndpointRemovedMatch = std::make_unique<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*systemBus),
+        "type='signal',member='InterfacesRemoved',path_namespace='/au/com/"
+        "codeconstruct/mctp1'",
+        [&mctpEndpointRemovedDebounceTimer,
+         pendingRemovedEids](sdbusplus::message_t& msg) {
+            if (msg.is_method_error())
+            {
+                lg2::error("InterfacesRemoved callback method error");
+                return;
+            }
+
+            sdbusplus::message::object_path path;
+            std::vector<std::string> interfaces;
+
+            msg.read(path, interfaces);
+
+            // Check if this is a codeconstruct MCTP endpoint
+            bool isMctpEndpoint = false;
+            for (const auto& interfaceName : interfaces)
+            {
+                if (interfaceName == "au.com.codeconstruct.MCTP.Endpoint1")
+                {
+                    isMctpEndpoint = true;
+                    break;
+                }
+            }
+
+            if (!isMctpEndpoint)
+            {
+                return;
+            }
+
+            lg2::info("MCTP endpoint removed: {PATH}", "PATH", path.str);
+
+            // Find and collect the EID associated with this path
+            uint8_t removedEid = 0;
+            for (const auto& [eid, storedPath] : eidToMctpPath)
+            {
+                if (storedPath == path.str)
+                {
+                    removedEid = eid;
+                    break;
+                }
+            }
+
+            // Add to pending removal set (collects all EIDs during debounce)
+            if (removedEid != 0)
+            {
+                pendingRemovedEids->insert(removedEid);
+            }
+
+            // Debounce: cancel any existing timer and start a new 3-second
+            // delay
+            mctpEndpointRemovedDebounceTimer.expires_after(
+                std::chrono::seconds(3));
+
+            mctpEndpointRemovedDebounceTimer.async_wait(
+                [pendingRemovedEids](const boost::system::error_code& ec) {
+                    if (ec == boost::asio::error::operation_aborted)
+                    {
+                        return; // Timer was canceled
+                    }
+
+                    if (ec)
+                    {
+                        lg2::error(
+                            "MCTP endpoint removed debounce timer error: "
+                            "{ERROR}",
+                            "ERROR", ec.message());
+                        return;
+                    }
+
+                    lg2::info(
+                        "Processing debounced MCTP endpoint removed event");
+
+                    // Call cleanup handler with all collected EIDs
+                    handleMctpEndpointRemoved(*pendingRemovedEids);
+
+                    // Clear the pending removals
+                    pendingRemovedEids->clear();
+                });
+        });
+
+    // Watch for MCTP endpoint Connectivity property changes on codeconstruct
+    // MCTP stack - this monitors the Connectivity property to detect when
+    // devices become unresponsive during power transitions
+    auto mctpConnectivityMatch = std::make_unique<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*systemBus),
+        "type='signal',member='PropertiesChanged',interface='org.freedesktop."
+        "DBus.Properties',path_namespace='/au/com/codeconstruct/mctp1',"
+        "arg0='au.com.codeconstruct.MCTP.Endpoint1'",
+        [&io, &objectServer, &systemBus](sdbusplus::message_t& msg) {
+            handleMctpConnectivityChange(msg, io, objectServer, systemBus);
         });
 
     setupManufacturingModeMatch(*systemBus);
