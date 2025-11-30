@@ -9,6 +9,7 @@
 #include <boost/asio/error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/system/detail/errc.hpp>
+#include <phosphor-logging/device_error_log.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus.hpp>
@@ -19,7 +20,6 @@
 
 #include <cassert>
 #include <charconv>
-#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -38,6 +38,12 @@
 #include <vector>
 
 PHOSPHOR_LOG2_USING;
+
+// Use the nv::lg2 namespace for error logging
+using nv::lg2::ErrorClass;
+
+// Global set of EIDs for suppressing errors during recovery or health check
+std::set<uint8_t> suppressedHealthCheckEids;
 
 static constexpr const char* mctpdBusName = "au.com.codeconstruct.MCTP1";
 static constexpr const char* mctpdControlPath = "/au/com/codeconstruct/mctp1";
@@ -428,18 +434,33 @@ void MCTPDDevice::performHealthCheck()
                     // First failure: Log & Start Recovery
                     if (self->endpoint)
                     {
-                        info("Health error: Device not responsive, EID {EID}",
-                             "EID", self->endpoint->eid());
-
-                        // Log the MCTP ping failure for Redfish
-                        logMCTPPingFailure(self->name, self->endpoint->eid());
-                        self->recover();
+                        self->consecutivePingFailures++;
+                        if (self->consecutivePingFailures ==
+                            self->pingFailureThreshold)
+                        {
+                            info(
+                                "Health error: Device not responsive (Timeout), EID {EID}",
+                                "EID", self->endpoint->eid());
+                            // Log the MCTP ping failure for Redfish only after
+                            // 3 consecutive timeouts
+                            if (ec == boost::system::errc::timed_out)
+                            {
+                                logMCTPError(
+                                    self->name, self->endpoint->eid(),
+                                    nv::lg2::ErrorCode::MCTP::
+                                        MCTP_TRANSPORT_FAIL_PING_TIMEOUT,
+                                    "MCTP ping failed due to timeout for the device");
+                            }
+                            self->recover();
+                        }
                     }
                 }
             }
             else
             {
-                // Device Responsive - Reset suppression flag
+                // Device Responsive - Reset failure counter and suppression
+                // flag
+                self->consecutivePingFailures = 0;
                 suppressedHealthCheckEids.erase(self->staticEID.value());
 
                 // Device Responsive Handling
@@ -470,15 +491,12 @@ void MCTPDDevice::performHealthCheck()
         uint8_t start = bridgePoolStartEid.value();
         uint8_t end = bridgePoolEndEid.value();
         // Ping each EID in the pool
-        size_t nameIndex = 1;
         for (uint8_t eid = start; eid <= end; eid++)
         {
-            std::string deviceName;
-            if (nameIndex < deviceNames.size())
-            {
-                deviceName = deviceNames[nameIndex];
-            }
-            nameIndex++;
+            std::string deviceName = getNameForEid(eid).value_or("");
+
+            // Suppress signal handler logs for bridge pool health check pings
+            suppressedHealthCheckEids.insert(eid);
 
             connection->async_method_call(
                 [weak = weak_from_this(), eid,
@@ -491,22 +509,34 @@ void MCTPDDevice::performHealthCheck()
 
                     if (ec)
                     {
+                        // Count consecutive timeouts for bridge pool EIDs
                         if (!self->unresponsiveBridgePoolEids.contains(eid))
                         {
-                            info("Bridge pool EID {EID} not responsive", "EID",
-                                 eid);
-
-                            // Log the MCTP ping failure for bridge pool device
-                            logMCTPPingFailure(deviceName, eid);
-                            self->unresponsiveBridgePoolEids.insert(eid);
-
-                            // Attempt to recover the specific bridge pool
-                            // endpoint
-                            self->recover(eid);
+                            self->bridgePoolPingFailures[eid]++;
+                            if (self->bridgePoolPingFailures[eid] ==
+                                self->pingFailureThreshold)
+                            {
+                                info(
+                                    "Bridge pool EID {EID} not responsive after {COUNT} timeouts",
+                                    "EID", eid, "COUNT",
+                                    self->bridgePoolPingFailures[eid]);
+                                if (ec == boost::system::errc::timed_out)
+                                {
+                                    logMCTPError(
+                                        deviceName, eid,
+                                        nv::lg2::ErrorCode::MCTP::
+                                            MCTP_TRANSPORT_FAIL_PING_TIMEOUT,
+                                        "MCTP ping failed due to timeout for the device");
+                                }
+                                self->unresponsiveBridgePoolEids.insert(eid);
+                                self->recover(eid);
+                            }
                         }
                     }
                     else
                     {
+                        self->bridgePoolPingFailures[eid] = 0;
+                        suppressedHealthCheckEids.erase(eid);
                         if (self->unresponsiveBridgePoolEids.contains(eid))
                         {
                             info("Bridge pool EID {EID} recovered", "EID", eid);

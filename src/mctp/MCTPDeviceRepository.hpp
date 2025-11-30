@@ -90,10 +90,10 @@ class MCTPDeviceRepository
             auto mctpDevice = std::dynamic_pointer_cast<MCTPDDevice>(device);
             if (mctpDevice)
             {
-                auto deviceEid = mctpDevice->getEid();
-                if (deviceEid && deviceEid.value() == eid)
+                auto name = mctpDevice->getNameForEid(eid);
+                if (name)
                 {
-                    return mctpDevice->getName();
+                    return name;
                 }
             }
         }

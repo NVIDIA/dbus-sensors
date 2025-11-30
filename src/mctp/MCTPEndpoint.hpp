@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -297,6 +298,33 @@ class MCTPDDevice :
         return name;
     }
 
+    std::optional<std::string> getNameForEid(uint8_t eid) const
+    {
+        // Check main EID
+        auto currentEid = getEid();
+        if (currentEid && currentEid.value() == eid)
+        {
+            return name;
+        }
+
+        // Check bridge pool
+        if (bridgePoolStartEid && bridgePoolEndEid)
+        {
+            uint8_t start = *bridgePoolStartEid;
+            uint8_t end = *bridgePoolEndEid;
+            if (eid >= start && eid <= end)
+            {
+                size_t offset = eid - start;
+                size_t index = 1 + offset; // 0 is main device
+                if (index < deviceNames.size())
+                {
+                    return deviceNames[index];
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
     std::string getInterface() const
     {
         return interface;
@@ -362,6 +390,11 @@ class MCTPDDevice :
     std::unique_ptr<boost::asio::steady_timer> healthTimer;
     bool inHealthRecoveryMode = false;
     std::set<uint8_t> unresponsiveBridgePoolEids;
+
+    // Ping retry tracking (require 3 consecutive failures before RF event)
+    static constexpr uint8_t pingFailureThreshold = 3;
+    uint8_t consecutivePingFailures = 0;
+    std::map<uint8_t, uint8_t> bridgePoolPingFailures;
     void performHealthCheck();
     void recover();
     void recover(uint8_t eid);
