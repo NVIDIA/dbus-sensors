@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <map>
 #include <optional>
 #include <sstream>
@@ -190,4 +191,16 @@ void createMctpTransportRedfishEvent(
         warning("No Redfish registry mapping for MCTP error {ERROR}", "ERROR",
                 errorCode);
     }
+}
+
+// Helper function to write a value to a sysfs file
+bool writeSysfsFile(const std::string& path, const std::string& value)
+{
+    std::ofstream file(path);
+    if (!file)
+    {
+        return false;
+    }
+    file << value;
+    return file.good();
 }

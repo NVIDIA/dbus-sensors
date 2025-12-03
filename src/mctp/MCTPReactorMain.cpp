@@ -1,7 +1,10 @@
+#include "MCTPCustomDevices.hpp"
 #include "MCTPEndpoint.hpp"
 #include "MCTPEndpointUtils.hpp"
 #include "MCTPReactor.hpp"
 #include "Utils.hpp"
+
+#include <sys/utsname.h>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
@@ -19,6 +22,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <functional>
 #include <map>
@@ -420,6 +424,45 @@ int main()
             systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
         gsc->getConfiguration({"MCTPXROTTarget"});
     });
+
+    // TODO: EM config support for USB Gadget MCTP device
+    // Temporary : Create static USB Gadget MCTP device only if kernel supports
+    // it later shift to EM config presence
+    struct utsname unameData{};
+    if (uname(&unameData) == 0)
+    {
+        std::filesystem::path mctpModulePath =
+            std::format("/lib/modules/{}/kernel/drivers/usb/gadget/function/"
+                        "usb_f_mctp.ko",
+                        unameData.release);
+
+        if (std::filesystem::exists(mctpModulePath))
+        {
+            boost::asio::post(io, [reactor, systemBus]() {
+                info("Creating USB Gadget MCTP device");
+
+                auto gadgetDevice = std::make_shared<USBGadgetMCTPDevice>(
+                    systemBus,
+                    "mctpusbg0", // Gadget device name
+                    8            // Local EID
+                );
+
+                // Register with reactor - reactor will handle setup via tick()
+                reactor->manageMCTPDevice("/virtual/usbgadget/mctp0",
+                                          gadgetDevice);
+            });
+        }
+        else
+        {
+            info(
+                "USB Gadget MCTP not supported: kernel module {PATH} not found",
+                "PATH", mctpModulePath.string());
+        }
+    }
+    else
+    {
+        warning("Failed to get kernel version, skipping USB Gadget MCTP setup");
+    }
 
     io.run();
 

@@ -101,3 +101,11 @@ std::optional<uint8_t> getPollingInterval(const SensorBaseConfigMap& iface);
  * @return Vector of device names
  */
 std::vector<std::string> getDeviceNames(const SensorBaseConfigMap& iface);
+
+/**
+ * @brief Write a value to a sysfs file
+ * @param path Path to the sysfs file
+ * @param value Value to write
+ * @return True if successful, false otherwise
+ */
+bool writeSysfsFile(const std::string& path, const std::string& value);

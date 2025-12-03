@@ -1,0 +1,556 @@
+#include "MCTPCustomDevices.hpp"
+
+#include "MCTPEndpoint.hpp"
+#include "MCTPEndpointUtils.hpp"
+#include "Utils.hpp"
+
+#include <linux/mctp.h>
+#include <net/if.h> // for if_nametoindex
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <boost/system/error_code.hpp>
+#include <phosphor-logging/lg2.hpp>
+#include <sdbusplus/asio/connection.hpp>
+#include <sdbusplus/bus.hpp>
+#include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/message.hpp>
+#include <sdbusplus/message/native_types.hpp>
+
+#include <array>
+#include <cerrno>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <exception>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <functional>
+#include <memory>
+#include <set>
+#include <string>
+#include <system_error>
+#include <utility>
+#include <variant>
+#include <vector>
+
+PHOSPHOR_LOG2_USING;
+
+static const char* mctpdObjectManagerInterface =
+    "org.freedesktop.DBus.ObjectManager";
+
+// MCTP D-Bus constants
+static constexpr const char* mctpdBusName = "au.com.codeconstruct.MCTP1";
+static constexpr const char* mctpdControlPath = "/au/com/codeconstruct/mctp1";
+static constexpr const char* mctpdEndpointPath =
+    "/au/com/codeconstruct/mctp1/networks/1/endpoints/";
+static constexpr const char* mctpdNetwork1Path =
+    "/au/com/codeconstruct/mctp1/networks/1";
+static constexpr const char* mctpdEndpointControlInterface =
+    "au.com.codeconstruct.MCTP.Endpoint1";
+static constexpr const char* mctpdNetworkInterface =
+    "au.com.codeconstruct.MCTP.Network1";
+
+/* MCTP USBGadget */
+
+USBGadgetMCTPDevice::USBGadgetMCTPDevice(
+    const std::shared_ptr<sdbusplus::asio::connection>& connection,
+    const std::string& gadgetName, uint8_t localEID) :
+    connection(connection), gadgetName(gadgetName), localEID(localEID)
+{
+    info("Creating USB Gadget MCTP Device: {GADGET_NAME}, EID: {EID}",
+         "GADGET_NAME", gadgetName, "EID", static_cast<int>(localEID));
+}
+
+void USBGadgetMCTPDevice::setup(
+    std::function<void(const std::error_code& ec,
+                       const std::shared_ptr<MCTPEndpoint>& ep)>&& added)
+{
+    auto onSetupComplete = std::move(added);
+    info("Setting up USB Gadget: {GADGET_NAME}", "GADGET_NAME", gadgetName);
+
+    if (isSetup)
+    {
+        warning("USB Gadget already setup: {GADGET_NAME}", "GADGET_NAME",
+                gadgetName);
+        onSetupComplete(
+            std::make_error_code(std::errc::device_or_resource_busy), nullptr);
+        return;
+    }
+
+    // Load libcomposite kernel module
+    // TODO: remove no lint next line once we come up with a better solution
+    // NOLINTNEXTLINE(cert-env33-c)
+    if (std::system("modprobe libcomposite") != 0)
+    {
+        error("Failed to load libcomposite module");
+        onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        return;
+    }
+
+    // Create USB gadget directory
+    std::error_code ec;
+    std::filesystem::create_directories("/sys/kernel/config/usb_gadget/g_multi",
+                                        ec);
+    if (ec)
+    {
+        error("Failed to create USB gadget directory: {ERROR}", "ERROR",
+              ec.message());
+        onSetupComplete(ec, nullptr);
+        return;
+    }
+
+    // Configure USB gadget parameters
+    if (!writeSysfsFile("/sys/kernel/config/usb_gadget/g_multi/idVendor",
+                        "0x1d6b"))
+    {
+        error("Failed to set idVendor");
+        onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        return;
+    }
+
+    if (!writeSysfsFile("/sys/kernel/config/usb_gadget/g_multi/idProduct",
+                        "0x1040"))
+    {
+        error("Failed to set idProduct");
+        onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        return;
+    }
+
+    if (!writeSysfsFile("/sys/kernel/config/usb_gadget/g_multi/bcdDevice",
+                        "0x0100"))
+    {
+        error("Failed to set bcdDevice");
+        onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        return;
+    }
+
+    if (!writeSysfsFile("/sys/kernel/config/usb_gadget/g_multi/bcdUSB",
+                        "0x0200"))
+    {
+        error("Failed to set bcdUSB");
+        onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        return;
+    }
+
+    // Create strings directory
+    std::filesystem::create_directories(
+        "/sys/kernel/config/usb_gadget/g_multi/strings/0x409", ec);
+    if (ec)
+    {
+        error("Failed to create strings directory: {ERROR}", "ERROR",
+              ec.message());
+        onSetupComplete(ec, nullptr);
+        return;
+    }
+
+    if (!writeSysfsFile(
+            "/sys/kernel/config/usb_gadget/g_multi/strings/0x409/manufacturer",
+            "ASPEED"))
+    {
+        error("Failed to set manufacturer string");
+        onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        return;
+    }
+
+    if (!writeSysfsFile(
+            "/sys/kernel/config/usb_gadget/g_multi/strings/0x409/product",
+            "Gadget: MCTP"))
+    {
+        error("Failed to set product string");
+        onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        return;
+    }
+
+    if (!writeSysfsFile(
+            "/sys/kernel/config/usb_gadget/g_multi/strings/0x409/serialnumber",
+            "1234567890"))
+    {
+        error("Failed to set serial number");
+        onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        return;
+    }
+
+    // Create configuration
+    std::filesystem::create_directories(
+        "/sys/kernel/config/usb_gadget/g_multi/configs/c.1", ec);
+    if (ec)
+    {
+        error("Failed to create config directory: {ERROR}", "ERROR",
+              ec.message());
+        onSetupComplete(ec, nullptr);
+        return;
+    }
+
+    std::filesystem::create_directories(
+        "/sys/kernel/config/usb_gadget/g_multi/configs/c.1/strings/0x409", ec);
+    if (ec)
+    {
+        error("Failed to create config strings directory: {ERROR}", "ERROR",
+              ec.message());
+        onSetupComplete(ec, nullptr);
+        return;
+    }
+
+    if (!writeSysfsFile(
+            "/sys/kernel/config/usb_gadget/g_multi/configs/c.1/strings/0x409/configuration",
+            "MCTP Config"))
+    {
+        error("Failed to set configuration string");
+        onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        return;
+    }
+
+    if (!writeSysfsFile(
+            "/sys/kernel/config/usb_gadget/g_multi/configs/c.1/MaxPower",
+            "250"))
+    {
+        error("Failed to set MaxPower");
+        onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        return;
+    }
+
+    // Create MCTP function
+    std::filesystem::create_directories(
+        "/sys/kernel/config/usb_gadget/g_multi/functions/mctp.usb0", ec);
+    if (ec)
+    {
+        error("Failed to create MCTP function directory: {ERROR}", "ERROR",
+              ec.message());
+        onSetupComplete(ec, nullptr);
+        return;
+    }
+
+    // Link function to configuration
+    const char* symlinkSource =
+        "/sys/kernel/config/usb_gadget/g_multi/functions/mctp.usb0";
+    const char* symlinkDest =
+        "/sys/kernel/config/usb_gadget/g_multi/configs/c.1/mctp.usb0";
+
+    if (symlink(symlinkSource, symlinkDest) == -1)
+    {
+        // Ignore EEXIST (symlink already exists from previous run)
+        if (errno != EEXIST)
+        {
+            error("Failed to link MCTP function to config: {ERROR}", "ERROR",
+                  std::strerror(errno));
+            onSetupComplete(std::make_error_code(static_cast<std::errc>(errno)),
+                            nullptr);
+            return;
+        }
+
+        info("MCTP function symlink already exists, continuing...");
+    }
+
+    // Check if UDC is already set to avoid error on re-bind
+    bool udcAlreadySet = false;
+    {
+        std::ifstream udcFile("/sys/kernel/config/usb_gadget/g_multi/UDC");
+        if (udcFile)
+        {
+            std::string currentUdc;
+            std::getline(udcFile, currentUdc);
+            udcAlreadySet =
+                (currentUdc.find("1e6a0000.usb-vhub:p2") != std::string::npos);
+        }
+    }
+
+    if (!udcAlreadySet)
+    {
+        if (!writeSysfsFile("/sys/kernel/config/usb_gadget/g_multi/UDC",
+                            "1e6a0000.usb-vhub:p2"))
+        {
+            error("Failed to set UDC and enable gadget");
+            onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+            return;
+        }
+    }
+    else
+    {
+        info("UDC already set to 1e6a0000.usb-vhub:p2, skipping...");
+    }
+
+    // Set the link up
+    // TODO: remove no lint next line once we come up with a better solution
+    // NOLINTNEXTLINE(cert-env33-c)
+    if (std::system(
+            std::format("/usr/bin/mctp link set {} up", gadgetName).c_str()) !=
+        0)
+    {
+        error("Failed to set link up for {GADGET_NAME}: {ERROR}", "GADGET_NAME",
+              gadgetName, "ERROR", std::strerror(errno));
+        onSetupComplete(std::make_error_code(static_cast<std::errc>(errno)),
+                        nullptr);
+        return;
+    }
+
+    // Set local MCTP address (udev rule might get delayed)
+    // TODO: remove no lint next line once we come up with a better solution
+    // NOLINTNEXTLINE(cert-env33-c)
+    if (std::system(std::format("/usr/bin/mctp addr add {} dev {}", localEID,
+                                gadgetName)
+                        .c_str()) != 0)
+    {
+        if (errno != EEXIST)
+        {
+            error("Failed to add MCTP address to {GADGET_NAME}: {ERROR}",
+                  "GADGET_NAME", gadgetName, "ERROR", std::strerror(errno));
+            onSetupComplete(std::make_error_code(static_cast<std::errc>(errno)),
+                            nullptr);
+            return;
+        }
+        info("MCTP address already exists, continuing...");
+    }
+
+    // Set the role to Endpoint mode
+    if (!setRoleEndpoint())
+    {
+        onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        warning("Failed to set role to Endpoint mode");
+        return;
+    }
+
+    isSetup = true;
+    info("USB gadget feature enabled successfully");
+
+    onSetupComplete(std::error_code{}, shared_from_this());
+}
+
+bool USBGadgetMCTPDevice::setRoleEndpoint()
+{
+    std::string interfacePath =
+        std::format("{}/interfaces/{}", mctpdControlPath, gadgetName);
+    try
+    {
+        auto method = connection->new_method_call(
+            mctpdBusName, interfacePath.c_str(),
+            "org.freedesktop.DBus.Properties", "Set");
+        method.append("au.com.codeconstruct.MCTP.Interface1", "Role",
+                      std::variant<std::string>("Endpoint"));
+        connection->call(method);
+    }
+    catch (const std::exception& e)
+    {
+        warning("Exception while setting Role property: {ERROR}", "ERROR",
+                e.what());
+        return false;
+    }
+    return true;
+}
+
+void USBGadgetMCTPDevice::remove()
+{
+    info("Removing USB Gadget: {GADGET_NAME}", "GADGET_NAME", gadgetName);
+
+    if (notifyRemoved)
+    {
+        notifyRemoved(shared_from_this());
+    }
+
+    // TODO: Implement gadget cleanup
+    isSetup = false;
+}
+
+std::string USBGadgetMCTPDevice::describe() const
+{
+    return std::format("USBGadget[{}, EID={}]", gadgetName,
+                       static_cast<int>(localEID));
+}
+
+int USBGadgetMCTPDevice::network() const
+{
+    // USB gadget's network ID, typically 1
+    return 1;
+}
+
+uint8_t USBGadgetMCTPDevice::eid() const
+{
+    return localEID;
+}
+
+void USBGadgetMCTPDevice::subscribe([[maybe_unused]] Event&& degraded,
+                                    [[maybe_unused]] Event&& available,
+                                    Event&& removed)
+{
+    if (!isSetup)
+    {
+        warning("USB Gadget not setup, skipping subscription");
+        return;
+    }
+
+    notifyRemoved = std::move(removed);
+    using namespace sdbusplus::bus::match;
+
+    info("Setting up MCTP endpoint monitoring for USB Gadget");
+
+    const std::string addedMatchSpec =
+        rules::sender(mctpdBusName) +
+        rules::interfacesAddedAtPath(mctpdEndpointPath);
+
+    endpointAddedMatch = std::make_unique<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*connection), addedMatchSpec,
+        [weak{weak_from_this()}](sdbusplus::message_t& msg) {
+            if (auto self = weak.lock())
+            {
+                self->onEndpointAdded(msg);
+            }
+        });
+
+    const std::string removedMatchSpec =
+        rules::sender(mctpdBusName) +
+        rules::interfacesRemovedAtPath(mctpdEndpointPath);
+
+    endpointRemovedMatch = std::make_unique<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*connection), removedMatchSpec,
+        [weak{weak_from_this()}](sdbusplus::message_t& msg) {
+            if (auto self = weak.lock())
+            {
+                self->onEndpointRemoved(msg);
+            }
+        });
+
+    connection->async_method_call(
+        [weak{weak_from_this()}](const boost::system::error_code& ec,
+                                 const ManagedObjectType& objects) {
+            if (auto self = weak.lock())
+            {
+                if (ec)
+                {
+                    error("Failed to get managed objects from mctpd: {ERROR}",
+                          "ERROR", ec.message());
+                    return;
+                }
+
+                auto networkIt = objects.find(
+                    sdbusplus::message::object_path(mctpdNetwork1Path));
+                if (networkIt != objects.end())
+                {
+                    const auto& interfaces = networkIt->second;
+                    auto ifaceIt = interfaces.find(mctpdNetworkInterface);
+                    if (ifaceIt != interfaces.end())
+                    {
+                        const auto& properties = ifaceIt->second;
+                        auto propIt = properties.find("LocalEIDs");
+                        if (propIt != properties.end())
+                        {
+                            const auto* eids =
+                                std::get_if<std::vector<uint8_t>>(
+                                    &propIt->second);
+                            if (eids)
+                            {
+                                self->netLocalEIDs.clear();
+                                for (auto eid : *eids)
+                                {
+                                    std::string endpointPath = std::format(
+                                        "{}{}", mctpdEndpointPath, eid);
+                                    self->netLocalEIDs.insert(endpointPath);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        mctpdBusName, mctpdControlPath, mctpdObjectManagerInterface,
+        "GetManagedObjects");
+
+    info("Subscribed to MCTP endpoint Added/Removed signals");
+}
+
+void USBGadgetMCTPDevice::sendDiscoveryNotify()
+{
+    int sd = socket(AF_MCTP, SOCK_DGRAM, 0);
+    if (sd < 0)
+    {
+        error("Failed to create MCTP socket for Discovery Notify: {ERROR}",
+              "ERROR", strerror(errno));
+        return;
+    }
+
+    int opt = 1;
+    if (setsockopt(sd, SOL_MCTP, MCTP_OPT_ADDR_EXT, &opt, sizeof(opt)) < 0)
+    {
+        error("Failed to enable extended addressing: {ERROR}", "ERROR",
+              strerror(errno));
+        close(sd);
+        return;
+    }
+
+    unsigned int ifindex = if_nametoindex(gadgetName.c_str());
+    if (ifindex == 0)
+    {
+        error("Failed to get interface index for {GADGET_NAME}: {ERROR}",
+              "GADGET_NAME", gadgetName, "ERROR", strerror(errno));
+        close(sd);
+        return;
+    }
+
+    // Construct Discovery Notify message
+    // 0x80 = Request, non-datagram, instance ID 0
+    // 0x0D = MCTP_CTRL_CMD_DISCOVERY_NOTIFY
+    std::array<uint8_t, 2> discoveryNotifyMsg = {0x80, 0x0D};
+    struct sockaddr_mctp_ext addr = {};
+    addr.smctp_base.smctp_family = AF_MCTP;
+    addr.smctp_base.smctp_network = 1;
+    addr.smctp_base.smctp_addr.s_addr = 0;
+    addr.smctp_base.smctp_type = 0;
+    addr.smctp_base.smctp_tag = MCTP_TAG_OWNER;
+    addr.smctp_ifindex = ifindex;
+    addr.smctp_halen = 0;
+
+    // TODO: remove no lint next line once we come up with a better solution
+    ssize_t len =
+        sendto(sd, discoveryNotifyMsg.data(), discoveryNotifyMsg.size(), 0,
+               // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+               reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+
+    if (len < 0)
+    {
+        error("Failed to send Discovery Notify to {GADGET_NAME}: {ERROR}",
+              "GADGET_NAME", gadgetName, "ERROR", strerror(errno));
+    }
+    else
+    {
+        info("Successfully sent Discovery Notify to {GADGET_NAME}",
+             "GADGET_NAME", gadgetName);
+    }
+
+    close(sd);
+}
+
+void USBGadgetMCTPDevice::onEndpointAdded(sdbusplus::message_t& msg)
+{
+    auto [path, interfaces] =
+        msg.unpack<sdbusplus::message::object_path, SensorData>();
+
+    if (interfaces.find(mctpdEndpointControlInterface) == interfaces.end())
+    {
+        return;
+    }
+
+    if (netLocalEIDs.contains(path.str))
+    {
+        return;
+    }
+
+    sendDiscoveryNotify();
+}
+
+void USBGadgetMCTPDevice::onEndpointRemoved(sdbusplus::message_t& msg)
+{
+    auto [path, interfaces] =
+        msg.unpack<sdbusplus::message::object_path, std::set<std::string>>();
+
+    if (!interfaces.contains(mctpdEndpointControlInterface))
+    {
+        return;
+    }
+
+    if (netLocalEIDs.contains(path.str))
+    {
+        return;
+    }
+
+    sendDiscoveryNotify();
+}
