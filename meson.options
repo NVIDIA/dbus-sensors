@@ -53,6 +53,12 @@ option(
     description: 'Enable intrusion sensor.',
 )
 option(
+    'intrusion-dbus-log',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Use sendEventToLoggingService for intrusion events. If disabled, use sd_journal_send.',
+)
+option(
     'ipmb',
     type: 'feature',
     value: 'enabled',

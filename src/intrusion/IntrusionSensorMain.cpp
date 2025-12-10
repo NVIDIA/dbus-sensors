@@ -28,6 +28,7 @@
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <chrono>
@@ -51,8 +52,15 @@ static constexpr const char* sensorType = "ChassisIntrusionSensor";
 static constexpr const char* nicType = "NIC";
 static constexpr auto nicTypes{std::to_array<const char*>({nicType})};
 
-static const std::map<std::string, std::string> compatibleHwmonNames = {
-    {"Aspeed2600_Hwmon", "intrusion0_alarm"}
+struct HwmonConfig
+{
+    std::string alarmFileName;   // e.g., "intrusion0_alarm"
+    std::string expectedDevName; // e.g., "aspeed_chassis or nct3018y"
+};
+
+static const std::map<std::string, HwmonConfig> compatibleHwmonNames = {
+    {"Aspeed2600_Hwmon", {"intrusion0_alarm", "aspeed_chassis"}},
+    {"Nct3018y_Hwmon", {"intrusion0_alarm", "nct3018y"}}
     // Add compatible strings here for new hwmon intrusion detection
     // drivers that have different hwmon names but would also like to
     // use the available Hwmon class.
@@ -78,6 +86,15 @@ static void createSensorsFromConfig(
     const std::pair<std::string, SensorBaseConfigMap>* baseConfiguration =
         nullptr;
 
+    struct HwmonCandidate
+    {
+        bool autoRearm;
+        std::string classString;
+        std::string sensorName;
+        uint64_t priority;
+    };
+    std::vector<HwmonCandidate> hwmonCandidates;
+
     for (const auto& [path, cfgData] : sensorConfigurations)
     {
         baseConfiguration = nullptr;
@@ -92,6 +109,13 @@ static void createSensorsFromConfig(
         }
 
         baseConfiguration = &(*sensorBase);
+        // Get the sensor name
+        std::string sensorName;
+        auto findSensorName = baseConfiguration->second.find("Name");
+        if (findSensorName != baseConfiguration->second.end())
+        {
+            sensorName = std::get<std::string>(findSensorName->second);
+        }
 
         // Rearm defaults to "Automatic" mode
         bool autoRearm = true;
@@ -105,6 +129,15 @@ static void createSensorsFromConfig(
                 continue;
             }
             autoRearm = (rearmStr == "Automatic");
+        }
+
+        // Priority defaults to 0 (lowest). Higher value means higher priority.
+        uint64_t priority = 0;
+        auto findPriority = baseConfiguration->second.find("Priority");
+        if (findPriority != baseConfiguration->second.end())
+        {
+            priority =
+                loadVariant<uint64_t>(baseConfiguration->second, "Priority");
         }
 
         // judge class, "Gpio", "Hwmon" or "I2C"
@@ -155,8 +188,7 @@ static void createSensorsFromConfig(
             // If class string contains Hwmon string
             else if (classString.find("Hwmon") != std::string::npos)
             {
-                std::string hwmonName;
-                std::map<std::string, std::string>::const_iterator
+                std::map<std::string, HwmonConfig>::const_iterator
                     compatIterator = compatibleHwmonNames.find(classString);
 
                 if (compatIterator == compatibleHwmonNames.end())
@@ -164,23 +196,9 @@ static void createSensorsFromConfig(
                     lg2::error("Hwmon Class string is not supported");
                     continue;
                 }
-
-                hwmonName = compatIterator->second;
-
-                try
-                {
-                    pSensor = std::make_shared<ChassisIntrusionHwmonSensor>(
-                        autoRearm, io, objServer, hwmonName);
-                    pSensor->start();
-                    return;
-                }
-                catch (const std::exception& e)
-                {
-                    lg2::error(
-                        "error creating chassis intrusion hwmon sensor: '{ERROR}'",
-                        "ERROR", e);
-                    continue;
-                }
+                hwmonCandidates.push_back(
+                    {autoRearm, classString, sensorName, priority});
+                continue;
             }
             else
             {
@@ -219,6 +237,49 @@ static void createSensorsFromConfig(
                         "ERROR", e);
                     continue;
                 }
+            }
+        }
+    }
+
+    if (!hwmonCandidates.empty())
+    {
+        std::sort(hwmonCandidates.begin(), hwmonCandidates.end(),
+                  [](const HwmonCandidate& a, const HwmonCandidate& b) {
+                      return a.priority > b.priority;
+                  });
+
+        for (const auto& candidate : hwmonCandidates)
+        {
+            const auto compatIterator =
+                compatibleHwmonNames.find(candidate.classString);
+            if (compatIterator == compatibleHwmonNames.end())
+            {
+                continue;
+            }
+
+            const std::string& hwmonFileName =
+                compatIterator->second.alarmFileName;
+            const std::string& expectedDevName =
+                compatIterator->second.expectedDevName;
+            try
+            {
+                pSensor = std::make_shared<ChassisIntrusionHwmonSensor>(
+                    candidate.autoRearm, io, objServer, hwmonFileName,
+                    candidate.sensorName, dbusConnection, expectedDevName);
+                lg2::info(
+                    "Creating hwmon intrusion sensor '{NAME}' (priority {NUM}), class '{CLASS}'",
+                    "NAME", candidate.sensorName, "NUM", candidate.priority,
+                    "CLASS", candidate.classString);
+                pSensor->start();
+                return;
+            }
+            catch (const std::exception& e)
+            {
+                lg2::info(
+                    "Skipping hwmon intrusion candidate '{CLASS}' (priority {NUM}): {ERROR}",
+                    "CLASS", candidate.classString, "NUM", candidate.priority,
+                    "ERROR", e.what());
+                continue;
             }
         }
     }
