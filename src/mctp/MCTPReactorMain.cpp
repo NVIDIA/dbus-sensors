@@ -248,7 +248,7 @@ static void handleApplicationTimeout(
         logMessage = mctpCommandTable.at(error.commandCode).logMessage;
     }
 
-    info("{MSG} {EID}", "MSG", logMessage, "EID", error.destEid);
+    debug("{MSG} {EID}", "MSG", logMessage, "EID", error.destEid);
 
     auto deviceNameOpt = reactor->getDeviceName(error.destEid);
     std::string deviceName =
@@ -308,11 +308,8 @@ static void handleTransportErrorSignal(
     // The 3rd ping failure will remove the EID from this set, allowing the log.
     if (suppressedHealthCheckEids.contains(error.destEid))
     {
-        // Suppress RX Timeouts (waiting for ping reply)
-        if (error.errorCode == ETIMEDOUT && error.direction == MCTP_DIR_RX)
-        {
-            return;
-        }
+        // Suppress ALL transport errors (TX and RX) while EID is suppressed
+        return;
     }
 
     // Suppress logs if the reactor is already retrying setup to avoid flooding

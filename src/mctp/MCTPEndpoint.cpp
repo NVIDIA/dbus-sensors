@@ -412,8 +412,14 @@ void MCTPDDevice::performHealthCheck()
         return; // Health monitoring not properly configured
     }
 
-    // Suppress generic GetUUID timeout logs for this health check ping
-    suppressedHealthCheckEids.insert(*staticEID);
+    // Reset suppression state for this specific check iteration
+    suppressedHealthCheckEids.erase(*staticEID);
+
+    // Only suppress errors for the first (threshold - 1) failures.
+    if (consecutivePingFailures < pingFailureThreshold - 1)
+    {
+        suppressedHealthCheckEids.insert(*staticEID);
+    }
 
     // Poll main device health via EndpointPing (which internally does GetUUID)
     connection->async_method_call(
@@ -495,8 +501,14 @@ void MCTPDDevice::performHealthCheck()
         {
             std::string deviceName = getNameForEid(eid).value_or("");
 
+            // Reset suppression state for this EID
+            suppressedHealthCheckEids.erase(eid);
+
             // Suppress signal handler logs for bridge pool health check pings
-            suppressedHealthCheckEids.insert(eid);
+            if (bridgePoolPingFailures[eid] < pingFailureThreshold - 1)
+            {
+                suppressedHealthCheckEids.insert(eid);
+            }
 
             connection->async_method_call(
                 [weak = weak_from_this(), eid,
@@ -565,6 +577,9 @@ void MCTPDDevice::performHealthCheck()
 
 void MCTPDDevice::recover(uint8_t eid)
 {
+    // Suppress errors during the recovery attempt
+    suppressedHealthCheckEids.insert(eid);
+
     std::string path = mctpdEndpointPath + std::to_string(eid);
     connection->async_method_call([](const boost::system::error_code&) {},
                                   mctpdBusName, path,
