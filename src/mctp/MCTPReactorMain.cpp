@@ -72,8 +72,9 @@ class DBusAssociationServer : public AssociationServer
         const auto entry = objects.find(path);
         if (entry == objects.end())
         {
-            throw std::logic_error(std::format(
-                "Attempted to untrack path that was not tracked: {}", path));
+            warning("Attempted to untrack path that was not tracked: {PATH}",
+                    "PATH", path);
+            return;
         }
         std::shared_ptr<sdbusplus::asio::dbus_interface> iface = entry->second;
         server.remove_interface(entry->second);
