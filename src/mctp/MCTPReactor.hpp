@@ -38,7 +38,7 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
     MCTPReactor& operator=(MCTPReactor&&) = delete;
 
     void tick();
-    bool isRetrying() const;
+    bool isRetrying(uint8_t eid) const;
 
     void manageMCTPDevice(const std::string& path,
                           const std::shared_ptr<MCTPDevice>& device);

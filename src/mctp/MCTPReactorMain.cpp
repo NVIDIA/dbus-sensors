@@ -313,8 +313,9 @@ static void handleTransportErrorSignal(
         return;
     }
 
-    // Suppress logs if the reactor is already retrying setup to avoid flooding
-    if (reactor->isRetrying())
+    // Suppress logs if this specific EID's device is retrying setup
+    // This allows other unrelated devices to still log their errors
+    if (reactor->isRetrying(error.destEid))
     {
         return;
     }

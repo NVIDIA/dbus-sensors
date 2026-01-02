@@ -298,8 +298,33 @@ class MCTPDDevice :
         return name;
     }
 
+    bool managesEid(uint8_t eid) const
+    {
+        // Check main EID
+        auto currentEid = getEid();
+        if (currentEid && currentEid.value() == eid)
+        {
+            return true;
+        }
+
+        // Check bridge pool
+        if (bridgePoolStartEid && bridgePoolEndEid)
+        {
+            if (eid >= *bridgePoolStartEid && eid <= *bridgePoolEndEid)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     std::optional<std::string> getNameForEid(uint8_t eid) const
     {
+        if (!managesEid(eid))
+        {
+            return std::nullopt;
+        }
+
         // Check main EID
         auto currentEid = getEid();
         if (currentEid && currentEid.value() == eid)
@@ -311,15 +336,11 @@ class MCTPDDevice :
         if (bridgePoolStartEid && bridgePoolEndEid)
         {
             uint8_t start = *bridgePoolStartEid;
-            uint8_t end = *bridgePoolEndEid;
-            if (eid >= start && eid <= end)
+            size_t offset = eid - start;
+            size_t index = 1 + offset; // 0 is main device
+            if (index < deviceNames.size())
             {
-                size_t offset = eid - start;
-                size_t index = 1 + offset; // 0 is main device
-                if (index < deviceNames.size())
-                {
-                    return deviceNames[index];
-                }
+                return deviceNames[index];
             }
         }
         return std::nullopt;

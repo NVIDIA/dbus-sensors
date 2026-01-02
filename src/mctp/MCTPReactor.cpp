@@ -141,9 +141,27 @@ void MCTPReactor::setupEndpoint(const std::shared_ptr<MCTPDevice>& dev)
     });
 }
 
-bool MCTPReactor::isRetrying() const
+bool MCTPReactor::isRetrying(uint8_t eid) const
 {
-    return !failureCounts.empty();
+    // For broadcast/unknown EID (0), check if any device is retrying
+    if (eid == 0)
+    {
+        return !failureCounts.empty();
+    }
+
+    // Check if this specific EID's device is in failureCounts
+    for (const auto& [device, count] : failureCounts)
+    {
+        auto mctpDevice = std::dynamic_pointer_cast<MCTPDDevice>(device);
+        if (mctpDevice)
+        {
+            if (mctpDevice->managesEid(eid))
+            {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 void MCTPReactor::tick()
