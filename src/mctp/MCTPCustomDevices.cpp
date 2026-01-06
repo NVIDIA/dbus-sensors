@@ -19,6 +19,7 @@
 
 #include <array>
 #include <cerrno>
+#include <charconv>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -28,7 +29,9 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -553,4 +556,75 @@ void USBGadgetMCTPDevice::onEndpointRemoved(sdbusplus::message_t& msg)
     }
 
     sendDiscoveryNotify();
+}
+
+bool USBGadgetMCTPDevice::match(const std::set<std::string>& interfaces)
+{
+    return interfaces.contains(configInterfaceName(configType));
+}
+
+std::optional<SensorBaseConfigMap> USBGadgetMCTPDevice::match(
+    const SensorData& config)
+{
+    auto iface = config.find(configInterfaceName(configType));
+    if (iface == config.end())
+    {
+        return std::nullopt;
+    }
+    return iface->second;
+}
+
+std::shared_ptr<USBGadgetMCTPDevice> USBGadgetMCTPDevice::from(
+    const std::shared_ptr<sdbusplus::asio::connection>& connection,
+    const SensorBaseConfigMap& iface)
+{
+    auto mType = iface.find("Type");
+    if (mType == iface.end())
+    {
+        throw std::invalid_argument(
+            "No 'Type' member found for provided configuration object");
+    }
+
+    auto type = std::visit(VariantToStringVisitor(), mType->second);
+    if (type != configType)
+    {
+        throw std::invalid_argument("Not an USB Gadget MCTP device");
+    }
+
+    auto mName = iface.find("Name");
+    auto mLocalEID = iface.find("LocalEID");
+    auto mInterface = iface.find("Interface");
+
+    if (mName == iface.end() || mInterface == iface.end() ||
+        mLocalEID == iface.end())
+    {
+        throw std::invalid_argument(
+            "Configuration object violates MCTPUSBGadgetTarget schema");
+    }
+
+    std::string name = std::visit(VariantToStringVisitor(), mName->second);
+    std::string interface =
+        std::visit(VariantToStringVisitor(), mInterface->second);
+    auto sLocalEID = std::visit(VariantToStringVisitor(), mLocalEID->second);
+    std::uint8_t parsedLocalEID{};
+
+    auto [cptr, cec] = std::from_chars(
+        sLocalEID.data(), sLocalEID.data() + sLocalEID.size(), parsedLocalEID);
+    if (cec != std::errc{} || parsedLocalEID > 0xfe || parsedLocalEID < 0x08)
+    {
+        throw std::invalid_argument("Bad local EID");
+    }
+
+    try
+    {
+        return std::make_shared<USBGadgetMCTPDevice>(connection, interface,
+                                                     parsedLocalEID);
+    }
+    catch (const MCTPException& ex)
+    {
+        warning(
+            "Failed to create USBGadgetMCTPDevice at [ name: {GADGET_NAME} interface: {INTERFACE} ]: {EXCEPTION}",
+            "GADGET_NAME", name, "INTERFACE", interface, "EXCEPTION", ex);
+        return {};
+    }
 }

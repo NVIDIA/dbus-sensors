@@ -140,6 +140,12 @@ static std::shared_ptr<MCTPDevice> deviceFromConfig(
         {
             return XROTMCTPDDevice::from(connection, *iface);
         }
+
+        iface = USBGadgetMCTPDevice::match(config);
+        if (iface)
+        {
+            return USBGadgetMCTPDevice::from(connection, *iface);
+        }
     }
     catch (const std::invalid_argument& ex)
     {
@@ -182,7 +188,8 @@ static void removeInventory(const std::shared_ptr<MCTPReactor>& reactor,
     {
         if (I2CMCTPDDevice::match(removed) || I3CMCTPDDevice::match(removed) ||
             USBMCTPDDevice::match(removed) || SPIMCTPDDevice::match(removed) ||
-            XROTMCTPDDevice::match(removed))
+            XROTMCTPDDevice::match(removed) ||
+            USBGadgetMCTPDevice::match(removed))
         {
             reactor->unmanageMCTPDevice(path.str);
         }
@@ -424,9 +431,6 @@ int main()
         gsc->getConfiguration({"MCTPXROTTarget"});
     });
 
-    // TODO: EM config support for USB Gadget MCTP device
-    // Temporary : Create static USB Gadget MCTP device only if kernel supports
-    // it later shift to EM config presence
     struct utsname unameData{};
     if (uname(&unameData) == 0)
     {
@@ -440,15 +444,10 @@ int main()
             boost::asio::post(io, [reactor, systemBus]() {
                 info("Creating USB Gadget MCTP device");
 
-                auto gadgetDevice = std::make_shared<USBGadgetMCTPDevice>(
+                auto gsc = std::make_shared<GetSensorConfiguration>(
                     systemBus,
-                    "mctpusbg0", // Gadget device name
-                    8            // Local EID
-                );
-
-                // Register with reactor - reactor will handle setup via tick()
-                reactor->manageMCTPDevice("/virtual/usbgadget/mctp0",
-                                          gadgetDevice);
+                    std::bind_front(manageMCTPEntity, systemBus, reactor));
+                gsc->getConfiguration({"MCTPUSBGadgetTarget"});
             });
         }
         else

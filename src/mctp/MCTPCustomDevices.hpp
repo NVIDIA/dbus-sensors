@@ -31,6 +31,11 @@ class USBGadgetMCTPDevice :
 {
   public:
     USBGadgetMCTPDevice() = delete;
+    static bool match(const std::set<std::string>& interfaces);
+    static std::optional<SensorBaseConfigMap> match(const SensorData& config);
+    static std::shared_ptr<USBGadgetMCTPDevice> from(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const SensorBaseConfigMap& iface);
     USBGadgetMCTPDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
         const std::string& gadgetName, uint8_t localEID);
@@ -50,6 +55,7 @@ class USBGadgetMCTPDevice :
                    Event&& removed) override;
 
   private:
+    static constexpr const char* configType = "MCTPUSBGadgetTarget";
     std::shared_ptr<sdbusplus::asio::connection> connection;
     std::string gadgetName;
     uint8_t localEID;
