@@ -67,12 +67,14 @@ MCTPDDevice::MCTPDDevice(
     std::optional<std::uint8_t> bridgePoolStartEid,
     std::optional<std::uint8_t> bridgePoolEndEid,
     const std::optional<std::vector<uint8_t>>& ignoreEids,
+    const std::optional<std::vector<uint8_t>>& ignoreMessageTypes,
     std::optional<std::uint8_t> pollingInterval,
     const std::vector<std::string>& deviceNames) :
     connection(connection), name(name), deviceNames(deviceNames),
     interface(interface), physaddr(physaddr), staticEID(staticEID),
     bridgePoolStartEid(bridgePoolStartEid), bridgePoolEndEid(bridgePoolEndEid),
-    ignoreEids(ignoreEids), pollingInterval(pollingInterval)
+    ignoreEids(ignoreEids), ignoreMessageTypes(ignoreMessageTypes),
+    pollingInterval(pollingInterval)
 {}
 
 void MCTPDDevice::onDiscoveryMatchRule()
@@ -642,14 +644,16 @@ void MCTPDDevice::setup(
             mctpdControlInterface, "AssignEndpointStatic", physaddr,
             staticEID.value(),
             static_cast<uint8_t>(bridgePoolStartEid.value_or(0)),
-            ignoreEids.value_or(std::vector<uint8_t>{}));
+            ignoreEids.value_or(std::vector<uint8_t>{}),
+            ignoreMessageTypes.value_or(std::vector<uint8_t>{}));
     }
     else
     {
         connection->async_method_call(
             onSetup, mctpdBusName,
             mctpdControlPath + std::string("/interfaces/") + interface,
-            mctpdControlInterface, "AssignEndpoint", physaddr);
+            mctpdControlInterface, "AssignEndpoint", physaddr,
+            ignoreMessageTypes.value_or(std::vector<uint8_t>{}));
     }
 }
 
@@ -1241,6 +1245,7 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     auto mbridgePoolStartEid = iface.find("BridgePoolStartEID");
     auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
     auto mIgnoreEids = iface.find("IgnoreEIDs");
+    auto mIgnoreMessageTypes = iface.find("IgnoreMessageTypes");
     if (mType == iface.end())
     {
         throw std::invalid_argument(
@@ -1391,6 +1396,75 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
             ignoreEids = std::nullopt;
         }
     }
+    // Parse IgnoreMessageTypes
+    std::optional<std::vector<std::uint8_t>> ignoreMessageTypes{};
+    if (mIgnoreMessageTypes == iface.end())
+    {
+        info(
+            "Info: Key 'IgnoreMessageTypes' is not provided for USB device {USB_DEVICE}; skipping related processing.",
+            "USB_DEVICE", interface);
+    }
+    else
+    {
+        try
+        {
+            auto ignoreMessageTypesStr = std::visit(
+                VariantToStringVisitor(), mIgnoreMessageTypes->second);
+            if (!ignoreMessageTypesStr.empty())
+            {
+                ignoreMessageTypes = std::vector<std::uint8_t>{};
+                std::stringstream ss(ignoreMessageTypesStr);
+                std::string token;
+                while (std::getline(ss, token, ','))
+                {
+                    token.erase(0, token.find_first_not_of(" \t"));
+                    token.erase(token.find_last_not_of(" \t") + 1);
+                    if (!token.empty())
+                    {
+                        try
+                        {
+                            int64_t intVal = std::stoll(token);
+                            if (intVal >= 0 && intVal <= 255)
+                            {
+                                ignoreMessageTypes->push_back(
+                                    static_cast<uint8_t>(intVal));
+                            }
+                            else
+                            {
+                                warning(
+                                    "IgnoreMessageTypes entry out of range (0-255): {MSG_TYPE}",
+                                    "MSG_TYPE", intVal);
+                            }
+                        }
+                        catch (const std::exception& e)
+                        {
+                            warning(
+                                "Invalid IgnoreMessageTypes entry: '{VALUE}' - {ERROR}",
+                                "VALUE", token, "ERROR", e.what());
+                        }
+                    }
+                }
+                info(
+                    "Successfully parsed {COUNT} IgnoreMessageTypes entries for USB device {USB_DEVICE}",
+                    "COUNT", ignoreMessageTypes->size(), "USB_DEVICE",
+                    interface);
+            }
+            else
+            {
+                info(
+                    "IgnoreMessageTypes string is empty, no entries to parse for USB device {USB_DEVICE}",
+                    "USB_DEVICE", interface);
+                ignoreMessageTypes = std::nullopt;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            warning(
+                "Failed to parse IgnoreMessageTypes: {ERROR} for USB device {USB_DEVICE}",
+                "ERROR", e.what(), "USB_DEVICE", interface);
+            ignoreMessageTypes = std::nullopt;
+        }
+    }
 
     auto pollingInterval = getPollingInterval(iface);
 
@@ -1401,18 +1475,19 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
             return std::make_shared<USBMCTPDDevice>(
                 connection, name, interface, address, staticEID.value(),
                 bridgePoolStartEid.value(), bridgePoolEndEid, ignoreEids,
-                pollingInterval, names);
+                ignoreMessageTypes, pollingInterval, names);
         }
         if (staticEID.has_value())
         {
             return std::make_shared<USBMCTPDDevice>(
                 connection, name, interface, address, staticEID.value(),
-                std::nullopt, bridgePoolEndEid, std::nullopt, pollingInterval,
-                names);
+                std::nullopt, bridgePoolEndEid, std::nullopt,
+                ignoreMessageTypes, pollingInterval, names);
         }
         return std::make_shared<USBMCTPDDevice>(
             connection, name, interface, address, std::nullopt, std::nullopt,
-            bridgePoolEndEid, std::nullopt, pollingInterval, names);
+            bridgePoolEndEid, std::nullopt, ignoreMessageTypes, pollingInterval,
+            names);
     }
     catch (const MCTPException& ex)
     {
