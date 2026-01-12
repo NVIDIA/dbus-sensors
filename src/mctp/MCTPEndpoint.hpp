@@ -320,11 +320,6 @@ class MCTPDDevice :
 
     std::optional<std::string> getNameForEid(uint8_t eid) const
     {
-        if (!managesEid(eid))
-        {
-            return std::nullopt;
-        }
-
         // Check main EID
         auto currentEid = getEid();
         if (currentEid && currentEid.value() == eid)
