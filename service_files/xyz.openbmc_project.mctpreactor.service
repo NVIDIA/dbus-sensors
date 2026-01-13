@@ -4,6 +4,7 @@ Requires=xyz.openbmc_project.EntityManager.service
 After=xyz.openbmc_project.EntityManager.service
 Requires=mctpd.service
 After=mctpd.service
+After=xyz.openbmc_project.Logging.service
 
 [Service]
 Type=dbus
@@ -11,6 +12,7 @@ BusName=xyz.openbmc_project.MCTPReactor
 
 Restart=always
 RestartSec=5
+ExecStartPre=sleep 5s
 ExecStart=/usr/libexec/dbus-sensors/mctpreactor
 
 [Install]
