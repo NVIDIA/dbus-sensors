@@ -87,6 +87,15 @@ NVMeMiManager::~NVMeMiManager()
 bool NVMeMiManager::addContext(const std::shared_ptr<NVMeMiContext>& context,
                                int net, uint8_t eid)
 {
+    // This prevents duplicate sensor creation when multiple async callbacks
+    {
+        std::lock_guard<std::mutex> lock(contextsMutex);
+        if (contexts.find(eid) != contexts.end())
+        {
+            return false;
+        }
+    }
+
     auto commInfo = std::make_unique<ContextCommInfo>(io, eid);
     commInfo->context = context;
     auto& ep = commInfo->nvmeEp;
@@ -123,7 +132,10 @@ bool NVMeMiManager::addContext(const std::shared_ptr<NVMeMiContext>& context,
         boost::asio::posix::stream_descriptor(io, requestPipeFds[1]),
         boost::asio::posix::stream_descriptor(io, responsePipeFds[0]));
 
-    contexts[eid] = std::move(commInfo);
+    {
+        std::lock_guard<std::mutex> lock(contextsMutex);
+        contexts[eid] = std::move(commInfo);
+    }
 
     lg2::info("Added context for eid: {EID}", "EID", static_cast<int>(eid));
     return true;
@@ -220,11 +232,19 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
     ssize_t rc = 0;
 
     // Error handling - writes error response and returns
-    auto handleError = [&out](uint32_t respLen) -> ssize_t {
+    auto handleError = [&out, eid](uint32_t respLen) -> ssize_t {
         uint32_t len = htole32(respLen);
         ssize_t writeResult = ::write(out.handle(), &len, sizeof(len));
         if (writeResult != static_cast<ssize_t>(sizeof(len)))
         {
+            // EPIPE means the pipe was closed (likely during context removal)
+            // This is not an error, just log debug message
+            if (errno == EPIPE)
+            {
+                lg2::debug(
+                    "Response pipe closed for eid: {EID} (context removed)",
+                    "EID", static_cast<int>(eid));
+            }
             return -errno;
         }
         return 0;
@@ -315,6 +335,12 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
     ssize_t writeResult = ::write(out.handle(), &respLen, sizeof(respLen));
     if (writeResult != static_cast<ssize_t>(sizeof(respLen)))
     {
+        // EPIPE means the pipe was closed (likely during context removal)
+        if (errno == EPIPE)
+        {
+            lg2::debug("Response pipe closed for eid: {EID} (context removed)",
+                       "EID", static_cast<int>(eid));
+        }
         return -errno;
     }
 
@@ -322,6 +348,12 @@ ssize_t NVMeMiManager::processMiCommand(FileHandle& in, FileHandle& out,
     writeResult = ::write(out.handle(), resp.data(), resp.size());
     if (writeResult != static_cast<ssize_t>(resp.size()))
     {
+        // EPIPE means the pipe was closed (likely during context removal)
+        if (errno == EPIPE)
+        {
+            lg2::debug("Response pipe closed for eid: {EID} (context removed)",
+                       "EID", static_cast<int>(eid));
+        }
         return -errno;
     }
 

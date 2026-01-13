@@ -52,6 +52,7 @@ extern "C"
 #include <array>
 #include <chrono>
 #include <climits>
+#include <csignal>
 #include <cstdint>
 #include <functional>
 #include <iostream>
@@ -69,6 +70,10 @@ static NVMEMap nvmeDeviceMap;
 static std::unique_ptr<NVMeMiManager> commManager;
 // Map to store MCTP endpoint paths by EID for monitoring
 static std::map<uint8_t, std::string> eidToMctpPath;
+// Flag to prevent overlapping createSensors() execution
+static std::atomic<bool> createSensorsInProgress{false};
+// Track endpoints that have been explicitly paused (Degraded state)
+static std::set<uint8_t> pausedEids;
 
 NVMEMap& getNVMEMap()
 {
@@ -106,10 +111,7 @@ static MctpDiscoveryHandler handleMctpDiscovery(
 static void stopPollingForEid(uint8_t eid);
 
 // Resume polling for an EID
-static void resumePollingForEid(
-    uint8_t eid, boost::asio::io_context& io,
-    sdbusplus::asio::object_server& objectServer,
-    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection);
+static void resumePollingForEid(uint8_t eid);
 
 static uint8_t extractAddress(const SensorBaseConfigMap& properties)
 {
@@ -291,6 +293,16 @@ static void handleSensorConfigurations(
             nvmeContextPtr->close();
         }
     }
+
+    // Clear commManager contexts to release sensor references
+    // This allows sensor destructors to run, which removes D-Bus interfaces
+    if (commManager)
+    {
+        for (const auto& [eid, _] : nvmeDeviceMap)
+        {
+            commManager->removeContext(eid);
+        }
+    }
     nvmeDeviceMap.clear();
 
     // Store sensor configurations for later creation after MCTP discovery
@@ -399,9 +411,24 @@ static void handleSensorConfigurations(
                     if (!commManager->addContext(nvmeContext, net,
                                                  discoveredEid))
                     {
-                        lg2::error(
-                            "Failed to add context in NVMeMiManager for eid: {EID}",
-                            "EID", discoveredEid);
+                        // If it already exists, we don't want to create
+                        // duplicate sensors
+                        auto existingContext =
+                            nvmeDeviceMap.find(discoveredEid);
+                        if (existingContext != nvmeDeviceMap.end() &&
+                            existingContext->second != context)
+                        {
+                            // Context exists but it's different - this is the
+                            // duplicate case
+                            lg2::debug("Context for eid {EID} already exists",
+                                       "EID", discoveredEid);
+                        }
+                        else
+                        {
+                            lg2::error(
+                                "Failed to add context in NVMeMiManager for eid: {EID}",
+                                "EID", discoveredEid);
+                        }
                         return;
                     }
                 }
@@ -476,53 +503,73 @@ void createSensors(boost::asio::io_context& io,
                    sdbusplus::asio::object_server& objectServer,
                    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
 {
+    // Set flag at entry
+    createSensorsInProgress = true;
+
     auto getter = std::make_shared<GetSensorConfiguration>(
         dbusConnection, [&io, &objectServer, &dbusConnection](
                             const ManagedObjectType& sensorConfigurations) {
             handleSensorConfigurations(io, objectServer, dbusConnection,
                                        sensorConfigurations);
+            // Clear flag when sensor configuration handling completes
+            createSensorsInProgress = false;
         });
     getter->getConfiguration(std::vector<std::string>{
         NVMeSensor::sensorType, NVMeStatusSensor::sensorType});
 }
 
-// Stop polling for an EID
 static void stopPollingForEid(uint8_t eid)
 {
     auto findContext = nvmeDeviceMap.find(eid);
     if (findContext != nvmeDeviceMap.end())
     {
         lg2::info(
-            "Stopping polling for EID {EID} due to connectivity degradation",
+            "Pausing polling for EID {EID} due to connectivity degradation",
             "EID", eid);
-        // Stop polling by closing the context (closes timer and streams)
+
+        // Mark this EID as explicitly paused
+        pausedEids.insert(eid);
+
+        // Only cancel the timer - keep context and sensors intact
         findContext->second->close();
     }
 }
 
-// Resume polling for an EID - trigger full sensor rediscovery
-// to properly reinitialize the MCTP connection after it was closed
-static void resumePollingForEid(
-    uint8_t eid, boost::asio::io_context& io,
-    sdbusplus::asio::object_server& objectServer,
-    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
+static void resumePollingForEid(uint8_t eid)
 {
-    lg2::info("Resuming polling for EID {EID} - connectivity restored, "
-              "triggering sensor rediscovery",
-              "EID", eid);
+    // Only resume if this endpoint was explicitly paused
+    if (pausedEids.find(eid) == pausedEids.end())
+    {
+        lg2::debug(
+            "Ignoring resume request for EID {EID} - endpoint was not paused",
+            "EID", eid);
+        return;
+    }
 
-    // Trigger full sensor rediscovery to reinitialize the MCTP context
-    // This will recreate the communication pipes that were closed
-    boost::asio::post(io, [&io, &objectServer, &dbusConnection]() {
-        createSensors(io, objectServer, dbusConnection);
-    });
+    auto findContext = nvmeDeviceMap.find(eid);
+    if (findContext != nvmeDeviceMap.end())
+    {
+        lg2::info("Resuming polling for EID {EID} - connectivity restored",
+                  "EID", eid);
+
+        // Remove from paused set
+        pausedEids.erase(eid);
+
+        // Restart the polling timer - context and sensors already exist
+        findContext->second->pollNVMeDevices();
+    }
+    else
+    {
+        // Context not found - this shouldn't normally happen
+        lg2::warning("Cannot resume polling for EID {EID} - context not found. "
+                     "Endpoint may have been removed.",
+                     "EID", eid);
+        pausedEids.erase(eid);
+    }
 }
 
 // Handle MCTP endpoint connectivity property changes
-static void handleMctpConnectivityChange(
-    sdbusplus::message_t& message, boost::asio::io_context& io,
-    sdbusplus::asio::object_server& objectServer,
-    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
+static void handleMctpConnectivityChange(sdbusplus::message_t& message)
 {
     if (message.is_method_error())
     {
@@ -565,9 +612,6 @@ static void handleMctpConnectivityChange(
     {
         // Endpoint not found in our mapping - ignore this change
         // This can happen if we haven't discovered this endpoint yet
-        lg2::debug(
-            "Ignoring Connectivity change for unknown endpoint {PATH} - {STATE}",
-            "PATH", path, "STATE", connectivity);
         return;
     }
 
@@ -581,7 +625,7 @@ static void handleMctpConnectivityChange(
     }
     else if (connectivity == "Available")
     {
-        resumePollingForEid(foundEid, io, objectServer, dbusConnection);
+        resumePollingForEid(foundEid);
     }
 }
 
@@ -612,11 +656,19 @@ static void handleMctpEndpointRemoved(const std::set<uint8_t>& removedEids)
 
         // Remove from path mapping
         eidToMctpPath.erase(eid);
+
+        // Remove from paused set if present
+        pausedEids.erase(eid);
     }
 }
 
 int main()
 {
+    // Ignore SIGPIPE - handle pipe errors via errno instead of process
+    // termination. This prevents crashes when writing to closed pipes during
+    // context cleanup race conditions.
+    signal(SIGPIPE, SIG_IGN);
+
     boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     systemBus->request_name("xyz.openbmc_project.NVMeSensor");
@@ -630,26 +682,47 @@ int main()
                       [&]() { createSensors(io, objectServer, systemBus); });
 
     boost::asio::steady_timer filterTimer(io);
-    std::function<void(sdbusplus::message_t&)> eventHandler =
-        [&filterTimer, &io, &objectServer, &systemBus](sdbusplus::message_t&) {
-            // this implicitly cancels the timer
-            filterTimer.expires_after(std::chrono::seconds(1));
+    std::function<void(sdbusplus::message_t&)> eventHandler = [&filterTimer,
+                                                               &io,
+                                                               &objectServer,
+                                                               &systemBus](
+                                                                  sdbusplus::
+                                                                      message_t&) {
+        // Check if createSensors is already in progress
+        if (createSensorsInProgress.load())
+        {
+            lg2::debug(
+                "createSensors already in progress, ignoring property change");
+            return;
+        }
 
-            filterTimer.async_wait([&](const boost::system::error_code& ec) {
-                if (ec == boost::asio::error::operation_aborted)
-                {
-                    return; // we're being canceled
-                }
+        // this implicitly cancels the timer
+        filterTimer.expires_after(std::chrono::seconds(1));
 
-                if (ec)
-                {
-                    lg2::error("Error: {ERROR}", "ERROR", ec.message());
-                    return;
-                }
+        filterTimer.async_wait([&](const boost::system::error_code& ec) {
+            if (ec == boost::asio::error::operation_aborted)
+            {
+                return; // we're being canceled
+            }
 
+            if (ec)
+            {
+                lg2::error("Error: {ERROR}", "ERROR", ec.message());
+                return;
+            }
+
+            // Check again before executing
+            if (createSensorsInProgress.exchange(true))
+            {
+                lg2::debug("createSensors already queued, skipping");
+                return;
+            }
+
+            boost::asio::post(io, [&io, &objectServer, &systemBus]() {
                 createSensors(io, objectServer, systemBus);
             });
-        };
+        });
+    };
 
     // Debounce timers for MCTP endpoint add/remove events
     boost::asio::steady_timer mctpEndpointAddedDebounceTimer(io);
@@ -672,9 +745,17 @@ int main()
         "codeconstruct/mctp1'",
         [&mctpEndpointAddedDebounceTimer, &io, &objectServer,
          &systemBus](sdbusplus::message_t&) {
+            // Check if createSensors is already in progress
+            if (createSensorsInProgress.load())
+            {
+                lg2::debug(
+                    "createSensors already in progress, ignoring InterfacesAdded signal");
+                return;
+            }
+
             // Debounce: cancel any existing timer and start a new 3-second
-            // delay. No need to parse the message - createSensors() will
-            // rediscover all endpoints and skip already-created sensors.
+            // delay to collect multiple endpoint additions into a single
+            // discovery operation
             mctpEndpointAddedDebounceTimer.expires_after(
                 std::chrono::seconds(3));
 
@@ -694,8 +775,15 @@ int main()
                         return;
                     }
 
+                    // Check again before queueing work (defense in depth)
+                    if (createSensorsInProgress.exchange(true))
+                    {
+                        lg2::debug(
+                            "createSensors already queued, skipping duplicate");
+                        return;
+                    }
+
                     lg2::info("Processing debounced MCTP endpoint added event");
-                    // Re-discover sensors to handle the new endpoint
                     boost::asio::post(io, [&io, &objectServer, &systemBus]() {
                         createSensors(io, objectServer, systemBus);
                     });
@@ -795,9 +883,7 @@ int main()
         "type='signal',member='PropertiesChanged',interface='org.freedesktop."
         "DBus.Properties',path_namespace='/au/com/codeconstruct/mctp1',"
         "arg0='au.com.codeconstruct.MCTP.Endpoint1'",
-        [&io, &objectServer, &systemBus](sdbusplus::message_t& msg) {
-            handleMctpConnectivityChange(msg, io, objectServer, systemBus);
-        });
+        [](sdbusplus::message_t& msg) { handleMctpConnectivityChange(msg); });
 
     setupManufacturingModeMatch(*systemBus);
 #ifdef NVIDIA_SHMEM
