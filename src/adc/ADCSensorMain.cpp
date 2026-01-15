@@ -39,6 +39,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -83,7 +84,64 @@ bool isAdc(const std::filesystem::path& parentPath)
     std::string name;
     std::getline(nameFile, name);
 
-    return name == "iio_hwmon" || name == "tps53679";
+    return name == "iio_hwmon" || name == "tps53679" || name == "nct3018y";
+}
+
+// Determine whether the hwmon device uses 0-based (in0_input, in1_input, ...)
+// or 1-based (in1_input, in2_input, ...) channel naming.
+//
+// Policy:
+// - If in0_input exists, treat it as 0-based.
+// - Else if in1_input exists, treat it as 1-based.
+// - Otherwise, unknown.
+static std::optional<bool> detectZeroBasedIndexing(
+    const std::filesystem::path& hwmonDir)
+{
+    const bool hasIn0 = std::filesystem::exists(hwmonDir / "in0_input");
+    if (hasIn0)
+    {
+        return true;
+    }
+
+    const bool hasIn1 = std::filesystem::exists(hwmonDir / "in1_input");
+    if (hasIn1)
+    {
+        return false;
+    }
+
+    lg2::warning(
+        "Cannot determine ADC indexing base under '{DIR}' (missing in0_input and in1_input)",
+        "DIR", hwmonDir.string());
+    return std::nullopt;
+}
+
+static std::optional<size_t> parseIndex(const std::filesystem::path& hwmonDir,
+                                        const std::string& indexStr)
+{
+    size_t n = 0;
+    try
+    {
+        n = std::stoul(indexStr);
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Invalid ADC channel index '{IDX}': {ERR}", "IDX", indexStr,
+                   "ERR", e.what());
+        return std::nullopt;
+    }
+
+    const std::optional<bool> zeroBased = detectZeroBasedIndexing(hwmonDir);
+    if (!zeroBased)
+    {
+        return std::nullopt;
+    }
+
+    if (*zeroBased)
+    {
+        return n;
+    }
+
+    return n - 1;
 }
 
 void createSensors(
@@ -123,7 +181,12 @@ void createSensors(
                 std::string indexStr = *(match.begin() + 1);
 
                 // convert to 0 based
-                size_t index = std::stoul(indexStr) - 1;
+                auto indexOpt = parseIndex(path.parent_path(), indexStr);
+                if (!indexOpt)
+                {
+                    continue;
+                }
+                size_t index = *indexOpt;
 
                 const SensorData* sensorData = nullptr;
                 const std::string* interfacePath = nullptr;
