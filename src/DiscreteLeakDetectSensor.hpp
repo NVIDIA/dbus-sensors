@@ -41,7 +41,8 @@ class DiscreteLeakDetectSensor :
         boost::asio::io_context& io, const std::string& sensorType,
         const std::string& sensorSysfsPath, const std::string& sensorName,
         const std::string& configurationPath, float pollRate, uint8_t busId,
-        uint8_t address, const std::string& driver);
+        uint8_t address, const std::string& driver, bool shutdownOnLeak,
+        unsigned int shutdownDelaySeconds);
     ~DiscreteLeakDetectSensor();
 
     void monitor();
@@ -59,14 +60,26 @@ class DiscreteLeakDetectSensor :
     static int readLeakValue(const std::string& filePath);
     static std::string getLeakLevelStatusName(LeakLevel leaklevel);
     void createLeakageLogEntry();
+    bool isAggregatedLeak();
 
     sdbusplus::asio::object_server& objServer;
     boost::asio::steady_timer waitTimer;
+    boost::asio::steady_timer shutdownTimer;
     std::shared_ptr<sdbusplus::asio::connection> dbusConnection;
     LeakLevel leakLevel{LeakLevel::NORMAL};
+
+    bool shutdownOnLeak;
+    unsigned int shutdownDelaySeconds;
+    void startShutdown();
+    void executeShutdown();
 
     std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryAssociation;
     std::shared_ptr<sdbusplus::asio::dbus_interface> stateInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> stateAssociation;
+
+    unsigned int uid;
+    bool didShutdownOnThisOccurrence;
+    bool startedShutdownTimer;
+    static unsigned int lastUID;
 };

@@ -107,6 +107,10 @@ void createSensors(
                     uint8_t address = loadVariant<uint8_t>(cfg, "Address");
                     std::string driver =
                         loadVariant<std::string>(cfg, "Driver");
+                    bool shutdownOnLeak =
+                        loadVariant<bool>(cfg, "ShutdownOnLeak");
+                    unsigned int shutdownDelaySeconds =
+                        loadVariant<unsigned int>(cfg, "ShutdownDelaySeconds");
                     std::string detectorType =
                         loadVariant<std::string>(cfg, "DetectorType");
 
@@ -121,6 +125,9 @@ void createSensors(
                             << "\tPollRate: " << pollRate << "\n"
                             << "\tDriver: " << driver << "\n"
                             << "\tDetectorType: " << detectorType << "\n"
+                            << "\tShutdownOnLeak: " << shutdownOnLeak << "\n"
+                            << "\tShutdownDelaySeconds: "
+                            << shutdownDelaySeconds << "\n"
                             << "\n";
                     }
 
@@ -142,11 +149,26 @@ void createSensors(
                         {
                             std::cout << "Directory: " << dir
                                       << ", File: " << file << std::endl;
-                            auto& sensor = sensors[file];
-                            sensor = std::make_unique<DiscreteLeakDetectSensor>(
-                                objectServer, dbusConnection, io, detectorType,
-                                dir, file, *interfacePath, pollRate, busId,
-                                address, driver);
+                            // Check if the sensor already exists
+                            auto it = sensors.find(file);
+                            if (it != sensors.end())
+                            {
+                                sensors.erase(it); // Explicitly delete the
+                                                   // existing sensor
+                                std::cout << "Sensor for file: " << file
+                                          << " erased" << std::endl;
+                            }
+
+                            // Create the new sensor
+                            auto newSensor =
+                                std::make_unique<DiscreteLeakDetectSensor>(
+                                    objectServer, dbusConnection, io,
+                                    detectorType, dir, file, *interfacePath,
+                                    pollRate, busId, address, driver,
+                                    shutdownOnLeak, shutdownDelaySeconds);
+
+                            // Add the new sensor to the map
+                            sensors[file] = std::move(newSensor);
                         }
                     }
                     else
@@ -169,6 +191,10 @@ int main()
     boost::container::flat_map<std::string,
                                std::unique_ptr<DiscreteLeakDetectSensor>>
         leakSensors;
+
+    // Set the output to be unbuffered, so that the output is printed
+    // immediately.
+    std::cout.setf(std::ios::unitbuf);
 
     objectServer.add_manager("/xyz/openbmc_project/sensors");
     objectServer.add_manager("/xyz/openbmc_project/state");

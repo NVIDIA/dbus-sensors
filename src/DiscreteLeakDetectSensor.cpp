@@ -43,6 +43,7 @@
 
 // Enable debug logging
 static constexpr bool debug = false;
+unsigned int DiscreteLeakDetectSensor::lastUID = 0;
 
 DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
     sdbusplus::asio::object_server& objectServer,
@@ -50,12 +51,17 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
     boost::asio::io_context& io, const std::string& sensorType,
     const std::string& sensorSysfsPath, const std::string& sensorName,
     const std::string& configurationPath, float pollRate, uint8_t busId,
-    uint8_t address, const std::string& driver) :
+    uint8_t address, const std::string& driver, bool shutdownOnLeak,
+    const unsigned int shutdownDelaySeconds) :
     sensorType(sensorType), sysfsPath(sensorSysfsPath), name(sensorName),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)), busId(busId),
     address(address), driver(driver), objServer(objectServer), waitTimer(io),
-    dbusConnection(conn)
+    shutdownTimer(io), dbusConnection(conn), shutdownOnLeak(shutdownOnLeak),
+    shutdownDelaySeconds(shutdownDelaySeconds),
+    didShutdownOnThisOccurrence(false), startedShutdownTimer(false)
 {
+    DiscreteLeakDetectSensor::lastUID++;
+    uid = DiscreteLeakDetectSensor::lastUID;
     sdbusplus::message::object_path inventoryObjPath(
         "/xyz/openbmc_project/inventory/leakdetectors/");
     inventoryObjPath /= name;
@@ -122,16 +128,23 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
         return;
     }
 
-    monitor();
+    // This is asynchronous, ensuring the io_context is available.
+    boost::asio::post(waitTimer.get_executor(), [this]() { monitor(); });
+
+    std::cout << "Created DiscreteLeakDetectSensor for " << name << " with uid "
+              << uid << "\n";
 }
 
 DiscreteLeakDetectSensor::~DiscreteLeakDetectSensor()
 {
     waitTimer.cancel();
+    shutdownTimer.cancel();
     objServer.remove_interface(inventoryInterface);
     objServer.remove_interface(inventoryAssociation);
     objServer.remove_interface(stateInterface);
     objServer.remove_interface(stateAssociation);
+    std::cout << "Destroyed DiscreteLeakDetectSensor for " << name
+              << " with uid " << uid << "\n";
 }
 
 int DiscreteLeakDetectSensor::readLeakValue(const std::string& filePath)
@@ -145,6 +158,11 @@ int DiscreteLeakDetectSensor::readLeakValue(const std::string& filePath)
     return value;
 }
 
+bool DiscreteLeakDetectSensor::isAggregatedLeak()
+{
+    return (name == "leakage_aggr");
+}
+
 int DiscreteLeakDetectSensor::getLeakInfo()
 {
     std::vector<std::pair<std::string, int>> leakVec;
@@ -155,6 +173,7 @@ int DiscreteLeakDetectSensor::getLeakInfo()
         leakLevel = LeakLevel::NORMAL;
         stateInterface->set_property("DetectorState",
                                      getLeakLevelStatusName(leakLevel));
+        didShutdownOnThisOccurrence = false;
     }
     else
     {
@@ -162,6 +181,12 @@ int DiscreteLeakDetectSensor::getLeakInfo()
         stateInterface->set_property("DetectorState",
                                      getLeakLevelStatusName(leakLevel));
         createLeakageLogEntry();
+        if (shutdownOnLeak && !didShutdownOnThisOccurrence &&
+            isAggregatedLeak())
+        {
+            didShutdownOnThisOccurrence = true;
+            startShutdown();
+        }
     }
 
     return 0;
@@ -220,6 +245,15 @@ inline void DiscreteLeakDetectSensor::createLeakageLogEntry()
     std::string messageId = "ResourceEvent.1.0.ResourceStatusChangedCritical";
     std::string resolution =
         "Inspect for water leakage and consider power down switch tray.";
+    if (startedShutdownTimer &&
+        (shutdownTimer.expiry() > std::chrono::steady_clock::now()))
+    {
+        auto callbackRemainingTime =
+            shutdownTimer.expiry() - std::chrono::steady_clock::now();
+        resolution += "System will shutdown in " +
+                      std::to_string(callbackRemainingTime.count() / 1000) +
+                      " seconds.";
+    }
     std::string severity = "xyz.openbmc_project.Logging.Entry.Level.Error";
     std::string status = getLeakLevelStatusName(leakLevel);
 
@@ -229,4 +263,68 @@ inline void DiscreteLeakDetectSensor::createLeakageLogEntry()
     addData["xyz.openbmc_project.Logging.Entry.Resolution"] = resolution;
 
     addEventLog(dbusConnection, messageId, severity, addData);
+}
+
+void DiscreteLeakDetectSensor::startShutdown()
+{
+    if (shutdownDelaySeconds != 0U)
+    {
+        if (startedShutdownTimer)
+        {
+            /*Timer is already pending. no need to resched */
+            return;
+        }
+
+        std::cout << "Setting timer for " << shutdownDelaySeconds
+                  << " second(s) delay before shutdown due to " << name
+                  << ".\n";
+
+        startedShutdownTimer = true;
+        shutdownTimer.expires_after(std::chrono::seconds(shutdownDelaySeconds));
+        shutdownTimer.async_wait([&](const boost::system::error_code& ec) {
+            startedShutdownTimer = false;
+            if (ec == boost::asio::error::operation_aborted)
+            {
+                std::cout << "Timer aborted before expiration \n";
+                return; // we're being canceled
+            }
+
+            if (ec)
+            {
+                std::cerr << "Shutdown Timer callback error: " << ec.message()
+                          << "\n";
+                return;
+            }
+
+            executeShutdown();
+        });
+    }
+    else
+    {
+        startedShutdownTimer = false;
+        executeShutdown();
+    }
+}
+
+void DiscreteLeakDetectSensor::executeShutdown()
+{
+    std::cout << "Executing shutdown requested by " << name << ".\n";
+    std::variant<std::string> transitionChassisOff =
+        "xyz.openbmc_project.State.Chassis.Transition.Off";
+
+    dbusConnection->async_method_call(
+        [](const boost::system::error_code& ec) {
+            if (ec)
+            {
+                std::cerr << "Failed to execute shutdown due to "
+                          << ec.message() << "\n";
+                return;
+            }
+        },
+        "xyz.openbmc_project.State.Chassis",
+        "/xyz/openbmc_project/state/chassis0",
+        "org.freedesktop.DBus.Properties", "Set",
+        "xyz.openbmc_project.State.Chassis", "RequestedPowerTransition",
+        transitionChassisOff);
+    std::cout << "executeShutdown done\n";
 }
