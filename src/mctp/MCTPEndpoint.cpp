@@ -1597,9 +1597,6 @@ std::shared_ptr<XROTMCTPDDevice> XROTMCTPDDevice::from(
     std::vector<std::string> names = getDeviceNames(iface);
     const auto* name = names[0].c_str();
 
-    auto sInterface = std::visit(VariantToStringVisitor(), mInterface->second);
-    const char* interface = sInterface.c_str();
-
     std::optional<std::uint8_t> staticEID{};
     if (mStaticEndpointID == iface.end())
     {
@@ -1628,11 +1625,10 @@ std::shared_ptr<XROTMCTPDDevice> XROTMCTPDDevice::from(
         if (staticEID.has_value())
         {
             return std::make_shared<XROTMCTPDDevice>(
-                connection, name, interface, staticEID.value(), pollingInterval,
-                names);
+                connection, name, staticEID.value(), pollingInterval, names);
         }
-        return std::make_shared<XROTMCTPDDevice>(
-            connection, name, interface, std::nullopt, pollingInterval, names);
+        return std::make_shared<XROTMCTPDDevice>(connection, name, std::nullopt,
+                                                 pollingInterval, names);
     }
     catch (const MCTPException& ex)
     {
