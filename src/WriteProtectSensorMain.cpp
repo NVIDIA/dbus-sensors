@@ -160,8 +160,18 @@ void setupInterfaceRemoved(sdbusplus::asio::connection* conn,
     std::function<void(sdbusplus::message::message & msg)> handler =
         [callback{std::move(callbackIn)}](sdbusplus::message::message msg) {
             sdbusplus::message::object_path objPath;
-            msg.read(objPath);
-            callback(objPath.filename());
+            std::vector<std::string> interfaces;
+            msg.read(objPath, interfaces);
+
+            // Check if WriteProtect interface is in the removed list
+            for (const auto& iface : interfaces)
+            {
+                if (iface == interfaces::emWriteProtectIfc)
+                {
+                    callback(objPath.filename());
+                    break;
+                }
+            }
         };
 
     ifcRemoved = std::make_unique<sdbusplus::bus::match::match>(
