@@ -724,12 +724,22 @@ void MCTPDEndpoint::updateEndpointConnectivity(const std::string& connectivity)
         {
             notifyDegraded(shared_from_this());
         }
+        if (auto mctpdDevice =
+                std::dynamic_pointer_cast<MCTPDDevice>(this->device()))
+        {
+            mctpdDevice->stopHealthMonitoring();
+        }
     }
     else if (connectivity == "Available")
     {
         if (notifyAvailable)
         {
             notifyAvailable(shared_from_this());
+        }
+        if (auto mctpdDevice =
+                std::dynamic_pointer_cast<MCTPDDevice>(this->device()))
+        {
+            mctpdDevice->startHealthMonitoring();
         }
     }
     else

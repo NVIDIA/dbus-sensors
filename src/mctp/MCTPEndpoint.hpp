@@ -355,13 +355,6 @@ class MCTPDDevice :
         return staticEID;
     }
 
-  protected:
-    /**
-     * @brief Virtual hook called after endpoint is successfully established.
-     *        Derived classes can override to add transport-specific behavior.
-     */
-    virtual void onEndpointEstablished();
-
     /**
      * @brief Start health monitoring for direct attached endpoints.
      * Only monitors if pollingInterval is specified, > 0, and StaticEndpointID
@@ -374,6 +367,13 @@ class MCTPDDevice :
      * @brief Stop health monitoring
      */
     void stopHealthMonitoring();
+
+  protected:
+    /**
+     * @brief Virtual hook called after endpoint is successfully established.
+     *        Derived classes can override to add transport-specific behavior.
+     */
+    virtual void onEndpointEstablished();
 
     std::shared_ptr<sdbusplus::asio::connection> connection;
     const std::string name;
