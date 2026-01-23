@@ -561,13 +561,13 @@ class XROTMCTPDDevice : public MCTPDDevice
     XROTMCTPDDevice() = delete;
     XROTMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
-        const std::string& name,
+        const std::string& name, const std::string& interface,
         std::optional<std::uint8_t> staticEID = std::nullopt,
         std::optional<std::uint8_t> pollingInterval = std::nullopt,
         const std::vector<std::string>& deviceNames = {}) :
-        MCTPDDevice(connection, name, name, std::vector<uint8_t>{}, staticEID,
-                    std::nullopt, std::nullopt, std::nullopt, pollingInterval,
-                    deviceNames)
+        MCTPDDevice(connection, name, interface, std::vector<uint8_t>{},
+                    staticEID, std::nullopt, std::nullopt, std::nullopt,
+                    pollingInterval, deviceNames)
     {}
     ~XROTMCTPDDevice() override = default;
 
