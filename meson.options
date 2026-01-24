@@ -215,3 +215,9 @@ option(
     value: 'disabled',
     description: 'Enable USB port control service.',
 )
+option(
+    'nvidia-fw-write-protect',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable NVIDIA firmware write protect reactor.',
+)

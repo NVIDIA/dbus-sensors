@@ -354,3 +354,7 @@ if get_option('usb-port-ctrl').allowed()
         install: true,
     )
 endif
+
+if get_option('nvidia-fw-write-protect').enabled()
+    subdir('nvidia-fw-write-protect')
+endif

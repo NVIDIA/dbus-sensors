@@ -1,0 +1,13 @@
+[Unit]
+Description=NVIDIA Firmware Write Protection
+Requires=xyz.openbmc_project.EntityManager.service
+After=xyz.openbmc_project.EntityManager.service
+
+[Service]
+BusName=com.nvidia.fwwriteprotect
+Restart=always
+RestartSec=5
+ExecStart=/usr/libexec/dbus-sensors/nvidia-fw-write-protect
+
+[Install]
+WantedBy=multi-user.target
