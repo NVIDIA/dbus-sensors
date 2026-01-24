@@ -84,6 +84,9 @@ class WriteProtect : public std::enable_shared_from_this<WriteProtect>
     // Remove a object from the object reference list.
     void removeObj(const std::string& name);
 
+    // Cleanup write protect interface
+    void cleanupWriteProtectIf();
+
     // Check if a object is included in the obj->iface map already.
     bool hasObj(const std::string& name);
 

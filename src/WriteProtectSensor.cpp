@@ -42,6 +42,21 @@ void WriteProtect::addObj(const std::string& name, const Config& config)
 void WriteProtect::removeObj(const std::string& name)
 {
     objIfaces.erase(name);
+
+    // If all objects are removed, cleanup the interface
+    if (objEmpty())
+    {
+        cleanupWriteProtectIf();
+    }
+}
+
+void WriteProtect::cleanupWriteProtectIf()
+{
+    if (settingsIfPtr)
+    {
+        objectServerPtr->remove_interface(settingsIfPtr);
+        settingsIfPtr.reset();
+    }
 }
 
 bool WriteProtect::hasObj(const std::string& name)
