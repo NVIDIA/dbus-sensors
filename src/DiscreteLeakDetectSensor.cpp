@@ -167,6 +167,7 @@ int DiscreteLeakDetectSensor::getLeakInfo()
 {
     std::vector<std::pair<std::string, int>> leakVec;
     auto leakVal = readLeakValue(sysfsPath + "/" + name);
+    LeakLevel oldLeakLevel = leakLevel;
 
     if (leakVal == 1)
     {
@@ -180,7 +181,6 @@ int DiscreteLeakDetectSensor::getLeakInfo()
         leakLevel = LeakLevel::LEAKAGE;
         stateInterface->set_property("DetectorState",
                                      getLeakLevelStatusName(leakLevel));
-        createLeakageLogEntry();
         if (shutdownOnLeak && !didShutdownOnThisOccurrence &&
             isAggregatedLeak())
         {
@@ -189,7 +189,71 @@ int DiscreteLeakDetectSensor::getLeakInfo()
         }
     }
 
+    if (oldLeakLevel != leakLevel)
+    {
+        std::cout << "Leak value changed from "
+                  << getLeakLevelStatusName(oldLeakLevel) << " to "
+                  << getLeakLevelStatusName(leakLevel) << "\n";
+        createLeakageLogEntry();
+    }
+
     return 0;
+}
+
+std::string DiscreteLeakDetectSensor::getLeakResourceStatusName(
+    LeakLevel leaklevel)
+{
+    switch (leaklevel)
+    {
+        case LeakLevel::NORMAL:
+            return "ResourceEvent.1.0.ResourceStatusChangedOK";
+        case LeakLevel::LEAKAGE:
+        default:
+            return "ResourceEvent.1.0.ResourceStatusChangedCritical";
+    }
+}
+
+std::string DiscreteLeakDetectSensor::getLeakResourceResolutionName(
+    LeakLevel leaklevel)
+{
+    std::string resolution = "";
+    switch (leaklevel)
+    {
+        case LeakLevel::NORMAL:
+            resolution = "None.";
+            break;
+        case LeakLevel::LEAKAGE:
+        default:
+            resolution =
+                "Inspect for water leakage and consider power down switch tray.";
+            if (startedShutdownTimer &&
+                (shutdownTimer.expiry() > std::chrono::steady_clock::now()))
+            {
+                auto callbackRemainingTime =
+                    shutdownTimer.expiry() - std::chrono::steady_clock::now();
+                auto remainingSeconds =
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        callbackRemainingTime)
+                        .count();
+                resolution += " System will shutdown in " +
+                              std::to_string(remainingSeconds) + " seconds.";
+            }
+            break;
+    }
+    return resolution;
+}
+
+std::string DiscreteLeakDetectSensor::getLeakResourceSeverityName(
+    LeakLevel leaklevel)
+{
+    switch (leaklevel)
+    {
+        case LeakLevel::NORMAL:
+            return "xyz.openbmc_project.Logging.Entry.Level.Informational";
+        case LeakLevel::LEAKAGE:
+        default:
+            return "xyz.openbmc_project.Logging.Entry.Level.Error";
+    }
 }
 
 std::string DiscreteLeakDetectSensor::getLeakLevelStatusName(
@@ -199,11 +263,9 @@ std::string DiscreteLeakDetectSensor::getLeakLevelStatusName(
     {
         case LeakLevel::NORMAL:
             return "OK";
-            break;
         case LeakLevel::LEAKAGE:
         default:
             return "Critical";
-            break;
     }
 }
 
@@ -242,19 +304,10 @@ inline void DiscreteLeakDetectSensor::createLeakageLogEntry()
         std::cout << "Logging event for sensor: " << name << "\n";
     }
 
-    std::string messageId = "ResourceEvent.1.0.ResourceStatusChangedCritical";
-    std::string resolution =
-        "Inspect for water leakage and consider power down switch tray.";
-    if (startedShutdownTimer &&
-        (shutdownTimer.expiry() > std::chrono::steady_clock::now()))
-    {
-        auto callbackRemainingTime =
-            shutdownTimer.expiry() - std::chrono::steady_clock::now();
-        resolution += "System will shutdown in " +
-                      std::to_string(callbackRemainingTime.count() / 1000) +
-                      " seconds.";
-    }
-    std::string severity = "xyz.openbmc_project.Logging.Entry.Level.Error";
+    std::string messageId = getLeakResourceStatusName(leakLevel);
+    std::string resolution = getLeakResourceResolutionName(leakLevel);
+
+    std::string severity = getLeakResourceSeverityName(leakLevel);
     std::string status = getLeakLevelStatusName(leakLevel);
 
     std::map<std::string, std::string> addData = {};

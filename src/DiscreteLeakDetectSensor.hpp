@@ -59,6 +59,9 @@ class DiscreteLeakDetectSensor :
     int getLeakInfo();
     static int readLeakValue(const std::string& filePath);
     static std::string getLeakLevelStatusName(LeakLevel leaklevel);
+    static std::string getLeakResourceStatusName(LeakLevel leaklevel);
+    std::string getLeakResourceResolutionName(LeakLevel leaklevel);
+    static std::string getLeakResourceSeverityName(LeakLevel leaklevel);
     void createLeakageLogEntry();
     bool isAggregatedLeak();
 
