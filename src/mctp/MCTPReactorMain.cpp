@@ -246,23 +246,27 @@ static void handleApplicationTimeout(
     const std::shared_ptr<MCTPReactor>& reactor,
     const TransportErrorInfo& error)
 {
-    std::string errorMessage = "MCTP communication failed due to timeout";
-    std::string logMessage = "MCTP Control Timeout on EID";
-
     if (mctpCommandTable.contains(error.commandCode))
     {
-        errorMessage =
+        std::string errorMessage =
             mctpCommandTable.at(error.commandCode).timeoutErrorMessage;
-        logMessage = mctpCommandTable.at(error.commandCode).logMessage;
+        std::string logMessage =
+            mctpCommandTable.at(error.commandCode).logMessage;
+
+        debug("{MSG} {EID}", "MSG", logMessage, "EID", error.destEid);
+
+        auto deviceNameOpt = reactor->getDeviceName(error.destEid);
+        std::string deviceName =
+            deviceNameOpt.value_or("EID_" + std::to_string(error.destEid));
+
+        logMCTPError(deviceName, error.destEid, error.errorCode, errorMessage);
     }
-
-    debug("{MSG} {EID}", "MSG", logMessage, "EID", error.destEid);
-
-    auto deviceNameOpt = reactor->getDeviceName(error.destEid);
-    std::string deviceName =
-        deviceNameOpt.value_or("EID_" + std::to_string(error.destEid));
-
-    logMCTPError(deviceName, error.destEid, error.errorCode, errorMessage);
+    else
+    {
+        warning(
+            "MCTP communication timeout on EID {EID} for unknown command code {CODE}",
+            "EID", error.destEid, "CODE", error.commandCode);
+    }
 }
 
 static void handleTransportError(const std::shared_ptr<MCTPReactor>& reactor,
