@@ -369,13 +369,13 @@ class MCTPDDevice :
      */
     void stopHealthMonitoring();
 
-  protected:
     /**
      * @brief Virtual hook called after endpoint is successfully established.
      *        Derived classes can override to add transport-specific behavior.
      */
     virtual void onEndpointEstablished();
 
+  protected:
     std::shared_ptr<sdbusplus::asio::connection> connection;
     const std::string name;
     const std::vector<std::string> deviceNames;

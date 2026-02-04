@@ -360,6 +360,7 @@ void MCTPDDevice::onEndpointEstablished()
 {
     // Clear recovery mode flag when endpoint is successfully established
     inHealthRecoveryMode = false;
+    consecutivePingFailures = 0;
     startHealthMonitoring();
 }
 
@@ -443,12 +444,19 @@ void MCTPDDevice::performHealthCheck()
                     if (self->endpoint)
                     {
                         self->consecutivePingFailures++;
-                        if (self->consecutivePingFailures ==
+                        info(
+                            "Ping failed for EID {EID}. Failure count: {COUNT}/{THRESHOLD}",
+                            "EID", self->endpoint->eid(), "COUNT",
+                            self->consecutivePingFailures, "THRESHOLD",
+                            self->pingFailureThreshold);
+
+                        if (self->consecutivePingFailures >=
                             self->pingFailureThreshold)
                         {
                             info(
-                                "Health error: Device not responsive (Timeout), EID {EID}",
-                                "EID", self->endpoint->eid());
+                                "Health error: Device not responsive (Timeout), EID {EID} after {COUNT} failures",
+                                "EID", self->endpoint->eid(), "COUNT",
+                                self->consecutivePingFailures);
                             // Log the MCTP ping failure for Redfish only after
                             // 3 consecutive timeouts
                             if (ec == boost::system::errc::timed_out)
@@ -527,7 +535,13 @@ void MCTPDDevice::performHealthCheck()
                         if (!self->unresponsiveBridgePoolEids.contains(eid))
                         {
                             self->bridgePoolPingFailures[eid]++;
-                            if (self->bridgePoolPingFailures[eid] ==
+                            info(
+                                "Ping failed for Bridge Pool EID {EID}. Failure count: {COUNT}/{THRESHOLD}",
+                                "EID", eid, "COUNT",
+                                self->bridgePoolPingFailures[eid], "THRESHOLD",
+                                self->pingFailureThreshold);
+
+                            if (self->bridgePoolPingFailures[eid] >=
                                 self->pingFailureThreshold)
                             {
                                 info(
@@ -582,10 +596,19 @@ void MCTPDDevice::recover(uint8_t eid)
     // Suppress errors during the recovery attempt
     suppressedHealthCheckEids.insert(eid);
 
+    info("Recovering health for device {DEVICE_NAME}, EID {EID}", "DEVICE_NAME",
+         name, "EID", eid);
+
     std::string path = mctpdEndpointPath + std::to_string(eid);
-    connection->async_method_call([](const boost::system::error_code&) {},
-                                  mctpdBusName, path,
-                                  mctpdEndpointControlInterface, "Recover");
+    connection->async_method_call(
+        [eid](const boost::system::error_code& ec) {
+            if (ec)
+            {
+                error("Failed to initiate recovery for EID {EID}: {ERROR}",
+                      "EID", eid, "ERROR", ec.message());
+            }
+        },
+        mctpdBusName, path, mctpdEndpointControlInterface, "Recover");
 }
 
 void MCTPDDevice::recover()
@@ -722,6 +745,9 @@ void MCTPDEndpoint::onMctpEndpointChange(sdbusplus::message_t& msg)
 
 void MCTPDEndpoint::updateEndpointConnectivity(const std::string& connectivity)
 {
+    info("Updating connectivity for EID {EID}: {STATE}", "EID", mctp.eid,
+         "STATE", connectivity);
+
     if (connectivity == "Degraded")
     {
         if (notifyDegraded)
@@ -743,7 +769,7 @@ void MCTPDEndpoint::updateEndpointConnectivity(const std::string& connectivity)
         if (auto mctpdDevice =
                 std::dynamic_pointer_cast<MCTPDDevice>(this->device()))
         {
-            mctpdDevice->startHealthMonitoring();
+            mctpdDevice->onEndpointEstablished();
         }
     }
     else
