@@ -16,4 +16,10 @@ if get_option('mctpheartbeat').enabled()
         dependencies: [default_deps, utils_dep],
         install: true,
     )
+    install_data(
+        'reboot-wrapper.sh',
+        install_dir: get_option('sbindir'),
+        rename: 'reboot-wrapper',
+        install_mode: 'rwxr-xr-x',
+    )
 endif
