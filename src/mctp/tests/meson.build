@@ -1,0 +1,158 @@
+gtest_dep = dependency('gtest', main: true, disabler: true, required: false)
+gmock_dep = dependency('gmock', disabler: true, required: false)
+if not gtest_dep.found() or not gmock_dep.found()
+    gtest_proj = import('cmake').subproject('googletest', required: false)
+    if gtest_proj.found()
+        gtest_dep = declare_dependency(
+            dependencies: [
+                dependency('threads'),
+                gtest_proj.dependency('gtest'),
+                gtest_proj.dependency('gtest_main'),
+            ],
+        )
+        gmock_dep = gtest_proj.dependency('gmock')
+    else
+        assert(
+            not get_option('tests').allowed(),
+            'Googletest is required if tests are enabled',
+        )
+    endif
+endif
+
+ut_deps_list = [gtest_dep]
+
+ut_deps_list += default_deps
+
+subobject_linkage_disable_args = []
+if meson.get_compiler('cpp').has_argument('-Wno-subobject-linkage')
+    subobject_linkage_disable_args += ['-Wno-subobject-linkage']
+endif
+
+# ld --wrap flags to intercept sd-bus calls in fake-connection tests
+sd_bus_wrap_link_args = [
+    '-Wl,--wrap,sd_bus_get_fd',
+    '-Wl,--wrap,sd_bus_get_events',
+    '-Wl,--wrap,sd_bus_get_timeout',
+    '-Wl,--wrap,sd_bus_add_match',
+    '-Wl,--wrap,sd_bus_call',
+    '-Wl,--wrap,sd_bus_process',
+    '-Wl,--wrap,sd_bus_slot_unref',
+    '-Wl,--wrap,sd_bus_add_object_manager',
+]
+
+# Extended wrap flags that also intercept socket/system/sendto calls
+socket_wrap_link_args = sd_bus_wrap_link_args + [
+    '-Wl,--wrap,socket',
+    '-Wl,--wrap,setsockopt',
+    '-Wl,--wrap,bind',
+    '-Wl,--wrap,system',
+    '-Wl,--wrap,symlink',
+    '-Wl,--wrap,if_nametoindex',
+    '-Wl,--wrap,sendto',
+]
+
+test(
+    'MCTPReactor',
+    executable(
+        'test_MCTPReactor',
+        'test_MCTPReactor.cpp',
+        '../MCTPReactor.cpp',
+        '../MCTPEndpoint.cpp',
+        '../MCTPEndpointUtils.cpp',
+        dependencies: [gmock_dep, ut_deps_list, utils_dep],
+        implicit_include_directories: false,
+        include_directories: '..',
+    ),
+)
+
+test(
+    'MCTPEndpoint',
+    executable(
+        'test_MCTPEndpoint',
+        'test_MCTPEndpoint.cpp',
+        'test_MCTPDeviceRepository.cpp',
+        '../MCTPEndpoint.cpp',
+        '../MCTPEndpointUtils.cpp',
+        'sd_bus_wrappers.cpp',
+        cpp_args: ['-fno-access-control'],
+        link_args: socket_wrap_link_args,
+        dependencies: [gmock_dep, ut_deps_list, utils_dep],
+        implicit_include_directories: false,
+        include_directories: '..',
+    ),
+)
+
+test(
+    'MCTPDeviceRepository',
+    executable(
+        'test_MCTPDeviceRepository',
+        'test_MCTPDeviceRepository.cpp',
+        '../MCTPEndpoint.cpp',
+        '../MCTPEndpointUtils.cpp',
+        dependencies: [gmock_dep, ut_deps_list, utils_dep],
+        implicit_include_directories: false,
+        include_directories: '..',
+    ),
+)
+
+test(
+    'MCTPEndpointUtils',
+    executable(
+        'test_MCTPEndpointUtils',
+        'test_MCTPEndpointUtils.cpp',
+        '../MCTPEndpointUtils.cpp',
+        dependencies: [ut_deps_list, utils_dep],
+        implicit_include_directories: false,
+        include_directories: '..',
+    ),
+)
+
+test(
+    'MCTPCustomDevices',
+    executable(
+        'test_MCTPCustomDevices',
+        'test_MCTPCustomDevices.cpp',
+        '../MCTPCustomDevices.cpp',
+        '../MCTPEndpoint.cpp',
+        '../MCTPEndpointUtils.cpp',
+        'sd_bus_wrappers.cpp',
+        cpp_args: ['-fno-access-control'],
+        link_args: socket_wrap_link_args,
+        dependencies: [gmock_dep, ut_deps_list, utils_dep],
+        implicit_include_directories: false,
+        include_directories: '..',
+    ),
+)
+
+test(
+    'MCTPReactorMain',
+    executable(
+        'test_MCTPReactorMain',
+        'test_MCTPReactorMain.cpp',
+        '../MCTPReactor.cpp',
+        '../MCTPEndpoint.cpp',
+        '../MCTPEndpointUtils.cpp',
+        '../MCTPCustomDevices.cpp',
+        'sd_bus_wrappers.cpp',
+        cpp_args: subobject_linkage_disable_args + ['-fno-access-control'],
+        link_args: socket_wrap_link_args,
+        dependencies: [gmock_dep, ut_deps_list, utils_dep],
+        implicit_include_directories: false,
+        include_directories: '..',
+    ),
+)
+
+test(
+    'MCTPHeartBeatApp',
+    executable(
+        'test_MCTPHeartBeatApp',
+        'test_MCTPHeartBeatApp.cpp',
+        'sd_bus_wrappers.cpp',
+        cpp_args: subobject_linkage_disable_args + ['-fno-access-control'],
+        link_args: socket_wrap_link_args,
+        dependencies: [gmock_dep, ut_deps_list, utils_dep],
+        implicit_include_directories: false,
+        include_directories: '..',
+    ),
+    timeout: 120,
+)
