@@ -142,8 +142,10 @@ LeakDetectSensor::LeakDetectSensor(
     // Expose inventory related leak detector interfaces and properties
     inventoryInterface = objectServer.add_interface(
         inventoryObjPath, "xyz.openbmc_project.Inventory.Item.LeakDetector");
-    inventoryInterface->register_property("LeakDetectorType",
-                                          std::string("Moisture"));
+    inventoryInterface->register_property(
+        "LeakDetectorType",
+        std::string(
+            "xyz.openbmc_project.Inventory.Item.LeakDetector.LeakDetectorTypeEnum.Moisture"));
     if (!inventoryInterface->initialize())
     {
         std::cerr << "Error initializing leakage inventory interface for "
@@ -634,11 +636,11 @@ std::string LeakDetectSensor::getDetectorStatusString(
     switch (detectorState)
     {
         case DetectorState::NORMAL:
-            return "OK";
+            return "xyz.openbmc_project.State.LeakDetector.DetectorStateEnum.OK";
             break;
         case DetectorState::LEAKAGE:
         case DetectorState::FAULT:
-            return "Critical";
+            return "xyz.openbmc_project.State.LeakDetector.DetectorStateEnum.Critical";
             break;
         default:
             throw std::runtime_error("Invalid detector state.");
@@ -654,10 +656,10 @@ std::string LeakDetectSensor::getDetectorStateString(
     {
         case DetectorState::NORMAL:
         case DetectorState::LEAKAGE:
-            return "Enabled";
+            return "xyz.openbmc_project.State.Decorator.OperationalStatus.StateType.Enabled";
             break;
         case DetectorState::FAULT:
-            return "Degraded";
+            return "xyz.openbmc_project.State.Decorator.OperationalStatus.StateType.Degraded";
             break;
         default:
             throw std::runtime_error("Invalid detector state.");
