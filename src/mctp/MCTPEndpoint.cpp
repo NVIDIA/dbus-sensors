@@ -515,7 +515,8 @@ void MCTPDDevice::performHealthCheck()
             suppressedHealthCheckEids.erase(eid);
 
             // Suppress signal handler logs for bridge pool health check pings
-            if (bridgePoolPingFailures[eid] < pingFailureThreshold - 1)
+            if (bridgePoolPingFailures[eid] < pingFailureThreshold - 1 ||
+                unresponsiveBridgePoolEids.contains(eid))
             {
                 suppressedHealthCheckEids.insert(eid);
             }
@@ -557,7 +558,7 @@ void MCTPDDevice::performHealthCheck()
                                         "MCTP ping failed due to timeout for the device");
                                 }
                                 self->unresponsiveBridgePoolEids.insert(eid);
-                                self->recover(eid);
+                                // self->recover(eid);
                             }
                         }
                     }
