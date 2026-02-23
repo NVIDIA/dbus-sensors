@@ -31,7 +31,7 @@ PHOSPHOR_LOG2_USING;
 static constexpr std::string_view busName =
     "xyz.openbmc_project.Control.USB.Port";
 static constexpr std::string_view objPath =
-    "/xyz/openbmc_project/control/usb/port0";
+    "/xyz/openbmc_project/control/port/USB_0";
 static constexpr std::string_view ifaceName =
     "xyz.openbmc_project.Object.Enable";
 static constexpr std::string_view stateDir = "/var/lib/obmc/usb-port-ctrl";
