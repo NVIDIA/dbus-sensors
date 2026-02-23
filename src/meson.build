@@ -337,3 +337,20 @@ if get_option('write-protect').enabled()
         install: true,
     )
 endif
+
+if get_option('usb-port-ctrl').allowed()
+    executable(
+        'usbportctrl',
+        'UsbPortCtrl.cpp',
+        dependencies: [
+            sdbusplus,
+            boost,
+            uring,
+            phosphor_logging_dep,
+            gpiodcxx,
+            nlohmann_json_dep,
+        ],
+        implicit_include_directories: false,
+        install: true,
+    )
+endif

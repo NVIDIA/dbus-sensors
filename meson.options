@@ -209,3 +209,9 @@ option(
     value: 'disabled',
     description: 'Enable NVMe-MI sensor.',
 )
+option(
+    'usb-port-ctrl',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable USB port control service.',
+)

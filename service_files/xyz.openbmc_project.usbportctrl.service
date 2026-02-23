@@ -1,0 +1,14 @@
+[Unit]
+Description=USB Port Control D-Bus Service
+After=dbus.service bmc-boot-complete.service
+Requires=bmc-boot-complete.service
+
+[Service]
+Restart=always
+RestartSec=5
+Type=dbus
+BusName=xyz.openbmc_project.Control.USB.Port
+ExecStart=/usr/bin/usbportctrl
+
+[Install]
+WantedBy=multi-user.target

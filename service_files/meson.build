@@ -39,6 +39,7 @@ unit_files = [
     ],
     ['write-protect', 'xyz.openbmc_project.writeprotectsensor.service'],
     ['smbpbi', 'xyz.openbmc_project.smbpbisensor.service'],
+    ['usb-port-ctrl', 'xyz.openbmc_project.usbportctrl.service'],
 ]
 
 fs = import('fs')
