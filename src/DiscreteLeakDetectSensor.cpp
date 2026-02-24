@@ -69,8 +69,10 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
     // Expose inventory related leak detector interfaces and properties
     inventoryInterface = objectServer.add_interface(
         inventoryObjPath, "xyz.openbmc_project.Inventory.Item.LeakDetector");
-    inventoryInterface->register_property("LeakDetectorType",
-                                          std::string("Moisture"));
+    inventoryInterface->register_property(
+        "LeakDetectorType",
+        std::string(
+            "xyz.openbmc_project.Inventory.Item.LeakDetector.LeakDetectorTypeEnum.Moisture"));
     if (!inventoryInterface->initialize())
     {
         std::cerr << "Error initializing leakage inventory interface for "
@@ -262,10 +264,10 @@ std::string DiscreteLeakDetectSensor::getLeakLevelStatusName(
     switch (leaklevel)
     {
         case LeakLevel::NORMAL:
-            return "OK";
+            return "xyz.openbmc_project.State.LeakDetector.DetectorStateEnum.OK";
         case LeakLevel::LEAKAGE:
         default:
-            return "Critical";
+            return "xyz.openbmc_project.State.LeakDetector.DetectorStateEnum.Critical";
     }
 }
 
