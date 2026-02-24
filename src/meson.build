@@ -358,3 +358,13 @@ endif
 if get_option('nvidia-fw-write-protect').enabled()
     subdir('nvidia-fw-write-protect')
 endif
+
+if get_option('debug-serial-ctrl').allowed()
+    executable(
+        'debugserialctrl',
+        'DebugSerialCtrl.cpp',
+        dependencies: [sdbusplus, boost, uring, phosphor_logging_dep],
+        implicit_include_directories: false,
+        install: true,
+    )
+endif

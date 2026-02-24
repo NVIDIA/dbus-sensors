@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+#include "PortStateUtils.hpp"
+
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
 #include <gpiod.hpp>
@@ -23,8 +25,6 @@
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
-#include <filesystem>
-#include <fstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -48,12 +48,27 @@ struct PortConfig
 
 struct PortInstance
 {
+    PortInstance() = default;
+    PortInstance(const PortInstance&) = delete;
+    PortInstance& operator=(const PortInstance&) = delete;
+    PortInstance(PortInstance&&) = default;
+    PortInstance& operator=(PortInstance&&) = default;
+
+    ~PortInstance()
+    {
+        if (iface && objectServer)
+        {
+            objectServer->remove_interface(iface);
+        }
+    }
+
     std::string name;
     gpiod::line gpioLine;
     std::filesystem::path stateDirPath;
     std::filesystem::path stateFilePath;
     bool initialState = false;
     std::shared_ptr<sdbusplus::asio::dbus_interface> iface;
+    sdbusplus::asio::object_server* objectServer = nullptr;
 };
 
 static int loadConfig(std::vector<PortConfig>& ports)
@@ -136,54 +151,6 @@ static int loadConfig(std::vector<PortConfig>& ports)
     return 0;
 }
 
-static void saveState(const std::filesystem::path& dirPath,
-                      const std::filesystem::path& filePath, bool enabled)
-{
-    try
-    {
-        std::filesystem::create_directories(dirPath);
-    }
-    catch (const std::filesystem::filesystem_error& e)
-    {
-        error("Failed to create state directory {DIR}: {ERROR}", "DIR",
-              dirPath.string(), "ERROR", e.what());
-        return;
-    }
-
-    std::ofstream ofs(filePath);
-    if (!ofs)
-    {
-        error("Failed to open state file {FILE} for writing", "FILE",
-              filePath.string());
-        return;
-    }
-    ofs << (enabled ? "true" : "false") << '\n';
-    ofs.flush();
-    if (ofs.fail())
-    {
-        error("Failed to write state file {FILE}", "FILE", filePath.string());
-    }
-}
-
-static bool loadState(const std::filesystem::path& filePath)
-{
-    std::ifstream ifs(filePath);
-    if (!ifs)
-    {
-        info("State file {FILE} not found, defaulting to disabled", "FILE",
-             filePath.string());
-        return false;
-    }
-    std::string val;
-    ifs >> val;
-    if (ifs.fail())
-    {
-        error("Failed to read state file {FILE}", "FILE", filePath.string());
-        return false;
-    }
-    return (val == "true");
-}
-
 static bool applyState(gpiod::line& line, bool enabled)
 {
     try
@@ -205,7 +172,7 @@ static bool setPortEnabled(PortInstance& port, const bool newVal,
     {
         return false;
     }
-    saveState(port.stateDirPath, port.stateFilePath, newVal);
+    port_state::saveState(port.stateDirPath, port.stateFilePath, newVal);
     storedVal = newVal;
     return true;
 }
@@ -230,7 +197,7 @@ static int initPorts(const std::vector<PortConfig>& configs,
             return -1;
         }
 
-        port.initialState = loadState(port.stateFilePath);
+        port.initialState = port_state::loadState(port.stateFilePath, false);
 
         try
         {
@@ -277,20 +244,21 @@ int main(int /* argc */, char* /* argv */[])
         return 1;
     }
 
-    std::vector<PortInstance> ports;
-    if (initPorts(configs, ports) != 0)
-    {
-        return 1;
-    }
-
     boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
 
     sdbusplus::asio::object_server objectServer(systemBus, true);
     objectServer.add_manager("/xyz/openbmc_project/control");
 
+    std::vector<PortInstance> ports;
+    if (initPorts(configs, ports) != 0)
+    {
+        return 1;
+    }
+
     for (auto& port : ports)
     {
+        port.objectServer = &objectServer;
         std::string objPath = std::string(objPathBase) + port.name;
         port.iface =
             objectServer.add_interface(objPath, std::string(ifaceName));
@@ -308,15 +276,9 @@ int main(int /* argc */, char* /* argv */[])
     }
 
     boost::asio::signal_set signals(io, SIGINT, SIGTERM);
-    signals.async_wait(
-        [&io, &ports, &objectServer](const boost::system::error_code&, int) {
-            for (auto& port : ports)
-            {
-                objectServer.remove_interface(port.iface);
-                port.gpioLine.release();
-            }
-            io.stop();
-        });
+    signals.async_wait([&io](const boost::system::error_code&, int) {
+        io.stop();
+    });
 
     systemBus->request_name(busName);
     io.run();

@@ -221,3 +221,9 @@ option(
     value: 'disabled',
     description: 'Enable NVIDIA firmware write protect reactor.',
 )
+option(
+    'debug-serial-ctrl',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable debug serial port control service.',
+)

@@ -1,0 +1,14 @@
+[Unit]
+Description=Debug Serial Port Control D-Bus Service
+After=dbus.service bmc-boot-complete.service
+Requires=bmc-boot-complete.service
+
+[Service]
+Restart=always
+RestartSec=5
+Type=dbus
+BusName=xyz.openbmc_project.Control.DebugSerial
+ExecStart=/usr/bin/debugserialctrl
+
+[Install]
+WantedBy=multi-user.target

@@ -41,6 +41,7 @@ unit_files = [
     ['smbpbi', 'xyz.openbmc_project.smbpbisensor.service'],
     ['port-ctrl', 'xyz.openbmc_project.portctrl.service'],
     ['nvidia-fw-write-protect', 'com.nvidia.fwwriteprotect.service'],
+    ['debug-serial-ctrl', 'xyz.openbmc_project.debugserialctrl.service'],
 ]
 
 fs = import('fs')
