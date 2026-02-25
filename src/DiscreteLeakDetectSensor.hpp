@@ -59,6 +59,7 @@ class DiscreteLeakDetectSensor :
     int getLeakInfo();
     static int readLeakValue(const std::string& filePath);
     static std::string getLeakLevelStatusName(LeakLevel leaklevel);
+    static std::string getLeakLevelStateString(LeakLevel leaklevel);
     static std::string getLeakResourceStatusName(LeakLevel leaklevel);
     std::string getLeakResourceResolutionName(LeakLevel leaklevel);
     static std::string getLeakResourceSeverityName(LeakLevel leaklevel);
@@ -79,6 +80,7 @@ class DiscreteLeakDetectSensor :
     std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> inventoryAssociation;
     std::shared_ptr<sdbusplus::asio::dbus_interface> stateInterface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> opStateInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> stateAssociation;
 
     unsigned int uid;

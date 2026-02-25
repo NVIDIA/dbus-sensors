@@ -24,6 +24,11 @@
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/message/native_types.hpp>
+#include <xyz/openbmc_project/Inventory/Item/LeakDetector/common.hpp>
+#include <xyz/openbmc_project/Logging/Entry/common.hpp>
+#include <xyz/openbmc_project/State/Chassis/common.hpp>
+#include <xyz/openbmc_project/State/Decorator/OperationalStatus/common.hpp>
+#include <xyz/openbmc_project/State/LeakDetector/common.hpp>
 
 #include <cerrno>
 #include <chrono>
@@ -35,6 +40,11 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace inventoryItem =
+    sdbusplus::common::xyz::openbmc_project::inventory::item;
+namespace logging = sdbusplus::common::xyz::openbmc_project::logging;
+namespace state = sdbusplus::common::xyz::openbmc_project::state;
 
 /* CPLD definitions
 1 - no event (leakage not detected)
@@ -68,11 +78,11 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
 
     // Expose inventory related leak detector interfaces and properties
     inventoryInterface = objectServer.add_interface(
-        inventoryObjPath, "xyz.openbmc_project.Inventory.Item.LeakDetector");
+        inventoryObjPath, inventoryItem::LeakDetector::interface);
     inventoryInterface->register_property(
         "LeakDetectorType",
-        std::string(
-            "xyz.openbmc_project.Inventory.Item.LeakDetector.LeakDetectorTypeEnum.Moisture"));
+        inventoryItem::convertForMessage(
+            inventoryItem::LeakDetector::LeakDetectorTypeEnum::Moisture));
     if (!inventoryInterface->initialize())
     {
         std::cerr << "Error initializing leakage inventory interface for "
@@ -103,14 +113,26 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
     stateObjPath /= name;
 
     // Expose leak detector state interfaces and properties
-    stateInterface = objectServer.add_interface(
-        stateObjPath, "xyz.openbmc_project.State.LeakDetector");
+    stateInterface = objectServer.add_interface(stateObjPath,
+                                                state::LeakDetector::interface);
     stateInterface->register_property("DetectorState",
                                       getLeakLevelStatusName(leakLevel));
     if (!stateInterface->initialize())
     {
         std::cerr << "Error initializing leakage state interface for " << name
                   << "\n";
+        return;
+    }
+
+    // Expose detector operational state interface and properties
+    opStateInterface = objectServer.add_interface(
+        stateObjPath, state::decorator::OperationalStatus::interface);
+    opStateInterface->register_property("State",
+                                        getLeakLevelStateString(leakLevel));
+    if (!opStateInterface->initialize())
+    {
+        std::cerr << "Error initializing operational state interface for "
+                  << name << "\n";
         return;
     }
 
@@ -144,6 +166,7 @@ DiscreteLeakDetectSensor::~DiscreteLeakDetectSensor()
     objServer.remove_interface(inventoryInterface);
     objServer.remove_interface(inventoryAssociation);
     objServer.remove_interface(stateInterface);
+    objServer.remove_interface(opStateInterface);
     objServer.remove_interface(stateAssociation);
     std::cout << "Destroyed DiscreteLeakDetectSensor for " << name
               << " with uid " << uid << "\n";
@@ -176,6 +199,8 @@ int DiscreteLeakDetectSensor::getLeakInfo()
         leakLevel = LeakLevel::NORMAL;
         stateInterface->set_property("DetectorState",
                                      getLeakLevelStatusName(leakLevel));
+        opStateInterface->set_property("State",
+                                       getLeakLevelStateString(leakLevel));
         didShutdownOnThisOccurrence = false;
     }
     else
@@ -183,6 +208,8 @@ int DiscreteLeakDetectSensor::getLeakInfo()
         leakLevel = LeakLevel::LEAKAGE;
         stateInterface->set_property("DetectorState",
                                      getLeakLevelStatusName(leakLevel));
+        opStateInterface->set_property("State",
+                                       getLeakLevelStateString(leakLevel));
         if (shutdownOnLeak && !didShutdownOnThisOccurrence &&
             isAggregatedLeak())
         {
@@ -251,10 +278,11 @@ std::string DiscreteLeakDetectSensor::getLeakResourceSeverityName(
     switch (leaklevel)
     {
         case LeakLevel::NORMAL:
-            return "xyz.openbmc_project.Logging.Entry.Level.Informational";
+            return logging::convertForMessage(
+                logging::Entry::Level::Informational);
         case LeakLevel::LEAKAGE:
         default:
-            return "xyz.openbmc_project.Logging.Entry.Level.Error";
+            return logging::convertForMessage(logging::Entry::Level::Error);
     }
 }
 
@@ -264,11 +292,29 @@ std::string DiscreteLeakDetectSensor::getLeakLevelStatusName(
     switch (leaklevel)
     {
         case LeakLevel::NORMAL:
-            return "xyz.openbmc_project.State.LeakDetector.DetectorStateEnum.OK";
+            return state::convertForMessage(
+                state::LeakDetector::DetectorStateEnum::OK);
         case LeakLevel::LEAKAGE:
         default:
-            return "xyz.openbmc_project.State.LeakDetector.DetectorStateEnum.Critical";
+            return state::convertForMessage(
+                state::LeakDetector::DetectorStateEnum::Critical);
     }
+}
+
+std::string DiscreteLeakDetectSensor::getLeakLevelStateString(
+    LeakLevel leaklevel)
+{
+    switch (leaklevel)
+    {
+        case LeakLevel::NORMAL:
+        case LeakLevel::LEAKAGE:
+            return state::decorator::convertForMessage(
+                state::decorator::OperationalStatus::StateType::Enabled);
+    }
+    /* For now returning always "Enabled", since we didn't implement,
+    the FAULT state yet */
+    return state::decorator::convertForMessage(
+        state::decorator::OperationalStatus::StateType::Enabled);
 }
 
 void DiscreteLeakDetectSensor::monitor()
@@ -365,7 +411,7 @@ void DiscreteLeakDetectSensor::executeShutdown()
 {
     std::cout << "Executing shutdown requested by " << name << ".\n";
     std::variant<std::string> transitionChassisOff =
-        "xyz.openbmc_project.State.Chassis.Transition.Off";
+        state::convertForMessage(state::Chassis::Transition::Off);
 
     dbusConnection->async_method_call(
         [](const boost::system::error_code& ec) {
@@ -376,10 +422,8 @@ void DiscreteLeakDetectSensor::executeShutdown()
                 return;
             }
         },
-        "xyz.openbmc_project.State.Chassis",
-        "/xyz/openbmc_project/state/chassis0",
-        "org.freedesktop.DBus.Properties", "Set",
-        "xyz.openbmc_project.State.Chassis", "RequestedPowerTransition",
-        transitionChassisOff);
+        state::Chassis::interface, "/xyz/openbmc_project/state/chassis0",
+        "org.freedesktop.DBus.Properties", "Set", state::Chassis::interface,
+        "RequestedPowerTransition", transitionChassisOff);
     std::cout << "executeShutdown done\n";
 }
