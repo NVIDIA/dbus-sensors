@@ -39,7 +39,7 @@ unit_files = [
     ],
     ['write-protect', 'xyz.openbmc_project.writeprotectsensor.service'],
     ['smbpbi', 'xyz.openbmc_project.smbpbisensor.service'],
-    ['usb-port-ctrl', 'xyz.openbmc_project.usbportctrl.service'],
+    ['port-ctrl', 'xyz.openbmc_project.portctrl.service'],
     ['nvidia-fw-write-protect', 'com.nvidia.fwwriteprotect.service'],
 ]
 

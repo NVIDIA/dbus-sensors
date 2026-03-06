@@ -338,10 +338,10 @@ if get_option('write-protect').enabled()
     )
 endif
 
-if get_option('usb-port-ctrl').allowed()
+if get_option('port-ctrl').allowed()
     executable(
-        'usbportctrl',
-        'UsbPortCtrl.cpp',
+        'portctrl',
+        'PortCtrl.cpp',
         dependencies: [
             sdbusplus,
             boost,
