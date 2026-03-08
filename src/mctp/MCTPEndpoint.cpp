@@ -945,6 +945,7 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
     auto mStaticEndpointID = iface.find("StaticEndpointID");
     auto mbridgePoolStartEid = iface.find("BridgePoolStartEid");
     auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
+    auto mIgnoreMessageTypes = iface.find("IgnoreMessageTypes");
     if (mAddress == iface.end() || mBus == iface.end() || mName == iface.end())
     {
         throw std::invalid_argument(
@@ -1032,6 +1033,76 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
         bridgePoolEndEid = parsedbridgePoolEndEid;
     }
 
+    // Parse IgnoreMessageTypes
+    std::optional<std::vector<std::uint8_t>> ignoreMessageTypes{};
+    if (mIgnoreMessageTypes == iface.end())
+    {
+        info(
+            "Info: Key 'IgnoreMessageTypes' is not provided for I2C device [ bus: {I2C_BUS}, address: {I2C_ADDRESS} ]; skipping related processing.",
+            "I2C_BUS", bus, "I2C_ADDRESS", address);
+    }
+    else
+    {
+        try
+        {
+            auto ignoreMessageTypesStr = std::visit(
+                VariantToStringVisitor(), mIgnoreMessageTypes->second);
+            if (!ignoreMessageTypesStr.empty())
+            {
+                ignoreMessageTypes = std::vector<std::uint8_t>{};
+                std::stringstream ss(ignoreMessageTypesStr);
+                std::string token;
+                while (std::getline(ss, token, ','))
+                {
+                    token.erase(0, token.find_first_not_of(" \t"));
+                    token.erase(token.find_last_not_of(" \t") + 1);
+                    if (!token.empty())
+                    {
+                        try
+                        {
+                            int64_t intVal = std::stoll(token);
+                            if (intVal >= 0 && intVal <= 255)
+                            {
+                                ignoreMessageTypes->push_back(
+                                    static_cast<uint8_t>(intVal));
+                            }
+                            else
+                            {
+                                warning(
+                                    "IgnoreMessageTypes entry out of range (0-255): {MSG_TYPE}",
+                                    "MSG_TYPE", intVal);
+                            }
+                        }
+                        catch (const std::exception& e)
+                        {
+                            warning(
+                                "Invalid IgnoreMessageTypes entry: '{VALUE}' - {ERROR}",
+                                "VALUE", token, "ERROR", e.what());
+                        }
+                    }
+                }
+                info(
+                    "Successfully parsed {COUNT} IgnoreMessageTypes entries for I2C device [ bus: {I2C_BUS}, address: {I2C_ADDRESS} ]",
+                    "COUNT", ignoreMessageTypes->size(), "I2C_BUS", bus,
+                    "I2C_ADDRESS", address);
+            }
+            else
+            {
+                info(
+                    "IgnoreMessageTypes string is empty, no entries to parse for I2C device [ bus: {I2C_BUS}, address: {I2C_ADDRESS} ]",
+                    "I2C_BUS", bus, "I2C_ADDRESS", address);
+                ignoreMessageTypes = std::nullopt;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            warning(
+                "Failed to parse IgnoreMessageTypes: {ERROR} for I2C device [ bus: {I2C_BUS}, address: {I2C_ADDRESS} ]",
+                "ERROR", e.what(), "I2C_BUS", bus, "I2C_ADDRESS", address);
+            ignoreMessageTypes = std::nullopt;
+        }
+    }
+
     auto pollingInterval = getPollingInterval(iface);
 
     try
@@ -1040,18 +1111,18 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
         {
             return std::make_shared<I2CMCTPDDevice>(
                 connection, name, bus, address, staticEID.value(),
-                bridgePoolStartEid.value(), bridgePoolEndEid, pollingInterval,
-                names);
+                bridgePoolStartEid.value(), bridgePoolEndEid,
+                ignoreMessageTypes, pollingInterval, names);
         }
         if (staticEID.has_value())
         {
             return std::make_shared<I2CMCTPDDevice>(
                 connection, name, bus, address, staticEID.value(), std::nullopt,
-                bridgePoolEndEid, pollingInterval, names);
+                bridgePoolEndEid, ignoreMessageTypes, pollingInterval, names);
         }
         return std::make_shared<I2CMCTPDDevice>(
             connection, name, bus, address, std::nullopt, std::nullopt,
-            bridgePoolEndEid, pollingInterval, names);
+            bridgePoolEndEid, ignoreMessageTypes, pollingInterval, names);
     }
     catch (const MCTPException& ex)
     {

@@ -449,11 +449,14 @@ class I2CMCTPDDevice : public MCTPDDevice
         std::optional<uint8_t> staticEID = std::nullopt,
         std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
         std::optional<uint8_t> bridgePoolEndEid = std::nullopt,
+        const std::optional<std::vector<uint8_t>>& ignoreMessageTypes =
+            std::nullopt,
         std::optional<uint8_t> pollingInterval = std::nullopt,
         const std::vector<std::string>& deviceNames = {}) :
         MCTPDDevice(connection, name, interfaceFromBus(bus), {physaddr},
                     staticEID, bridgePoolStartEid, bridgePoolEndEid,
-                    std::nullopt, std::nullopt, pollingInterval, deviceNames)
+                    std::nullopt, ignoreMessageTypes, pollingInterval,
+                    deviceNames)
     {}
     ~I2CMCTPDDevice() override = default;
 
