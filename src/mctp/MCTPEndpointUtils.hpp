@@ -4,10 +4,13 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
 #include <vector>
+
+const std::string hmcBridgeError{"ResourceEvent.1.0.ResourceErrorsDetected"};
 
 // MCTP Control Message Type
 enum
@@ -43,6 +46,14 @@ struct TransportErrorInfo
     uint8_t msgType = 0;
     uint8_t commandCode = 0;
     std::string interface;
+};
+
+// Structure to hold MCTP GeneralError signal data
+struct GeneralErrorInfo
+{
+    uint8_t eid = 0;
+    std::string errorMessage;
+    std::string resolution;
 };
 
 // Structure to hold MCTP command information
@@ -109,3 +120,16 @@ std::vector<std::string> getDeviceNames(const SensorBaseConfigMap& iface);
  * @return True if successful, false otherwise
  */
 bool writeSysfsFile(const std::string& path, const std::string& value);
+
+/** @brief Create log entry with explicit severity and pre-formatted args
+ *
+ *  @param[in] conn - D-Bus connection
+ *  @param[in] deviceName - Device name
+ *  @param[in] messageID - Message ID
+ *  @param[in] messageArgs - Pre-formatted message arguments string
+ *  @param[in] resolution - Resolution field
+ */
+void createMCTPLogEntry(
+    const std::shared_ptr<sdbusplus::asio::connection>& conn,
+    const std::string& deviceName, const std::string& messageID,
+    const std::string& messageArgs, const std::string& resolution);

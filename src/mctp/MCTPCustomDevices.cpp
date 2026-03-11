@@ -59,8 +59,9 @@ static constexpr const char* mctpdNetworkInterface =
 
 USBGadgetMCTPDevice::USBGadgetMCTPDevice(
     const std::shared_ptr<sdbusplus::asio::connection>& connection,
-    const std::string& gadgetName, uint8_t localEID) :
-    connection(connection), gadgetName(gadgetName), localEID(localEID)
+    const std::string& gadgetName, uint8_t localEID, const std::string& name) :
+    connection(connection), gadgetName(gadgetName), localEID(localEID),
+    name(name)
 {
     info("Creating USB Gadget MCTP Device: {GADGET_NAME}, EID: {EID}",
          "GADGET_NAME", gadgetName, "EID", static_cast<int>(localEID));
@@ -88,6 +89,9 @@ void USBGadgetMCTPDevice::setup(
     if (std::system("modprobe libcomposite") != 0)
     {
         error("Failed to load libcomposite module");
+        createMCTPLogEntry(connection, name, hmcBridgeError,
+                           "Failed to load libcomposite module",
+                           "If problem persists, contact next level support.");
         onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
         return;
     }
@@ -100,6 +104,10 @@ void USBGadgetMCTPDevice::setup(
     {
         error("Failed to create USB gadget directory: {ERROR}", "ERROR",
               ec.message());
+        createMCTPLogEntry(
+            connection, name, hmcBridgeError,
+            "Failed to create USB gadget directory: " + ec.message(),
+            "If problem persists, contact next level support.");
         onSetupComplete(ec, nullptr);
         return;
     }
@@ -109,6 +117,9 @@ void USBGadgetMCTPDevice::setup(
                         "0x1d6b"))
     {
         error("Failed to set idVendor");
+        createMCTPLogEntry(connection, name, hmcBridgeError,
+                           "Failed to set idVendor",
+                           "If problem persists, contact next level support.");
         onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
         return;
     }
@@ -117,6 +128,9 @@ void USBGadgetMCTPDevice::setup(
                         "0x1040"))
     {
         error("Failed to set idProduct");
+        createMCTPLogEntry(connection, name, hmcBridgeError,
+                           "Failed to set idProduct",
+                           "If problem persists, contact next level support.");
         onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
         return;
     }
@@ -125,6 +139,9 @@ void USBGadgetMCTPDevice::setup(
                         "0x0100"))
     {
         error("Failed to set bcdDevice");
+        createMCTPLogEntry(connection, name, hmcBridgeError,
+                           "Failed to set bcdDevice",
+                           "If problem persists, contact next level support.");
         onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
         return;
     }
@@ -133,6 +150,9 @@ void USBGadgetMCTPDevice::setup(
                         "0x0200"))
     {
         error("Failed to set bcdUSB");
+        createMCTPLogEntry(connection, name, hmcBridgeError,
+                           "Failed to set bcdUSB",
+                           "If problem persists, contact next level support.");
         onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
         return;
     }
@@ -144,6 +164,10 @@ void USBGadgetMCTPDevice::setup(
     {
         error("Failed to create strings directory: {ERROR}", "ERROR",
               ec.message());
+        createMCTPLogEntry(
+            connection, name, hmcBridgeError,
+            "Failed to create strings directory: " + ec.message(),
+            "If problem persists, contact next level support.");
         onSetupComplete(ec, nullptr);
         return;
     }
@@ -153,6 +177,9 @@ void USBGadgetMCTPDevice::setup(
             "ASPEED"))
     {
         error("Failed to set manufacturer string");
+        createMCTPLogEntry(connection, name, hmcBridgeError,
+                           "Failed to set manufacturer string",
+                           "If problem persists, contact next level support.");
         onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
         return;
     }
@@ -162,6 +189,9 @@ void USBGadgetMCTPDevice::setup(
             "Gadget: MCTP"))
     {
         error("Failed to set product string");
+        createMCTPLogEntry(connection, hmcBridgeError, name,
+                           "Failed to set product string",
+                           "If problem persists, contact next level support.");
         onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
         return;
     }
@@ -171,6 +201,9 @@ void USBGadgetMCTPDevice::setup(
             "1234567890"))
     {
         error("Failed to set serial number");
+        createMCTPLogEntry(connection, hmcBridgeError, name,
+                           "Failed to set serial number",
+                           "If problem persists, contact next level support.");
         onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
         return;
     }
@@ -192,6 +225,10 @@ void USBGadgetMCTPDevice::setup(
     {
         error("Failed to create config strings directory: {ERROR}", "ERROR",
               ec.message());
+        createMCTPLogEntry(
+            connection, name, hmcBridgeError,
+            "Failed to create config strings directory: " + ec.message(),
+            "If problem persists, contact next level support.");
         onSetupComplete(ec, nullptr);
         return;
     }
@@ -201,6 +238,9 @@ void USBGadgetMCTPDevice::setup(
             "MCTP Config"))
     {
         error("Failed to set configuration string");
+        createMCTPLogEntry(connection, name, hmcBridgeError,
+                           "Failed to set configuration string",
+                           "If problem persists, contact next level support.");
         onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
         return;
     }
@@ -210,6 +250,9 @@ void USBGadgetMCTPDevice::setup(
             "250"))
     {
         error("Failed to set MaxPower");
+        createMCTPLogEntry(connection, name, hmcBridgeError,
+                           "Failed to set MaxPower",
+                           "If problem persists, contact next level support.");
         onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
         return;
     }
@@ -221,6 +264,10 @@ void USBGadgetMCTPDevice::setup(
     {
         error("Failed to create MCTP function directory: {ERROR}", "ERROR",
               ec.message());
+        createMCTPLogEntry(
+            connection, name, hmcBridgeError,
+            "Failed to create MCTP function directory: " + ec.message(),
+            "If problem persists, contact next level support.");
         onSetupComplete(ec, nullptr);
         return;
     }
@@ -238,6 +285,10 @@ void USBGadgetMCTPDevice::setup(
         {
             error("Failed to link MCTP function to config: {ERROR}", "ERROR",
                   std::strerror(errno));
+            createMCTPLogEntry(
+                connection, name, hmcBridgeError,
+                "Failed to link MCTP function to config",
+                "If problem persists, contact next level support.");
             onSetupComplete(std::make_error_code(static_cast<std::errc>(errno)),
                             nullptr);
             return;
@@ -265,6 +316,10 @@ void USBGadgetMCTPDevice::setup(
                             "1e6a0000.usb-vhub:p2"))
         {
             error("Failed to set UDC and enable gadget");
+            createMCTPLogEntry(
+                connection, name, hmcBridgeError,
+                "Failed to set UDC and enable gadget",
+                "If problem persists, contact next level support.");
             onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
             return;
         }
@@ -283,6 +338,10 @@ void USBGadgetMCTPDevice::setup(
     {
         error("Failed to set link up for {GADGET_NAME}: {ERROR}", "GADGET_NAME",
               gadgetName, "ERROR", std::strerror(errno));
+        createMCTPLogEntry(connection, name, hmcBridgeError,
+                           "Failed to set link up for " + gadgetName + ": " +
+                               std::strerror(errno),
+                           "If problem persists, contact next level support.");
         onSetupComplete(std::make_error_code(static_cast<std::errc>(errno)),
                         nullptr);
         return;
@@ -341,6 +400,11 @@ void USBGadgetMCTPDevice::setup(
         {
             error("Failed to add MCTP address to {GADGET_NAME}: {ERROR}",
                   "GADGET_NAME", gadgetName, "ERROR", std::strerror(errno));
+            createMCTPLogEntry(
+                connection, name, hmcBridgeError,
+                "Failed to add MCTP address to " + gadgetName + ": " +
+                    std::strerror(errno),
+                "If problem persists, contact next level support.");
             onSetupComplete(std::make_error_code(static_cast<std::errc>(errno)),
                             nullptr);
             return;
@@ -352,12 +416,18 @@ void USBGadgetMCTPDevice::setup(
     if (!setRoleEndpoint())
     {
         onSetupComplete(std::make_error_code(std::errc::io_error), nullptr);
+        createMCTPLogEntry(connection, name, hmcBridgeError,
+                           "Failed to set role to Endpoint mode",
+                           "If problem persists, contact next level support.");
         warning("Failed to set role to Endpoint mode");
         return;
     }
 
     isSetup = true;
     info("USB gadget feature enabled successfully");
+    createMCTPLogEntry(connection, name, hmcBridgeError,
+                       "USB gadget feature enabled successfully",
+                       "If problem persists, contact next level support.");
 
     onSetupComplete(std::error_code{}, shared_from_this());
 }
@@ -401,6 +471,15 @@ std::string USBGadgetMCTPDevice::describe() const
 {
     return std::format("USBGadget[{}, EID={}]", gadgetName,
                        static_cast<int>(localEID));
+}
+
+std::optional<std::string> USBGadgetMCTPDevice::getNameForEid(uint8_t eid) const
+{
+    if (eid == localEID)
+    {
+        return name.empty() ? gadgetName : name;
+    }
+    return std::nullopt;
 }
 
 int USBGadgetMCTPDevice::network() const
@@ -660,7 +739,7 @@ std::shared_ptr<USBGadgetMCTPDevice> USBGadgetMCTPDevice::from(
     try
     {
         return std::make_shared<USBGadgetMCTPDevice>(connection, interface,
-                                                     parsedLocalEID);
+                                                     parsedLocalEID, name);
     }
     catch (const MCTPException& ex)
     {

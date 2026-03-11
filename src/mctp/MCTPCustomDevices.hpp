@@ -38,7 +38,8 @@ class USBGadgetMCTPDevice :
         const SensorBaseConfigMap& iface);
     USBGadgetMCTPDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
-        const std::string& gadgetName, uint8_t localEID);
+        const std::string& gadgetName, uint8_t localEID,
+        const std::string& name = "");
     ~USBGadgetMCTPDevice() override = default;
 
     // MCTPDevice interface
@@ -47,6 +48,7 @@ class USBGadgetMCTPDevice :
                    added) override;
     void remove() override;
     std::string describe() const override;
+    std::optional<std::string> getNameForEid(uint8_t eid) const override;
 
     // MCTPEndpoint interface
     int network() const override;
@@ -59,6 +61,7 @@ class USBGadgetMCTPDevice :
     std::shared_ptr<sdbusplus::asio::connection> connection;
     std::string gadgetName;
     uint8_t localEID;
+    std::string name;
     bool isSetup = false;
     std::set<std::string> netLocalEIDs;
     MCTPEndpoint::Event notifyRemoved;

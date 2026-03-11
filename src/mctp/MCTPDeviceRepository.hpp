@@ -87,14 +87,10 @@ class MCTPDeviceRepository
     {
         for (const auto& [path, device] : devices)
         {
-            auto mctpDevice = std::dynamic_pointer_cast<MCTPDDevice>(device);
-            if (mctpDevice)
+            auto name = device->getNameForEid(eid);
+            if (name)
             {
-                auto name = mctpDevice->getNameForEid(eid);
-                if (name)
-                {
-                    return name;
-                }
+                return name;
             }
         }
         return std::nullopt;

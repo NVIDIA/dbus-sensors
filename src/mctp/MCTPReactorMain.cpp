@@ -343,6 +343,22 @@ static void handleTransportErrorSignal(
     }
 }
 
+static void handleGeneralErrorSignal(
+    const std::shared_ptr<sdbusplus::asio::connection>& connection,
+    const std::shared_ptr<MCTPReactor>& reactor, sdbusplus::message_t& msg)
+{
+    GeneralErrorInfo error;
+    msg.read(error.eid, error.errorMessage, error.resolution);
+
+    // Get device name from reactor
+    auto deviceNameOpt = reactor->getDeviceName(error.eid);
+    std::string deviceName =
+        deviceNameOpt.value_or("EID_" + std::to_string(error.eid));
+
+    createMCTPLogEntry(connection, deviceName, hmcBridgeError,
+                       error.errorMessage, error.resolution);
+}
+
 int main()
 {
     constexpr std::chrono::seconds period(5);
@@ -408,6 +424,19 @@ int main()
     auto transportErrorMatch = sdbusplus::bus::match_t(
         static_cast<sdbusplus::bus_t&>(*systemBus), transportErrorMatchSpec,
         std::bind_front(handleTransportErrorSignal, reactor));
+
+    const std::string generalErrorMatchSpec =
+        rules::type::signal() +
+        rules::interface("au.com.codeconstruct.MCTP.BusOwner1") +
+        rules::member("GeneralError") +
+        rules::path("/au/com/codeconstruct/mctp1/interfaces");
+
+    info("Setting up GeneralError signal match: {MATCH}", "MATCH",
+         generalErrorMatchSpec);
+    auto generalErrorMatch = sdbusplus::bus::match_t(
+        static_cast<sdbusplus::bus_t&>(*systemBus), generalErrorMatchSpec,
+        std::bind_front(handleGeneralErrorSignal, systemBus, reactor));
+    info("GeneralError signal match registered");
 
     systemBus->request_name("xyz.openbmc_project.MCTPReactor");
 

@@ -2,15 +2,18 @@
 
 #include "Utils.hpp"
 
+#include <boost/system/error_code.hpp>
 #include <phosphor-logging/device_error_log.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <phosphor-logging/mctp_error_registry.hpp>
+#include <sdbusplus/asio/connection.hpp>
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -211,4 +214,41 @@ bool writeSysfsFile(const std::string& path, const std::string& value)
     }
     file << value;
     return file.good();
+}
+
+void createMCTPLogEntry(
+    const std::shared_ptr<sdbusplus::asio::connection>& conn,
+    const std::string& deviceName, const std::string& messageID,
+    const std::string& messageArgs, const std::string& resolution)
+{
+    if (!conn)
+    {
+        return;
+    }
+
+    std::map<std::string, std::string> addData;
+    addData["REDFISH_MESSAGE_ID"] = messageID;
+
+    if (!messageArgs.empty())
+    {
+        addData["REDFISH_MESSAGE_ARGS"] = deviceName + ", " + messageArgs;
+    }
+
+    if (!resolution.empty())
+    {
+        addData["xyz.openbmc_project.Logging.Entry.Resolution"] = resolution;
+    }
+
+    conn->async_method_call(
+        [](const boost::system::error_code& ec) {
+            if (ec)
+            {
+                error("error while logging MCTP message registry: ",
+                      "ERROR_MESSAGE", ec.message());
+                return;
+            }
+        },
+        "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
+        "xyz.openbmc_project.Logging.Create", "Create", messageID,
+        "xyz.openbmc_project.Logging.Entry.Level.Informational", addData);
 }

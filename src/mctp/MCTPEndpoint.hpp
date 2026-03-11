@@ -180,6 +180,19 @@ class MCTPDevice
      *         address properties.
      */
     virtual std::string describe() const = 0;
+
+    /**
+     * @brief Get the device name associated with a given EID
+     *
+     * @param eid The endpoint ID to look up
+     * @return The device name if this device manages the given EID,
+     *         std::nullopt otherwise
+     */
+    virtual std::optional<std::string> getNameForEid(
+        [[maybe_unused]] uint8_t eid) const
+    {
+        return std::nullopt;
+    }
 };
 
 class MCTPDDevice;
@@ -319,7 +332,7 @@ class MCTPDDevice :
         return false;
     }
 
-    std::optional<std::string> getNameForEid(uint8_t eid) const
+    std::optional<std::string> getNameForEid(uint8_t eid) const override
     {
         // Check main EID
         auto currentEid = getEid();
