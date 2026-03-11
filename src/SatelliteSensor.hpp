@@ -35,9 +35,11 @@
 #include <HmcSensor.hpp>
 #endif
 
+constexpr size_t i2cStaleCheckDisabled = 0;
+
 template <typename T>
-int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading,
-           uint8_t length);
+int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, uint8_t length,
+           size_t staleOffset = i2cStaleCheckDisabled, size_t staleBit = 0);
 
 struct SatelliteSensor : public Sensor
 {
@@ -47,9 +49,9 @@ struct SatelliteSensor : public Sensor
         const std::string& sensorConfiguration, const std::string& objType,
         sdbusplus::asio::object_server& objectServer,
         std::vector<thresholds::Threshold>&& thresholdData, uint8_t busId,
-        uint8_t addr, uint16_t offset, std::string& sensorType,
-        std::string& valueType, size_t pollTime, double minVal, double maxVal,
-        PowerState powerState);
+        uint8_t addr, uint16_t offset, uint16_t staleOffset, size_t staleBit,
+        std::string& sensorType, std::string& valueType, size_t pollTime,
+        double minVal, double maxVal, PowerState powerState);
     ~SatelliteSensor() override;
 
     void checkThresholds() override;
@@ -66,12 +68,16 @@ struct SatelliteSensor : public Sensor
     uint8_t busId;
     uint8_t addr;
     uint16_t offset;
+    uint16_t staleOffset;
+    size_t staleBit;
     std::string sensorType;
     std::string valueType;
 
   private:
-    int readRawEepromData(size_t off, uint8_t length, double* data) const;
-    int readPLDMEepromData(size_t off, uint8_t length, double* data) const;
+    int readRawEepromData(size_t off, uint8_t length, size_t staleOffset,
+                          size_t staleBit, double* data) const;
+    int readPLDMEepromData(size_t off, uint8_t length, size_t staleOffset,
+                           size_t staleBit, double* data) const;
     static uint8_t getLength(uint16_t offset)
     {
 #ifdef AUTO_GEN_SENSOR_HEADER

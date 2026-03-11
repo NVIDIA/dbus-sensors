@@ -72,15 +72,16 @@ SatelliteSensor::SatelliteSensor(
     const std::string& sensorConfiguration, const std::string& objType,
     sdbusplus::asio::object_server& objectServer,
     std::vector<thresholds::Threshold>&& thresholdData, uint8_t busId,
-    uint8_t addr, uint16_t offset, std::string& sensorType,
-    std::string& valueType, size_t pollTime, double minVal, double maxVal,
-    const PowerState powerState) :
+    uint8_t addr, uint16_t offset, uint16_t staleOffset, size_t staleBit,
+    std::string& sensorType, std::string& valueType, size_t pollTime,
+    double minVal, double maxVal, const PowerState powerState) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
            sensorConfiguration, objType, false, false, maxVal, minVal, conn,
            powerState),
     name(escapeName(sensorName)), busId(busId), addr(addr), offset(offset),
-    sensorType(sensorType), valueType(valueType), objectServer(objectServer),
-    waitTimer(io), pollRate(pollTime)
+    staleOffset(staleOffset), staleBit(staleBit), sensorType(sensorType),
+    valueType(valueType), objectServer(objectServer), waitTimer(io),
+    pollRate(pollTime)
 {
     // make the string to lowercase for Dbus sensor type
     for (auto& c : sensorType)
@@ -152,7 +153,8 @@ void SatelliteSensor::checkThresholds()
 }
 
 template <typename T>
-int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, uint8_t length)
+int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, uint8_t length,
+           size_t staleOffset, size_t staleBit)
 {
     std::string i2cBus = "/dev/i2c-" + std::to_string(bus);
 
@@ -244,16 +246,81 @@ int i2cCmd(uint8_t bus, uint8_t addr, size_t offset, T* reading, uint8_t length)
         close(fd);
         return -1;
     }
+
+    // Optional stale check: read a byte at staleOffset and treat bit staleBit
+    // as stale flag; if set, treat as invalid (return -1). Uses a separate
+    // struct with the same write-then-read pattern as the main read.
+    // StaleOffset 0 means disabled (no check); valid offset when
+    // enabled 1..0xFFFF.
+    if (staleOffset != i2cStaleCheckDisabled)
+    {
+        // Valid offset is 1..0xFFFF (same as main offset). Valid bit is 0..7.
+        if (staleOffset > 0xFFFF || staleBit > 7)
+        {
+            lg2::error("invalid stale offset or stale bit");
+            close(fd);
+            return -1;
+        }
+
+        uint8_t staleByte = 0;
+        std::array<uint8_t, 2> staleCmdBuf{};
+        uint16_t staleCmdLen;
+
+        if (staleOffset > 255)
+        {
+            staleCmdLen = 2;
+            staleCmdBuf[0] = (staleOffset >> 8) & 0xFF;
+            staleCmdBuf[1] = staleOffset & 0xFF;
+        }
+        else
+        {
+            staleCmdLen = 1;
+            staleCmdBuf[0] = staleOffset & 0xFF;
+        }
+
+        std::array<struct i2c_msg, 2> staleMsgs = {{
+            {
+                .addr = addr,
+                .flags = 0,
+                .len = staleCmdLen,
+                .buf = staleCmdBuf.data(),
+            },
+            {
+                .addr = addr,
+                .flags = I2C_M_RD,
+                .len = 1,
+                .buf = (uint8_t*)&staleByte,
+            },
+        }};
+        struct i2c_rdwr_ioctl_data staleArgs = {staleMsgs.data(), 2};
+
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+        ret = ioctl(fd, I2C_RDWR, &staleArgs);
+        if (ret < 0)
+        {
+            close(fd);
+            return ret;
+        }
+
+        if ((staleByte >> staleBit) & 1)
+        {
+            close(fd);
+            return -1;
+        }
+    }
+
     *reading = data;
     close(fd);
     return 0;
 }
 
 int SatelliteSensor::readRawEepromData(size_t off, uint8_t length,
+                                       size_t staleOffset, size_t staleBit,
                                        double* data) const
 {
     uint64_t reading = 0;
-    int ret = i2cCmd<uint64_t>(busId, addr, off, &reading, length);
+    int ret = i2cCmd<uint64_t>(busId, addr, off, &reading, length, staleOffset,
+                               staleBit);
     if (ret >= 0)
     {
         if (debug)
@@ -285,10 +352,12 @@ int SatelliteSensor::readRawEepromData(size_t off, uint8_t length,
 }
 
 int SatelliteSensor::readPLDMEepromData(size_t off, uint8_t length,
+                                        size_t staleOffset, size_t staleBit,
                                         double* data) const
 {
     double reading = 0;
-    int ret = i2cCmd<double>(busId, addr, off, &reading, length);
+    int ret = i2cCmd<double>(busId, addr, off, &reading, length, staleOffset,
+                             staleBit);
     if (ret >= 0)
     {
         *data = reading;
@@ -339,11 +408,11 @@ void SatelliteSensor::read()
     // and interpret sensor data based on it's value type.
     if (valueType == "Raw")
     {
-        ret = readRawEepromData(offset, len, &temp);
+        ret = readRawEepromData(offset, len, staleOffset, staleBit, &temp);
     }
     else if (valueType == "PLDM")
     {
-        ret = readPLDMEepromData(offset, len, &temp);
+        ret = readPLDMEepromData(offset, len, staleOffset, staleBit, &temp);
     }
     else
     {
@@ -411,53 +480,81 @@ void createSensors(
                                    "NAME", name);
                     }
 
-                    uint8_t busId = loadVariant<uint8_t>(entry.second, "Bus");
-
-                    uint8_t addr =
-                        loadVariant<uint8_t>(entry.second, "Address");
-
-                    uint16_t off =
-                        loadVariant<uint16_t>(entry.second, "OffsetValue");
-
-                    std::string sensorType =
-                        loadVariant<std::string>(entry.second, "SensorType");
-
-                    std::string valueType =
-                        loadVariant<std::string>(entry.second, "ValueType");
-
-                    size_t rate =
-                        loadVariant<uint8_t>(entry.second, "PollRate");
-
-                    std::string powerSate =
-                        loadVariant<std::string>(entry.second, "PowerState");
-
-                    PowerState pwrState = PowerState::always;
-                    setReadState(powerSate, pwrState);
-
-                    double minVal =
-                        loadVariant<double>(entry.second, "MinValue");
-
-                    double maxVal =
-                        loadVariant<double>(entry.second, "MaxValue");
-                    if constexpr (debug)
+                    uint8_t busId;
+                    uint8_t addr;
+                    uint16_t off;
+                    std::string sensorType;
+                    std::string valueType;
+                    size_t rate;
+                    std::string powerSate;
+                    PowerState pwrState;
+                    double minVal;
+                    double maxVal;
+                    uint16_t staleOffset;
+                    size_t staleBit;
+                    try
                     {
-                        lg2::info("Configuration parsed for \n\t {CONF}\nwith\n"
-                                  "\tName: {NAME}\n"
-                                  "\tBus: {BUS}\n"
-                                  "\tAddress:{ADDR}\n"
-                                  "\tPowerState:{PWRSTATE}\n"
-                                  "\tOffset: {OFF}\n"
-                                  "\tType : {TYPE}\n"
-                                  "\tValue Type : {VALUETYPE}\n"
-                                  "\tPollrate: {RATE}\n"
-                                  "\tMinValue: {MIN}\n"
-                                  "\tMaxValue: {MAX}\n",
-                                  "CONF", entry.first, "NAME", name, "BUS",
-                                  static_cast<int>(busId), "ADDR",
-                                  static_cast<int>(addr), "PWRSTATE", powerSate,
-                                  "OFF", static_cast<int>(off), "TYPE",
-                                  sensorType, "VALUETYPE", valueType, "RATE",
-                                  rate, "MIN", minVal, "MAX", maxVal);
+                        busId = loadVariant<uint8_t>(entry.second, "Bus");
+                        addr = loadVariant<uint8_t>(entry.second, "Address");
+                        off =
+                            loadVariant<uint16_t>(entry.second, "OffsetValue");
+                        sensorType = loadVariant<std::string>(entry.second,
+                                                              "SensorType");
+                        valueType =
+                            loadVariant<std::string>(entry.second, "ValueType");
+                        rate = loadVariant<uint8_t>(entry.second, "PollRate");
+                        powerSate = loadVariant<std::string>(entry.second,
+                                                             "PowerState");
+                        setReadState(powerSate, pwrState);
+                        minVal = loadVariant<double>(entry.second, "MinValue");
+                        maxVal = loadVariant<double>(entry.second, "MaxValue");
+                        try
+                        {
+                            staleOffset = loadVariant<uint16_t>(entry.second,
+                                                                "StaleOffset");
+                            staleBit =
+                                loadVariant<size_t>(entry.second, "StaleBit");
+                        }
+                        catch (const std::exception& e)
+                        {
+                            lg2::info(
+                                "No stale bit or offset provided for {NAME}. Ignoring stalness for this sensor.",
+                                "NAME", name);
+                            staleOffset = 0;
+                            staleBit = 0;
+                        }
+                        if constexpr (debug)
+                        {
+                            lg2::info(
+                                "Configuration parsed for \n\t {CONF}\nwith\n"
+                                "\tName: {NAME}\n"
+                                "\tBus: {BUS}\n"
+                                "\tAddress:{ADDR}\n"
+                                "\tPowerState:{PWRSTATE}\n"
+                                "\tOffset: {OFF}\n"
+                                "\tStaleOffset: {STALEOFFSET}\n"
+                                "\tStaleBit: {STALEBIT}\n"
+                                "\tType : {TYPE}\n"
+                                "\tValue Type : {VALUETYPE}\n"
+                                "\tPollrate: {RATE}\n"
+                                "\tMinValue: {MIN}\n"
+                                "\tMaxValue: {MAX}\n",
+                                "CONF", entry.first, "NAME", name, "BUS",
+                                static_cast<int>(busId), "ADDR",
+                                static_cast<int>(addr), "PWRSTATE", powerSate,
+                                "OFF", static_cast<int>(off), "STALEOFFSET",
+                                static_cast<int>(staleOffset), "STALEBIT",
+                                static_cast<int>(staleBit), "TYPE", sensorType,
+                                "VALUETYPE", valueType, "RATE", rate, "MIN",
+                                minVal, "MAX", maxVal);
+                        }
+                    }
+                    catch (const std::exception& e)
+                    {
+                        lg2::error(
+                            "Error parsing configuration for {NAME}. There is likely a missing or invalid value. {ERROR}",
+                            "NAME", name, "ERROR", e.what());
+                        continue;
                     }
 
                     auto& sensor = sensors[name];
@@ -466,8 +563,8 @@ void createSensors(
                     sensor = std::make_unique<SatelliteSensor>(
                         dbusConnection, io, name, pathPair.first, objectType,
                         objectServer, std::move(sensorThresholds), busId, addr,
-                        off, sensorType, valueType, rate, minVal, maxVal,
-                        pwrState);
+                        off, staleOffset, staleBit, sensorType, valueType, rate,
+                        minVal, maxVal, pwrState);
 
                     sensor->init();
                 }
