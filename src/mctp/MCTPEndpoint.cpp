@@ -558,7 +558,7 @@ void MCTPDDevice::performHealthCheck()
                                         "MCTP ping failed due to timeout for the device");
                                 }
                                 self->unresponsiveBridgePoolEids.insert(eid);
-                                // self->recover(eid);
+                                self->recover(eid);
                             }
                         }
                     }
@@ -570,6 +570,30 @@ void MCTPDDevice::performHealthCheck()
                         {
                             info("Bridge pool EID {EID} recovered", "EID", eid);
                             self->unresponsiveBridgePoolEids.erase(eid);
+                            if (!self->discoveryNeeded)
+                            {
+                                self->connection->async_method_call(
+                                    [weak,
+                                     eid](const boost::system::error_code& ec) {
+                                        auto self = weak.lock();
+                                        if (!self)
+                                        {
+                                            return;
+                                        }
+                                        if (ec)
+                                        {
+                                            error(
+                                                "Failed to initiate net LearnEndpoint for EID {EID}: {ERROR}",
+                                                "EID", eid, "ERROR",
+                                                ec.message());
+                                            self->unresponsiveBridgePoolEids
+                                                .insert(eid);
+                                        }
+                                    },
+                                    mctpdBusName, mctpdNetworkPath,
+                                    mctpdNetworkInterface, "LearnEndpoint",
+                                    eid);
+                            }
                         }
                     }
                 },
