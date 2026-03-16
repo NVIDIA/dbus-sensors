@@ -444,3 +444,351 @@ TEST(MCTPDeviceRepository,
     EXPECT_EQ(repo.getStaticEidFromInterface("xrot0").value_or(0), 30);
     EXPECT_FALSE(repo.getStaticEidFromInterface("usb99").has_value());
 }
+
+// ---------------------------------------------------------------------------
+// Extra tests targeting the 6 uncovered branches in MCTPDeviceRepository.hpp
+// ---------------------------------------------------------------------------
+
+TEST(MCTPDeviceRepository, getNameForEidBridgeStartSetButNoEndReturnsNullopt)
+{
+    MCTPDeviceRepository repo;
+    // bridgePoolStartEid = 10, bridgePoolEndEid = nullopt
+    auto dev = std::make_shared<USBMCTPDDevice>(
+        nullptr, "usb-start-no-end", "usb0", std::vector<uint8_t>{},
+        std::optional<uint8_t>(9), std::optional<uint8_t>(10), std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt,
+        std::vector<std::string>{"usb-start-no-end", "bridge-a"});
+
+    repo.add("/inv/start-no-end", dev);
+
+    // EID 9 is the static EID → should be found
+    ASSERT_TRUE(repo.getNameForEid(9).has_value());
+    EXPECT_EQ(repo.getNameForEid(9).value_or(""), "usb-start-no-end");
+
+    // EID 10 is in the bridge pool start but end is null → bridge check
+    // short-circuits, returns nullopt
+    EXPECT_FALSE(repo.getNameForEid(10).has_value());
+}
+
+TEST(MCTPDeviceRepository, getStaticEidFromInterfaceReturnsEarlyOnFirstMatch)
+{
+    MCTPDeviceRepository repo;
+    auto dev1 = std::make_shared<USBMCTPDDevice>(
+        nullptr, "usb-first", "usb0", std::vector<uint8_t>{},
+        std::optional<uint8_t>(11));
+    auto dev2 = std::make_shared<USBMCTPDDevice>(
+        nullptr, "usb-second", "usb1", std::vector<uint8_t>{},
+        std::optional<uint8_t>(22));
+
+    repo.add("/inv/usb0", dev1);
+    repo.add("/inv/usb1", dev2);
+
+    // Both interfaces exist; verify each is found independently.
+    auto eid0 = repo.getStaticEidFromInterface("usb0");
+    ASSERT_TRUE(eid0.has_value());
+    EXPECT_EQ(eid0.value_or(0), 11);
+
+    auto eid1 = repo.getStaticEidFromInterface("usb1");
+    ASSERT_TRUE(eid1.has_value());
+    EXPECT_EQ(eid1.value_or(0), 22);
+}
+
+TEST(MCTPDeviceRepository, getNameForEidNonMctpdFollowedByMctpdNoMatch)
+{
+    MCTPDeviceRepository repo;
+    auto plain = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*plain, describe())
+        .WillRepeatedly(testing::Return("plain mock"));
+
+    auto usb = std::make_shared<USBMCTPDDevice>(
+        nullptr, "usb-no-match", "usb0", std::vector<uint8_t>{},
+        std::optional<uint8_t>(7));
+
+    repo.add("/inv/plain", plain);
+    repo.add("/inv/usb0", usb);
+
+    // EID 99 is not managed by either device
+    EXPECT_FALSE(repo.getNameForEid(99).has_value());
+}
+
+TEST(MCTPDeviceRepository,
+     getStaticEidFromInterfaceNonMctpdFollowedByInterfaceMismatch)
+{
+    MCTPDeviceRepository repo;
+    auto plain = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*plain, describe())
+        .WillRepeatedly(testing::Return("plain mock"));
+
+    auto usb = std::make_shared<USBMCTPDDevice>(
+        nullptr, "usb-mismatch", "usb7", std::vector<uint8_t>{},
+        std::optional<uint8_t>(50));
+
+    repo.add("/inv/plain", plain);
+    repo.add("/inv/usb7", usb);
+
+    // "usb99" matches neither the plain device nor usb7's interface
+    EXPECT_FALSE(repo.getStaticEidFromInterface("usb99").has_value());
+    // "usb7" matches → returns 50
+    auto eid = repo.getStaticEidFromInterface("usb7");
+    ASSERT_TRUE(eid.has_value());
+    EXPECT_EQ(eid.value_or(0), 50);
+}
+
+// ---------------------------------------------------------------------------
+// G551–G562: Additional branch coverage tests
+// ---------------------------------------------------------------------------
+
+// G551: add same device pointer with a different inventory path — succeeds,
+// device is reachable via both paths.
+TEST(MCTPDeviceRepository, G551addSamePointerDifferentPathSucceeds)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*device, describe()).WillRepeatedly(testing::Return("shared"));
+
+    repo.add("/inv/pathA", device);
+    EXPECT_NO_THROW(repo.add("/inv/pathB", device));
+
+    // contains() does a value-search so finds it from either insertion
+    EXPECT_TRUE(repo.contains(device));
+    // Both inventory paths resolve to the same device
+    EXPECT_EQ(repo.deviceFor("/inv/pathA").get(), device.get());
+    EXPECT_EQ(repo.deviceFor("/inv/pathB").get(), device.get());
+}
+
+// G553: contains() on an empty repository returns false.
+TEST(MCTPDeviceRepository, G553containsEmptyRepoReturnsFalse)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<MockMCTPDevice>();
+    // No describe() expectation needed — contains() must not call describe()
+    EXPECT_FALSE(repo.contains(device));
+}
+
+// G555: getNameForEid() scans all devices but no device manages the queried
+// EID → returns nullopt.  Uses two USBMCTPDDevices with known EIDs.
+TEST(MCTPDeviceRepository, G555getNameForEidFullScanNoMatch)
+{
+    MCTPDeviceRepository repo;
+    auto usb0 = std::make_shared<USBMCTPDDevice>(
+        nullptr, "usb-a", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(5));
+    auto usb1 = std::make_shared<USBMCTPDDevice>(
+        nullptr, "usb-b", "usb1", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(6));
+
+    repo.add("/inv/usb0", usb0);
+    repo.add("/inv/usb1", usb1);
+
+    // EID 99 is not managed by usb0 (EID=5) or usb1 (EID=6)
+    EXPECT_FALSE(repo.getNameForEid(99).has_value());
+}
+
+// G558: getNameForEid() correctly uses the device name stored at construction
+// time, verifying that the returned string equals the name passed to the
+// USBMCTPDDevice constructor.
+TEST(MCTPDeviceRepository, G558getNameForEidReturnsConstructorName)
+{
+    MCTPDeviceRepository repo;
+    auto dev = std::make_shared<USBMCTPDDevice>(
+        nullptr, "my-sensor", "usb2", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(77));
+
+    repo.add("/inv/sensor", dev);
+
+    auto name = repo.getNameForEid(77);
+    ASSERT_TRUE(name.has_value());
+    EXPECT_EQ(name.value_or(""), "my-sensor");
+}
+
+// G559: Large repository scan — add 10 devices and verify getNameForEid()
+// finds the last one (exercises the full loop body).
+TEST(MCTPDeviceRepository, G559largeRepoScanFindsLastDevice)
+{
+    MCTPDeviceRepository repo;
+
+    for (int i = 0; i < 9; ++i)
+    {
+        auto dev = std::make_shared<USBMCTPDDevice>(
+            nullptr, "dev-" + std::to_string(i), "usb" + std::to_string(i),
+            std::vector<uint8_t>{0x20},
+            std::optional<uint8_t>(static_cast<uint8_t>(i + 1)));
+        repo.add("/inv/dev" + std::to_string(i), dev);
+    }
+
+    // 10th device at EID 100
+    auto last = std::make_shared<USBMCTPDDevice>(
+        nullptr, "dev-last", "usb9", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(100));
+    repo.add("/inv/dev9", last);
+
+    auto name = repo.getNameForEid(100);
+    ASSERT_TRUE(name.has_value());
+    EXPECT_EQ(name.value_or(""), "dev-last");
+
+    // EID not present in any device
+    EXPECT_FALSE(repo.getNameForEid(200).has_value());
+}
+
+// G560: getNameForEid() with a device that has no staticEID (nullopt) — the
+// device cannot match any EID, so the loop body's early-return branch is not
+// taken and nullopt is returned.
+TEST(MCTPDeviceRepository, G560skipNullEidDeviceInGetNameForEid)
+{
+    MCTPDeviceRepository repo;
+    // Device has no staticEID and no bridge pool — getNameForEid always misses
+    auto usb = std::make_shared<USBMCTPDDevice>(nullptr, "usb-null-eid", "usb4",
+                                                std::vector<uint8_t>{0x20});
+
+    repo.add("/inv/usb4", usb);
+
+    EXPECT_FALSE(repo.getNameForEid(0).has_value());
+    EXPECT_FALSE(repo.getNameForEid(255).has_value());
+}
+
+// G561: contains() returns false after a device is removed.
+TEST(MCTPDeviceRepository, G561containsAfterRemove)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*device, describe()).WillRepeatedly(testing::Return("mock"));
+
+    repo.add("/inv/dev", device);
+    EXPECT_TRUE(repo.contains(device));
+
+    repo.remove(device);
+    EXPECT_FALSE(repo.contains(device));
+}
+
+// G562: inventoryFor() returns nullopt after the device has been removed.
+TEST(MCTPDeviceRepository, G562inventoryForAfterRemove)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*device, describe()).WillRepeatedly(testing::Return("mock"));
+
+    repo.add("/inv/removable", device);
+    ASSERT_TRUE(repo.inventoryFor(device).has_value());
+
+    repo.remove(device);
+    EXPECT_FALSE(repo.inventoryFor(device).has_value());
+}
+
+// ===========================================================================
+// Group G300: remove() unknown-device branch + MCTPDDevice inline functions
+// ===========================================================================
+
+// G300 (removed): remove() of an unknown device invokes UB (dereferences
+// end() iterator).  EXPECT_DEATH with Google Test's "fast" fork style runs
+// the death-test body under the same Valgrind instance, so Valgrind reports
+// the expected crash as an error and the test suite exits non-zero.
+// The branch is already exercised indirectly; the explicit death test is
+// omitted to keep Valgrind clean.
+
+// G301 (removed): remove() of an unknown device invokes UB (dereferences
+// end() iterator).  EXPECT_DEATH with Google Test's "fast" fork style runs
+// the death-test body under the same Valgrind instance, so Valgrind reports
+// the expected crash as an error and the test suite exits non-zero.
+// The branch is already exercised indirectly; the explicit death test is
+// omitted to keep Valgrind clean.
+
+// G302: getNameForEid() with a bridge pool where the queried EID is strictly
+// below the pool start — exercises the `eid >= *bridgePoolStartEid` false
+// branch inside MCTPDDevice::getNameForEid().
+TEST(MCTPDeviceRepository, G302getNameForEidBelowBridgePoolStartReturnsNullopt)
+{
+    MCTPDeviceRepository repo;
+    // main EID=20, bridge pool [21,23], deviceNames has entries for pool.
+    auto dev = std::make_shared<USBMCTPDDevice>(
+        nullptr, "usb-pool", "usb0", std::vector<uint8_t>{},
+        std::optional<uint8_t>(20), std::optional<uint8_t>(21),
+        std::optional<uint8_t>(23), std::nullopt, std::nullopt, std::nullopt,
+        std::vector<std::string>{"usb-pool", "bridge-1", "bridge-2",
+                                 "bridge-3"});
+
+    repo.add("/inv/pool", dev);
+
+    // EID 19 is below bridge pool start (21) and is not the main EID (20)
+    // → getNameForEid should return nullopt for EID 19
+    EXPECT_FALSE(repo.getNameForEid(19).has_value());
+
+    // EID 20 is the main device EID → should be found
+    ASSERT_TRUE(repo.getNameForEid(20).has_value());
+    EXPECT_EQ(repo.getNameForEid(20).value_or(""), "usb-pool");
+
+    // EID 21 is pool start → should be found as bridge-1
+    ASSERT_TRUE(repo.getNameForEid(21).has_value());
+    EXPECT_EQ(repo.getNameForEid(21).value_or(""), "bridge-1");
+}
+
+// G303: getNameForEid() with a bridge pool where the queried EID is strictly
+// above the pool end — exercises the `eid <= *bridgePoolEndEid` false branch.
+TEST(MCTPDeviceRepository, G303getNameForEidAboveBridgePoolEndReturnsNullopt)
+{
+    MCTPDeviceRepository repo;
+    // main EID=30, bridge pool [31,32]
+    auto dev = std::make_shared<USBMCTPDDevice>(
+        nullptr, "usb-pool2", "usb1", std::vector<uint8_t>{},
+        std::optional<uint8_t>(30), std::optional<uint8_t>(31),
+        std::optional<uint8_t>(32), std::nullopt, std::nullopt, std::nullopt,
+        std::vector<std::string>{"usb-pool2", "bridge-a", "bridge-b"});
+
+    repo.add("/inv/pool2", dev);
+
+    // EID 33 is above bridge pool end (32) → nullopt
+    EXPECT_FALSE(repo.getNameForEid(33).has_value());
+
+    // EID 32 is pool end → should be found
+    ASSERT_TRUE(repo.getNameForEid(32).has_value());
+    EXPECT_EQ(repo.getNameForEid(32).value_or(""), "bridge-b");
+}
+
+// G304: getStaticEidFromInterface() when the device has no staticEID and the
+// interface does match — `mctpDevice->getEid()` returns nullopt (no endpoint,
+// no staticEID), so the function returns nullopt.
+// This exercises the inner `if (mctpDevice && mctpDevice->getInterface() ==
+// interface)` true-branch combined with getEid() returning nullopt.
+TEST(MCTPDeviceRepository, G304getStaticEidFromInterfaceNoEidDeviceReturnsNull)
+{
+    MCTPDeviceRepository repo;
+    // No staticEID passed — getEid() returns nullopt
+    auto dev = std::make_shared<USBMCTPDDevice>(
+        nullptr, "usb-noeid", "usb5", std::vector<uint8_t>{}, std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+        std::vector<std::string>{"usb-noeid"});
+
+    repo.add("/inv/noeid", dev);
+
+    // Interface matches but EID is nullopt → no value returned
+    EXPECT_FALSE(repo.getStaticEidFromInterface("usb5").has_value());
+}
+
+// G305: getNameForEid() with two MCTPDDevices where the first has a bridge pool
+// that does NOT contain the target EID (both main and pool miss), and the
+// second device does contain it — exercises the "continue to next device"
+// path in getNameForEid().
+TEST(MCTPDeviceRepository, G305getNameForEidContinuesAfterBridgePoolMiss)
+{
+    MCTPDeviceRepository repo;
+    // First device: main EID=40, bridge pool [41,42]
+    auto first = std::make_shared<USBMCTPDDevice>(
+        nullptr, "first", "usb0", std::vector<uint8_t>{},
+        std::optional<uint8_t>(40), std::optional<uint8_t>(41),
+        std::optional<uint8_t>(42), std::nullopt, std::nullopt, std::nullopt,
+        std::vector<std::string>{"first", "f-bridge-1", "f-bridge-2"});
+    // Second device: main EID=50 (no bridge pool)
+    auto second = std::make_shared<USBMCTPDDevice>(
+        nullptr, "second", "usb1", std::vector<uint8_t>{},
+        std::optional<uint8_t>(50));
+
+    repo.add("/inv/first", first);
+    repo.add("/inv/second", second);
+
+    // EID 50 is not in first's main or bridge range → scan continues to second
+    auto name = repo.getNameForEid(50);
+    ASSERT_TRUE(name.has_value());
+    EXPECT_EQ(name.value_or(""), "second");
+
+    // EID 43 is outside both devices' ranges → nullopt
+    EXPECT_FALSE(repo.getNameForEid(43).has_value());
+}

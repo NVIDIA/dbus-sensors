@@ -49,6 +49,16 @@ socket_wrap_link_args = sd_bus_wrap_link_args + [
     '-Wl,--wrap,symlink',
     '-Wl,--wrap,if_nametoindex',
     '-Wl,--wrap,sendto',
+    '-Wl,--wrap,recvfrom',
+    '-Wl,--wrap,sd_bus_default',
+    '-Wl,--wrap,sd_bus_request_name',
+    '-Wl,--wrap,sd_bus_message_new_method_call',
+    '-Wl,--wrap,sd_bus_call_async',
+]
+
+# Additional wrap for tests that link MCTPCustomDevices.cpp (defines writeSysfsFile)
+custom_devices_wrap_link_args = socket_wrap_link_args + [
+    '-Wl,--wrap,_Z14writeSysfsFileRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEES6_',
 ]
 
 test(
@@ -74,6 +84,7 @@ test(
         '../MCTPEndpoint.cpp',
         '../MCTPEndpointUtils.cpp',
         'sd_bus_wrappers.cpp',
+        'filesystem_wrappers.cpp',
         cpp_args: ['-fno-access-control'],
         link_args: socket_wrap_link_args,
         dependencies: [gmock_dep, ut_deps_list, utils_dep],
@@ -116,8 +127,9 @@ test(
         '../MCTPEndpoint.cpp',
         '../MCTPEndpointUtils.cpp',
         'sd_bus_wrappers.cpp',
+        'filesystem_wrappers.cpp',
         cpp_args: ['-fno-access-control'],
-        link_args: socket_wrap_link_args,
+        link_args: custom_devices_wrap_link_args,
         dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
         include_directories: '..',
@@ -134,8 +146,9 @@ test(
         '../MCTPEndpointUtils.cpp',
         '../MCTPCustomDevices.cpp',
         'sd_bus_wrappers.cpp',
+        'filesystem_wrappers.cpp',
         cpp_args: subobject_linkage_disable_args + ['-fno-access-control'],
-        link_args: socket_wrap_link_args,
+        link_args: custom_devices_wrap_link_args,
         dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
         include_directories: '..',
