@@ -288,6 +288,48 @@ void USBGadgetMCTPDevice::setup(
         return;
     }
 
+    // Apply netfilter rules to allow MCTP traffic only for type 0 and 5
+    // messages. Clear the gadget-specific table first; ignore failure if none
+    // exists.
+    const std::string nftBinary = "/usr/sbin/nft";
+    const std::string nftTableName = "mctp_" + gadgetName;
+    const std::string nftChainName = "ingress_" + gadgetName;
+
+    // TODO: remove no lint next line once we come up with a better solution
+    // NOLINTNEXTLINE(cert-env33-c)
+    const int deleteTableResult = std::system(
+        (nftBinary + " delete table netdev " + nftTableName +
+         " > /dev/null 2>&1")
+            .c_str());
+    info("netfilter delete table result for {GADGET_NAME}: {RESULT}",
+         "GADGET_NAME", gadgetName, "RESULT", deleteTableResult);
+
+    const std::array<std::string, 5> nftCommands = {
+        nftBinary + " add table netdev " + nftTableName,
+        std::format(
+            "{} 'add chain netdev {} {} {{ type filter hook ingress device "
+            "\"{}\" priority 0; }}'",
+            nftBinary, nftTableName, nftChainName, gadgetName),
+        nftBinary + " add rule netdev " + nftTableName + " " + nftChainName +
+            " @nh,32,8 0x0 accept",
+        nftBinary + " add rule netdev " + nftTableName + " " + nftChainName +
+            " @nh,32,8 0x5 accept",
+        nftBinary + " add rule netdev " + nftTableName + " " + nftChainName +
+            " drop"};
+
+    for (const auto& command : nftCommands)
+    {
+        // TODO: remove no lint next line once we come up with a better solution
+        // NOLINTNEXTLINE(cert-env33-c)
+        if (std::system(command.c_str()) != 0)
+        {
+            warning(
+                "Failed to apply netfilter rule for {GADGET_NAME}: {COMMAND}",
+                "GADGET_NAME", gadgetName, "COMMAND", command);
+            break;
+        }
+    }
+
     // Set local MCTP address (udev rule might get delayed)
     // TODO: remove no lint next line once we come up with a better solution
     // NOLINTNEXTLINE(cert-env33-c)
