@@ -91,7 +91,8 @@ void logMCTPError(const std::string& deviceName, uint8_t destEid, int errorCode,
         {"REDFISH_MESSAGE_ID", "ResourceEvent.1.0.ResourceErrorsDetected"},
         {"REDFISH_MESSAGE_ARGS", name + ", " + errorMessage},
         {"REDFISH_RESOLUTION", resolution},
-        {"REDFISH_SEVERITY", "Critical"},
+        {"REDFISH_SEVERITY",
+         "xyz.openbmc_project.Logging.Entry.Level.Informational"},
         {"REDFISH_ORIGIN_OF_CONDITION", name}};
 
     CommitDeviceError(destEid, errorCode, ErrorClass::MCTP, additionalData);
@@ -181,6 +182,8 @@ void createMctpTransportRedfishEvent(
         }
 
         additionalData["REDFISH_ORIGIN_OF_CONDITION"] = name;
+        additionalData["REDFISH_SEVERITY"] =
+            "xyz.openbmc_project.Logging.Entry.Level.Informational";
 
         // Commit the error
         CommitDeviceError(destEid, errorCode, ErrorClass::MCTP, additionalData);
