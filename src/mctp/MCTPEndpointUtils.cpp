@@ -13,6 +13,7 @@
 #include <map>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <variant>
 #include <vector>
@@ -53,7 +54,7 @@ std::vector<std::string> getDeviceNames(const SensorBaseConfigMap& iface)
     auto it = iface.find("Name");
     if (it == iface.end())
     {
-        return names;
+        throw std::invalid_argument("No 'Name' key in configuration");
     }
 
     if (std::holds_alternative<std::string>(it->second))
@@ -74,6 +75,10 @@ std::vector<std::string> getDeviceNames(const SensorBaseConfigMap& iface)
     else if (std::holds_alternative<std::vector<std::string>>(it->second))
     {
         names = std::get<std::vector<std::string>>(it->second);
+    }
+    if (names.empty())
+    {
+        throw std::invalid_argument("No valid device name in configuration");
     }
     return names;
 }

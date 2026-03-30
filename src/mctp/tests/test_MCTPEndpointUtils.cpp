@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -85,11 +86,10 @@ TEST(MCTPEndpointUtils, getPollingIntervalNumericVariant)
 
 // ---- getDeviceNames tests ----
 
-TEST(MCTPEndpointUtils, getDeviceNamesMissingKeyReturnsEmpty)
+TEST(MCTPEndpointUtils, getDeviceNamesMissingKeyThrows)
 {
     SensorBaseConfigMap iface{};
-    auto names = getDeviceNames(iface);
-    EXPECT_TRUE(names.empty());
+    EXPECT_THROW(getDeviceNames(iface), std::invalid_argument);
 }
 
 TEST(MCTPEndpointUtils, getDeviceNamesSingleString)
@@ -132,11 +132,10 @@ TEST(MCTPEndpointUtils, getDeviceNamesVectorOfStrings)
     EXPECT_EQ(names[2], "dev3");
 }
 
-TEST(MCTPEndpointUtils, getDeviceNamesEmptyStringReturnsEmpty)
+TEST(MCTPEndpointUtils, getDeviceNamesEmptyStringThrows)
 {
     SensorBaseConfigMap iface{{"Name", std::string("")}};
-    auto names = getDeviceNames(iface);
-    EXPECT_TRUE(names.empty());
+    EXPECT_THROW(getDeviceNames(iface), std::invalid_argument);
 }
 
 TEST(MCTPEndpointUtils, getDeviceNamesTrailingCommaIgnoresEmpty)
@@ -147,18 +146,16 @@ TEST(MCTPEndpointUtils, getDeviceNamesTrailingCommaIgnoresEmpty)
     EXPECT_EQ(names[0], "GPU0");
 }
 
-TEST(MCTPEndpointUtils, getDeviceNamesOnlyWhitespace)
+TEST(MCTPEndpointUtils, getDeviceNamesOnlyWhitespaceThrows)
 {
     SensorBaseConfigMap iface{{"Name", std::string("  ,  ,  ")}};
-    auto names = getDeviceNames(iface);
-    EXPECT_TRUE(names.empty());
+    EXPECT_THROW(getDeviceNames(iface), std::invalid_argument);
 }
 
-TEST(MCTPEndpointUtils, getDeviceNamesUnsupportedVariantTypeReturnsEmpty)
+TEST(MCTPEndpointUtils, getDeviceNamesUnsupportedVariantTypeThrows)
 {
     SensorBaseConfigMap iface{{"Name", int64_t(42)}};
-    auto names = getDeviceNames(iface);
-    EXPECT_TRUE(names.empty());
+    EXPECT_THROW(getDeviceNames(iface), std::invalid_argument);
 }
 
 TEST(MCTPEndpointUtils, getDeviceNamesSingleElementVector)
@@ -170,12 +167,11 @@ TEST(MCTPEndpointUtils, getDeviceNamesSingleElementVector)
     EXPECT_EQ(names[0], "single");
 }
 
-TEST(MCTPEndpointUtils, getDeviceNamesEmptyVector)
+TEST(MCTPEndpointUtils, getDeviceNamesEmptyVectorThrows)
 {
     std::vector<std::string> nameVec{};
     SensorBaseConfigMap iface{{"Name", nameVec}};
-    auto names = getDeviceNames(iface);
-    EXPECT_TRUE(names.empty());
+    EXPECT_THROW(getDeviceNames(iface), std::invalid_argument);
 }
 
 TEST(MCTPEndpointUtils, getPollingIntervalBoundaryAt180)
@@ -240,11 +236,10 @@ TEST(MCTPEndpointUtils, getDeviceNamesSingleCharName)
     EXPECT_EQ(names[0], "X");
 }
 
-TEST(MCTPEndpointUtils, getDeviceNamesCommaOnly)
+TEST(MCTPEndpointUtils, getDeviceNamesCommaOnlyThrows)
 {
     SensorBaseConfigMap iface{{"Name", std::string(",")}};
-    auto names = getDeviceNames(iface);
-    EXPECT_TRUE(names.empty());
+    EXPECT_THROW(getDeviceNames(iface), std::invalid_argument);
 }
 
 TEST(MCTPEndpointUtils, writeSysfsFileEmptyValue)
