@@ -415,6 +415,11 @@ void MCTPDDevice::performHealthCheck()
         return; // Health monitoring not properly configured
     }
 
+    if (!healthTimer)
+    {
+        return; // Timer not initialized
+    }
+
     // Reset suppression state for this specific check iteration
     suppressedHealthCheckEids.erase(*staticEID);
 
