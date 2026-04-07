@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace nvidia::write_protect
 {
@@ -18,6 +19,11 @@ struct GpioConfig
     bool activeLow = false;
     /// If set, poll at this interval instead of using edge interrupts.
     std::optional<std::chrono::milliseconds> pollInterval;
+
+    bool isPolled() const
+    {
+        return pollInterval.has_value();
+    }
 };
 
 /**
@@ -29,43 +35,75 @@ struct GpioConfig
  *    interval.  Used for GPIO lines that do not support edge interrupts.
  *    Activated when @c GpioConfig::pollInterval is set.
  *
+ * Not thread-safe: a single owner must ensure that get() and changed()
+ * are never called concurrently.
+ *
  * Read-only; set() returns Error::Unsupported.
  */
 class Gpio : public Protector
 {
     sdbusplus::async::context* ctx;
     GpioConfig config;
-    gpiod::line line;
-    std::unique_ptr<sdbusplus::async::fdio> fdio;
+    gpiod::line line = {};
+    std::optional<bool> lastValue = {};
+    std::unique_ptr<sdbusplus::async::fdio> fdio = nullptr;
 
-    static constexpr int findLineRetries = 5;
+    static constexpr auto acquireLineRetryInterval =
+        std::chrono::milliseconds(5000);
+    static constexpr auto pollGpioChangedTimeout = std::chrono::minutes(2);
 
-    explicit Gpio(sdbusplus::async::context& ctx, const GpioConfig& config,
-                  const gpiod::line& line,
-                  std::unique_ptr<sdbusplus::async::fdio>&& fdio) :
-        ctx(&ctx), config(config), line(line), fdio(std::move(fdio))
+    explicit Gpio(sdbusplus::async::context& ctx, const GpioConfig& config) :
+        ctx(&ctx), config(config)
     {}
 
-    auto getImpl() -> Result<bool>;
+    void teardown();
+    auto acquire() -> bool;
+
+    auto getWithRecovery() -> sdbusplus::async::task<Result<bool>>;
 
   public:
     Gpio(const Gpio&) = delete;
     Gpio& operator=(const Gpio&) = delete;
-    Gpio(Gpio&&) = default;
-    Gpio& operator=(Gpio&&) = default;
+
+    Gpio(Gpio&& other) noexcept :
+        ctx(std::exchange(other.ctx, nullptr)), config(std::move(other.config)),
+        line(std::move(other.line)), lastValue(std::move(other.lastValue)),
+        fdio(std::move(other.fdio))
+    {
+        other.line.reset();
+    }
+
+    Gpio& operator=(Gpio&& other) noexcept
+    {
+        if (this != &other)
+        {
+            teardown();
+            ctx = std::exchange(other.ctx, nullptr);
+            config = std::move(other.config);
+            line = std::move(other.line);
+            lastValue = std::move(other.lastValue);
+            fdio = std::move(other.fdio);
+            other.line.reset();
+        }
+        return *this;
+    }
+
+    ~Gpio() override
+    {
+        teardown();
+    }
 
     /**
      * @brief Asynchronously create a Gpio protector from configuration.
      *
-     * Locates the named GPIO line (retrying up to @c findLineRetries times).
-     * In edge mode, requests the line for both-edge events and creates an
-     * fdio watcher.  In poll mode (when @c config.pollInterval is set),
-     * requests the line as input only.
+     * Locates the named GPIO line, retrying indefinitely until found or
+     * cancelled via stop token.  In edge mode, requests the line for
+     * both-edge events and creates an fdio watcher.  In poll mode (when
+     * @c config.pollInterval is set), requests the line as input only.
      *
      * @param ctx    The sdbusplus async context.
      * @param config GPIO configuration (line name, polarity, poll interval).
-     * @return The constructed Gpio, or std::nullopt if the line cannot be
-     *         found or requested.
+     * @return The constructed Gpio, or std::nullopt if cancelled.
      */
     static auto create(sdbusplus::async::context& ctx, const GpioConfig& config)
         -> sdbusplus::async::task<std::optional<Gpio>>;

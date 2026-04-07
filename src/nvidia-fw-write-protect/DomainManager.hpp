@@ -88,11 +88,18 @@ class DomainManager
 
   private:
     using EntityManager = entity_manager::EntityManagerInterface;
+    using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
+
+    static constexpr auto sourceChangedCoolOffInterval =
+        std::chrono::milliseconds(1000);
+    static constexpr auto minSourceChangedSleepDuration =
+        std::chrono::milliseconds(10);
 
     struct Source
     {
         SourceNodeId nodeId;
         std::unique_ptr<Protector> protector;
+        std::optional<TimePoint> lastChanged = {};
     };
 
     /// A write-protection group with its graph node, D-Bus facades, and

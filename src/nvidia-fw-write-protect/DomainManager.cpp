@@ -209,14 +209,39 @@ auto DomainManager::monitorSource(std::shared_ptr<Source> source,
         auto changed = co_await source->protector->changed();
         if (!changed)
         {
+            if (changed.error() == Error::Unavailable)
+            {
+                error(
+                    "Source {NAME} is no longer available, stop requested={STOPPED}",
+                    "NAME", name, "STOPPED", token.stop_requested());
+                break;
+            }
             error("Source {NAME} change error: {ERROR}", "NAME", name, "ERROR",
-                  static_cast<uint32_t>(changed.error()));
+                  tostr(changed.error()));
+        }
+        else
+        {
+            info("Source {NAME} changed to {VAL}", "NAME", name, "VAL",
+                 *changed);
+            graph.set(source->nodeId, *changed);
+            graph.propagate();
+        }
+
+        auto changedTime = std::chrono::steady_clock::now();
+        auto lastChanged = source->lastChanged;
+        source->lastChanged = changedTime;
+        if (!lastChanged)
+        {
             continue;
         }
 
-        info("Source {NAME} changed to {VAL}", "NAME", name, "VAL", *changed);
-        graph.set(source->nodeId, *changed);
-        graph.propagate();
+        auto duration = changedTime - lastChanged.value();
+        if (duration > minSourceChangedSleepDuration &&
+            duration < sourceChangedCoolOffInterval)
+        {
+            auto sleepDuration = sourceChangedCoolOffInterval - duration;
+            co_await sdbusplus::async::sleep_for(ctx, sleepDuration);
+        }
     }
 }
 

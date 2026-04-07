@@ -3,6 +3,7 @@
 #include "AsyncSet.hpp"
 
 #include <expected>
+#include <string>
 
 namespace nvidia
 {
@@ -28,6 +29,9 @@ enum class Error
 
     /** @brief The operation was stopped or aborted. */
     Aborted,
+
+    /** @brief The operation timed out */
+    Timeout,
 };
 
 /**
@@ -44,9 +48,31 @@ inline auto convert(nvidia::async::Error e) -> Error
             return Error::InternalError;
         case AsyncError::UnsupportedRequest:
             return Error::Unsupported;
+        case AsyncError::Timeout:
+            return Error::Timeout;
         default:
             return Error::Io;
     }
+}
+
+inline std::string_view tostr(Error error)
+{
+    switch (error)
+    {
+        case Error::InternalError:
+            return "InternalError";
+        case Error::Unsupported:
+            return "Unsupported";
+        case Error::Io:
+            return "Io";
+        case Error::Unavailable:
+            return "Unavailable";
+        case Error::Aborted:
+            return "Aborted";
+        case Error::Timeout:
+            return "Timeout";
+    }
+    return "Unknown";
 }
 
 template <typename T>
