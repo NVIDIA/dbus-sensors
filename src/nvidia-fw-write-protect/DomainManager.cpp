@@ -440,14 +440,33 @@ auto DomainManager::setWriteProtected(SourceNodeId nodeId, bool value)
         co_return std::unexpected(Error::Unavailable);
     }
 
-    auto result = co_await source->protector->set(value);
-    if (!result)
+    auto setResult = co_await source->protector->set(value);
+    if (!setResult)
     {
-        co_return result;
+        error("Failed to set write protection value={VALUE}, error={ERROR}",
+              "VALUE", value, "ERROR", tostr(setResult.error()));
+        co_return std::unexpected(setResult.error());
     }
 
-    graph.set(nodeId, value);
+    auto getResult = co_await source->protector->get();
+    if (!getResult)
+    {
+        error("Failed to get write protection error={ERROR}", "ERROR",
+              tostr(getResult.error()));
+        co_return std::unexpected(getResult.error());
+    }
+
+    bool actual = getResult.value();
+    graph.set(nodeId, actual);
     graph.propagate();
+
+    if (actual != value)
+    {
+        error("Failed to set write protection value={VALUE}, actual={ACTUAL}",
+              "VALUE", value, "ACTUAL", actual);
+        co_return std::unexpected(Error::InternalError);
+    }
+
     co_return {};
 }
 
