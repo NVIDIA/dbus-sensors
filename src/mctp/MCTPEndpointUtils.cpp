@@ -101,7 +101,8 @@ void logMCTPError(const std::string& deviceName, uint8_t destEid, int errorCode,
         {"REDFISH_RESOLUTION", resolution},
         {"REDFISH_SEVERITY",
          "xyz.openbmc_project.Logging.Entry.Level.Informational"},
-        {"REDFISH_ORIGIN_OF_CONDITION", name}};
+        {"REDFISH_ORIGIN_OF_CONDITION", name},
+        {"DEVICE_NAME", name}};
 
     CommitDeviceError(destEid, errorCode, ErrorClass::MCTP, additionalData);
 }
@@ -192,6 +193,11 @@ void createMctpTransportRedfishEvent(
         additionalData["REDFISH_ORIGIN_OF_CONDITION"] = name;
         additionalData["REDFISH_SEVERITY"] =
             "xyz.openbmc_project.Logging.Entry.Level.Informational";
+        additionalData["DEVICE_NAME"] = name;
+        if (!registry->errorId.empty())
+        {
+            additionalData["ERROR_ID"] = registry->errorId;
+        }
 
         // Commit the error
         CommitDeviceError(destEid, errorCode, ErrorClass::MCTP, additionalData);
