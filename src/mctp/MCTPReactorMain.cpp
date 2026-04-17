@@ -141,6 +141,13 @@ static std::shared_ptr<MCTPDevice> deviceFromConfig(
             return XROTMCTPDDevice::from(connection, *iface);
         }
 
+        iface = PCIeMCTPDDevice::match(config);
+        if (iface)
+        {
+            info("Creating PCIeMCTPDDevice");
+            return PCIeMCTPDDevice::from(connection, *iface);
+        }
+
         iface = USBGadgetMCTPDevice::match(config);
         if (iface)
         {
@@ -189,6 +196,7 @@ static void removeInventory(const std::shared_ptr<MCTPReactor>& reactor,
         if (I2CMCTPDDevice::match(removed) || I3CMCTPDDevice::match(removed) ||
             USBMCTPDDevice::match(removed) || SPIMCTPDDevice::match(removed) ||
             XROTMCTPDDevice::match(removed) ||
+            PCIeMCTPDDevice::match(removed) ||
             USBGadgetMCTPDevice::match(removed))
         {
             reactor->unmanageMCTPDevice(path.str);
@@ -475,6 +483,12 @@ int main()
         auto gsc = std::make_shared<GetSensorConfiguration>(
             systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
         gsc->getConfiguration({"MCTPXROTTarget"});
+    });
+
+    boost::asio::post(io, [reactor, systemBus]() {
+        auto gsc = std::make_shared<GetSensorConfiguration>(
+            systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
+        gsc->getConfiguration({"MCTPPCIeTarget"});
     });
 
     struct utsname unameData{};

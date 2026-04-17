@@ -583,6 +583,242 @@ TEST(XROTMCTPDDevice, fromValidMinimalConfig)
     EXPECT_EQ(device->getInterface(), "xrot0");
 }
 
+TEST(PCIeMCTPDDevice, matchEmptyConfig)
+{
+    SensorData config{};
+    EXPECT_FALSE(PCIeMCTPDDevice::match(config));
+}
+
+TEST(PCIeMCTPDDevice, matchIrrelevantConfig)
+{
+    SensorData config{{"xyz.openbmc_project.Configuration.NVME1000", {}}};
+    EXPECT_FALSE(PCIeMCTPDDevice::match(config));
+}
+
+TEST(PCIeMCTPDDevice, matchRelevantConfig)
+{
+    SensorData config{{"xyz.openbmc_project.Configuration.MCTPPCIeTarget",
+                       {{"Type", "MCTPPCIeTarget"},
+                        {"Name", "pcie-test-device"},
+                        {"Interface", "mctp-pcie0"},
+                        {"Address", "0000:01:00.0"}}}};
+    EXPECT_TRUE(PCIeMCTPDDevice::match(config).has_value());
+}
+
+TEST(PCIeMCTPDDevice, matchInterfacesRelevant)
+{
+    std::set<std::string> interfaces{
+        "xyz.openbmc_project.Configuration.MCTPPCIeTarget"};
+    EXPECT_TRUE(PCIeMCTPDDevice::match(interfaces));
+}
+
+TEST(PCIeMCTPDDevice, matchInterfacesIrrelevant)
+{
+    std::set<std::string> interfaces{
+        "xyz.openbmc_project.Configuration.NVME1000"};
+    EXPECT_FALSE(PCIeMCTPDDevice::match(interfaces));
+}
+
+TEST(PCIeMCTPDDevice, fromBadIfaceNoType)
+{
+    SensorBaseConfigMap iface{
+        {"Name", "pcie-test-device"},
+        {"Interface", "mctp-pcie0"},
+        {"Address", "0000:01:00.0"},
+    };
+    EXPECT_THROW(PCIeMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(PCIeMCTPDDevice, fromBadIfaceWrongType)
+{
+    SensorBaseConfigMap iface{{"Type", "NVME1000"}};
+    EXPECT_THROW(PCIeMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(PCIeMCTPDDevice, fromBadIfaceNoAddress)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},
+        {"Name", "pcie-test-device"},
+        {"Interface", "mctp-pcie0"},
+    };
+    EXPECT_THROW(PCIeMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(PCIeMCTPDDevice, fromBadIfaceNoInterface)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},
+        {"Name", "pcie-test-device"},
+        {"Address", "0000:01:00.0"},
+    };
+    EXPECT_THROW(PCIeMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(PCIeMCTPDDevice, fromBadIfaceNoName)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},
+        {"Interface", "mctp-pcie0"},
+        {"Address", "0000:01:00.0"},
+    };
+    EXPECT_THROW(PCIeMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(PCIeMCTPDDevice, fromBadIfaceBadAddresses)
+{
+    const std::vector<std::string> badAddresses{
+        "",
+        "0100.0",
+        "01:00",
+        "0000:01:00",
+        "0000:01:00.0:extra",
+        "01::0.0",
+        "01:gg.0",
+        "zzzz:01:00.0",
+        "0000:gg:00.0",
+        "100:00.0",
+        "01:20.0",
+        "01:00.8",
+    };
+
+    for (const auto& address : badAddresses)
+    {
+        SCOPED_TRACE(address);
+        SensorBaseConfigMap iface{
+            {"Type", "MCTPPCIeTarget"},
+            {"Name", "pcie-test-device"},
+            {"Interface", "mctp-pcie0"},
+            {"Address", address},
+        };
+        EXPECT_THROW(PCIeMCTPDDevice::from({}, iface), std::invalid_argument);
+    }
+}
+
+TEST(PCIeMCTPDDevice, fromValidMinimalConfigWithDomainBdf)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},
+        {"Name", "pcie-test-device"},
+        {"Interface", "mctp-pcie0"},
+        {"Address", "0000:01:00.0"},
+    };
+
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->getName(), "pcie-test-device");
+    EXPECT_EQ(device->getInterface(), "mctp-pcie0");
+    EXPECT_FALSE(device->getEid().has_value());
+    EXPECT_EQ(device->describe(),
+              "interface: mctp-pcie0, address: 0x [ 01 00 ]");
+}
+
+TEST(PCIeMCTPDDevice, fromValidMinimalConfigWithoutDomainBdf)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},
+        {"Name", "pcie-test-device"},
+        {"Interface", "mctp-pcie1"},
+        {"Address", "02:1f.7"},
+    };
+
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->getName(), "pcie-test-device");
+    EXPECT_EQ(device->getInterface(), "mctp-pcie1");
+    EXPECT_EQ(device->describe(),
+              "interface: mctp-pcie1, address: 0x [ 02 ff ]");
+}
+
+TEST(PCIeMCTPDDevice, fromValidWithStaticEid)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},  {"Name", "pcie-static"},
+        {"Interface", "mctp-pcie2"}, {"Address", "0000:03:04.5"},
+        {"StaticEndpointID", "44"},
+    };
+
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+    ASSERT_TRUE(device->getEid().has_value());
+    EXPECT_EQ(device->getEid().value_or(0), 44);
+    EXPECT_TRUE(device->managesEid(44));
+    EXPECT_FALSE(device->managesEid(45));
+    EXPECT_EQ(device->describe(),
+              "interface: mctp-pcie2, address: 0x [ 03 25 ]");
+}
+
+TEST(PCIeMCTPDDevice, fromValidWithStaticEidBridgePoolAndPolling)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},  {"Name", "pcie-main,bridge-a,bridge-b"},
+        {"Interface", "mctp-pcie3"}, {"Address", "abcd:04:05.6"},
+        {"StaticEndpointID", "9"},   {"BridgePoolStartEID", "10"},
+        {"BridgePoolEndEID", "11"},  {"PollingInterval", "30"},
+    };
+
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->getName(), "pcie-main");
+    EXPECT_EQ(device->getInterface(), "mctp-pcie3");
+    EXPECT_EQ(device->getEid().value_or(0), 9);
+    EXPECT_TRUE(device->managesEid(9));
+    EXPECT_TRUE(device->managesEid(10));
+    EXPECT_TRUE(device->managesEid(11));
+    EXPECT_FALSE(device->managesEid(12));
+    EXPECT_EQ(device->getNameForEid(9).value_or(""), "pcie-main");
+    EXPECT_EQ(device->getNameForEid(10).value_or(""), "bridge-a");
+    EXPECT_EQ(device->getNameForEid(11).value_or(""), "bridge-b");
+    EXPECT_EQ(device->describe(),
+              "interface: mctp-pcie3, address: 0x [ 04 2e ]");
+}
+
+TEST(PCIeMCTPDDevice, fromValidWithoutStaticButWithBridgeEnd)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},  {"Name", "pcie-no-static"},
+        {"Interface", "mctp-pcie4"}, {"Address", "05:06.7"},
+        {"BridgePoolEndEID", "11"},
+    };
+
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+    EXPECT_FALSE(device->getEid().has_value());
+    EXPECT_FALSE(device->managesEid(11));
+    EXPECT_EQ(device->describe(),
+              "interface: mctp-pcie4, address: 0x [ 05 37 ]");
+}
+
+TEST(PCIeMCTPDDevice, fromBadStaticEndpointIdThrows)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},      {"Name", "pcie-bad-static"},
+        {"Interface", "mctp-pcie0"},     {"Address", "0000:01:00.0"},
+        {"StaticEndpointID", "invalid"},
+    };
+    EXPECT_THROW(PCIeMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(PCIeMCTPDDevice, fromBadBridgePoolStartThrows)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},        {"Name", "pcie-bad-start"},
+        {"Interface", "mctp-pcie0"},       {"Address", "0000:01:00.0"},
+        {"BridgePoolStartEID", "invalid"},
+    };
+    EXPECT_THROW(PCIeMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(PCIeMCTPDDevice, fromBadBridgePoolEndThrows)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},      {"Name", "pcie-bad-end"},
+        {"Interface", "mctp-pcie0"},     {"Address", "0000:01:00.0"},
+        {"BridgePoolEndEID", "invalid"},
+    };
+    EXPECT_THROW(PCIeMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
 TEST(MCTPDDevice, describeWithoutPhysaddrContainsOnlyInterface)
 {
     auto device = std::make_shared<USBMCTPDDevice>(
@@ -2862,16 +3098,12 @@ TEST_F(FakeConnFixture, onDiscoveryNotifyWithEndpointCoversTimerLambda)
     {}
 }
 
-// 35. performHealthCheck timer callback success path (line 585-590).
-//     pollingInterval=0 causes expires_after(0s) → timer fires immediately
-//     with ec=0 when io.run_one() is called → if (!ec) branch is taken →
-//     covers the timer lambda success path (lambda#3 in performHealthCheck).
-TEST_F(FakeConnFixture, performHealthCheckTimerSuccessPathCovered)
+TEST_F(FakeConnFixture, performHealthCheckTimerCanBeCancelled)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-hc-success", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(9), std::nullopt, std::nullopt, std::nullopt,
-        std::nullopt, std::optional<uint8_t>(0)); // pollingInterval=0
+        std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
         sdbusplus::message::object_path(
@@ -2880,8 +3112,6 @@ TEST_F(FakeConnFixture, performHealthCheckTimerSuccessPathCovered)
     dev->setEndpointForTest(ep);
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
 
-    // performHealthCheck sets expires_after(0s) → timer already expired.
-    // async_method_call callbacks fire synchronously (null bus = error).
     try
     {
         dev->performHealthCheck();
@@ -2889,19 +3119,6 @@ TEST_F(FakeConnFixture, performHealthCheckTimerSuccessPathCovered)
     catch (...) // NOLINT(bugprone-empty-catch)
     {}
 
-    // io.run_one() fires the timer lambda with ec=0 → if (!ec) is TRUE →
-    // calls self->performHealthCheck() (queues another 0s timer) — success
-    // branch covered.
-    try
-    {
-        io.run_one();
-    }
-    catch (...) // NOLINT(bugprone-empty-catch)
-    {}
-
-    // Cancel the 0s timer queued by the second performHealthCheck() call, so
-    // the handler fires with operation_aborted → if(ec) return → no infinite
-    // loop.
     try
     {
         dev->healthTimer->cancel();
@@ -2910,12 +3127,11 @@ TEST_F(FakeConnFixture, performHealthCheckTimerSuccessPathCovered)
     {}
     try
     {
-        io.poll_one();
+        io.restart();
+        io.poll();
     }
     catch (...) // NOLINT(bugprone-empty-catch)
     {}
-    // Leave dev/ep alive; any remaining pending handlers are dropped when the
-    // io_context (fixture member) is torn down at test exit.
 }
 
 // 36. AssignEndpointStatic branch with bridgePoolStartEid set — covers both

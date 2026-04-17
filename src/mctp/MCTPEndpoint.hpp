@@ -605,3 +605,32 @@ class XROTMCTPDDevice : public MCTPDDevice
   private:
     static constexpr const char* configType = "MCTPXROTTarget";
 };
+
+class PCIeMCTPDDevice : public MCTPDDevice
+{
+  public:
+    static std::optional<SensorBaseConfigMap> match(const SensorData& config);
+    static bool match(const std::set<std::string>& interfaces);
+    static std::shared_ptr<PCIeMCTPDDevice> from(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const SensorBaseConfigMap& iface);
+
+    PCIeMCTPDDevice() = delete;
+    PCIeMCTPDDevice(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const std::string& name, const std::string& interface,
+        const std::vector<uint8_t>& physaddr,
+        std::optional<uint8_t> staticEID = std::nullopt,
+        std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
+        std::optional<uint8_t> bridgePoolEndEid = std::nullopt,
+        std::optional<uint8_t> pollingInterval = std::nullopt,
+        const std::vector<std::string>& deviceNames = {}) :
+        MCTPDDevice(connection, name, interface, physaddr, staticEID,
+                    bridgePoolStartEid, bridgePoolEndEid, std::nullopt,
+                    std::nullopt, pollingInterval, deviceNames)
+    {}
+    ~PCIeMCTPDDevice() override = default;
+
+  private:
+    static constexpr const char* configType = "MCTPPCIeTarget";
+};
