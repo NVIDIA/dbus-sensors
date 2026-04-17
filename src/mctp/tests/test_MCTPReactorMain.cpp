@@ -95,6 +95,29 @@ TEST(DeviceFromConfig, xrotConfigCreatesDevice)
     EXPECT_NE(device, nullptr);
 }
 
+TEST(DeviceFromConfig, pcieConfigCreatesDevice)
+{
+    std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
+    SensorData config{{"xyz.openbmc_project.Configuration.MCTPPCIeTarget",
+                       {{"Type", std::string("MCTPPCIeTarget")},
+                        {"Name", std::string("pcie0")},
+                        {"Interface", std::string("mctp-pcie0")},
+                        {"Address", std::string("0000:01:00.0")}}}};
+    auto device = deviceFromConfig(conn, config);
+    EXPECT_NE(device, nullptr);
+}
+
+TEST(DeviceFromConfig, pcieConfigBadAddressReturnsNull)
+{
+    std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
+    SensorData config{{"xyz.openbmc_project.Configuration.MCTPPCIeTarget",
+                       {{"Type", std::string("MCTPPCIeTarget")},
+                        {"Name", std::string("pcie0")},
+                        {"Interface", std::string("mctp-pcie0")},
+                        {"Address", std::string("bad-bdf")}}}};
+    EXPECT_EQ(deviceFromConfig(conn, config), nullptr);
+}
+
 TEST(DeviceFromConfig, spiConfigReturnsNull)
 {
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
@@ -151,6 +174,13 @@ TEST(DeviceFromConfig, allDeviceTypesWithValidConfigs)
                       {"Name", std::string("xrot0")},
                       {"Interface", std::string("xrot0")}}}};
     EXPECT_NE(deviceFromConfig(conn, xrot), nullptr);
+
+    SensorData pcie{{"xyz.openbmc_project.Configuration.MCTPPCIeTarget",
+                     {{"Type", std::string("MCTPPCIeTarget")},
+                      {"Name", std::string("pcie0")},
+                      {"Interface", std::string("mctp-pcie0")},
+                      {"Address", std::string("0000:01:00.0")}}}};
+    EXPECT_NE(deviceFromConfig(conn, pcie), nullptr);
 }
 
 TEST(ManageMCTPEntity, emptyEntities)

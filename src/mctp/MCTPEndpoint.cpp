@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cassert>
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -33,6 +34,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <variant>
@@ -1918,6 +1920,240 @@ std::shared_ptr<XROTMCTPDDevice> XROTMCTPDDevice::from(
         warning(
             "Failed to create XROTMCTPDDevice at [ name: {XROT_NAME} ]: {EXCEPTION}",
             "XROT_NAME", name, "EXCEPTION", ex);
+        return {};
+    }
+}
+
+/* MCTP PCIe */
+std::optional<SensorBaseConfigMap> PCIeMCTPDDevice::match(
+    const SensorData& config)
+{
+    auto iface = config.find(configInterfaceName(configType));
+    if (iface == config.end())
+    {
+        return std::nullopt;
+    }
+    return iface->second;
+}
+
+bool PCIeMCTPDDevice::match(const std::set<std::string>& interfaces)
+{
+    return interfaces.contains(configInterfaceName(configType));
+}
+
+/*
+ * Parse a PCIe BDF string of the form "[domain:]bus:device.function"
+ * (e.g. "0000:01:00.0" or "01:00.0") into the 2-byte physical address
+ * { bus, devfn } that the kernel mctp-pcie binding uses for routing
+ * (matches the "address bb:df" column in `mctp link show`).
+ *
+ * The PCIe domain is parsed but ignored: the link layer address is only
+ * the requester ID (bus:devfn).
+ */
+static unsigned int parsePcieBdfHexField(std::string_view field,
+                                         const std::string& bdf)
+{
+    if (field.empty())
+    {
+        throw std::invalid_argument("Bad BDF: " + bdf);
+    }
+
+    unsigned int value = 0;
+    auto [ptr, ec] =
+        std::from_chars(field.data(), field.data() + field.size(), value, 16);
+    if (ec != std::errc{} || ptr != field.data() + field.size())
+    {
+        throw std::invalid_argument("Bad BDF: " + bdf);
+    }
+    return value;
+}
+
+static std::vector<uint8_t> parsePcieBdf(const std::string& bdf)
+{
+    unsigned int bus = 0;
+    unsigned int device = 0;
+    unsigned int function = 0;
+
+    std::string_view bdfView{bdf};
+    size_t firstColon = bdfView.find(':');
+    size_t secondColon = std::string_view::npos;
+    if (firstColon != std::string_view::npos)
+    {
+        secondColon = bdfView.find(':', firstColon + 1);
+    }
+
+    if (firstColon == std::string_view::npos)
+    {
+        throw std::invalid_argument("Bad BDF: " + bdf);
+    }
+
+    if (secondColon == std::string_view::npos)
+    {
+        size_t dot = bdfView.find('.', firstColon + 1);
+        if (dot == std::string_view::npos)
+        {
+            throw std::invalid_argument("Bad BDF: " + bdf);
+        }
+        bus = parsePcieBdfHexField(bdfView.substr(0, firstColon), bdf);
+        device = parsePcieBdfHexField(
+            bdfView.substr(firstColon + 1, dot - firstColon - 1), bdf);
+        function = parsePcieBdfHexField(bdfView.substr(dot + 1), bdf);
+    }
+    else
+    {
+        if (bdfView.find(':', secondColon + 1) != std::string_view::npos)
+        {
+            throw std::invalid_argument("Bad BDF: " + bdf);
+        }
+        size_t dot = bdfView.find('.', secondColon + 1);
+        if (dot == std::string_view::npos)
+        {
+            throw std::invalid_argument("Bad BDF: " + bdf);
+        }
+        (void)parsePcieBdfHexField(bdfView.substr(0, firstColon), bdf);
+        bus = parsePcieBdfHexField(
+            bdfView.substr(firstColon + 1, secondColon - firstColon - 1), bdf);
+        device = parsePcieBdfHexField(
+            bdfView.substr(secondColon + 1, dot - secondColon - 1), bdf);
+        function = parsePcieBdfHexField(bdfView.substr(dot + 1), bdf);
+    }
+
+    if (bus > 0xFF || device > 0x1F || function > 0x7)
+    {
+        throw std::invalid_argument("BDF out of range: " + bdf);
+    }
+
+    auto devfn = static_cast<uint8_t>((device << 3) | function);
+    return {static_cast<uint8_t>(bus), devfn};
+}
+
+std::shared_ptr<PCIeMCTPDDevice> PCIeMCTPDDevice::from(
+    const std::shared_ptr<sdbusplus::asio::connection>& connection,
+    const SensorBaseConfigMap& iface)
+{
+    auto mType = iface.find("Type");
+    if (mType == iface.end())
+    {
+        throw std::invalid_argument(
+            "No 'Type' member found for provided configuration object");
+    }
+
+    auto type = std::visit(VariantToStringVisitor(), mType->second);
+    if (type != configType)
+    {
+        throw std::invalid_argument("Not a PCIe device");
+    }
+
+    auto mAddress = iface.find("Address");
+    auto mInterface = iface.find("Interface");
+    auto mName = iface.find("Name");
+    auto mStaticEndpointID = iface.find("StaticEndpointID");
+    auto mbridgePoolStartEid = iface.find("BridgePoolStartEID");
+    auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
+    if (mAddress == iface.end() || mInterface == iface.end() ||
+        mName == iface.end())
+    {
+        throw std::invalid_argument(
+            "Configuration object violates MCTPPCIeTarget schema");
+    }
+
+    std::vector<std::string> names = getDeviceNames(iface);
+    std::string name = names[0];
+
+    auto interface = std::visit(VariantToStringVisitor(), mInterface->second);
+
+    auto sAddress = std::visit(VariantToStringVisitor(), mAddress->second);
+    std::vector<uint8_t> address;
+    try
+    {
+        address = parsePcieBdf(sAddress);
+    }
+    catch (const std::exception&)
+    {
+        throw std::invalid_argument("Bad PCIe device address (BDF)");
+    }
+
+    std::optional<std::uint8_t> staticEID{};
+    if (mStaticEndpointID == iface.end())
+    {
+        info(
+            "Info: Key 'StaticEndpointID' is not provided; skipping related processing.");
+    }
+    else
+    {
+        auto sStaticEndpointID =
+            std::visit(VariantToStringVisitor(), mStaticEndpointID->second);
+        std::uint8_t parsedEID{};
+        auto [cptr, cec] = std::from_chars(
+            sStaticEndpointID.data(),
+            sStaticEndpointID.data() + sStaticEndpointID.size(), parsedEID);
+        if (cec != std::errc{})
+        {
+            throw std::invalid_argument("Bad endpoint address");
+        }
+        staticEID = parsedEID;
+    }
+
+    std::optional<std::uint8_t> bridgePoolStartEid{};
+    if (mbridgePoolStartEid != iface.end())
+    {
+        auto sbridgePoolStartEid =
+            std::visit(VariantToStringVisitor(), mbridgePoolStartEid->second);
+        std::uint8_t parsedbridgePoolStartEid{};
+        auto [dptr, dec] = std::from_chars(
+            sbridgePoolStartEid.data(),
+            sbridgePoolStartEid.data() + sbridgePoolStartEid.size(),
+            parsedbridgePoolStartEid);
+        if (dec != std::errc{})
+        {
+            throw std::invalid_argument("Bad BridgePool Start address");
+        }
+        bridgePoolStartEid = parsedbridgePoolStartEid;
+    }
+
+    std::optional<std::uint8_t> bridgePoolEndEid{};
+    if (mbridgePoolEndEid != iface.end())
+    {
+        auto sbridgePoolEndEid =
+            std::visit(VariantToStringVisitor(), mbridgePoolEndEid->second);
+        std::uint8_t parsedbridgePoolEndEid{};
+        auto [eptr, eec] =
+            std::from_chars(sbridgePoolEndEid.data(),
+                            sbridgePoolEndEid.data() + sbridgePoolEndEid.size(),
+                            parsedbridgePoolEndEid);
+        if (eec != std::errc{})
+        {
+            throw std::invalid_argument("Bad BridgePool End address");
+        }
+        bridgePoolEndEid = parsedbridgePoolEndEid;
+    }
+
+    auto pollingInterval = getPollingInterval(iface);
+
+    try
+    {
+        if (staticEID.has_value() && bridgePoolStartEid.has_value())
+        {
+            return std::make_shared<PCIeMCTPDDevice>(
+                connection, name, interface, address, staticEID.value(),
+                bridgePoolStartEid.value(), bridgePoolEndEid, pollingInterval,
+                names);
+        }
+        if (staticEID.has_value())
+        {
+            return std::make_shared<PCIeMCTPDDevice>(
+                connection, name, interface, address, staticEID.value(),
+                std::nullopt, bridgePoolEndEid, pollingInterval, names);
+        }
+        return std::make_shared<PCIeMCTPDDevice>(
+            connection, name, interface, address, std::nullopt, std::nullopt,
+            bridgePoolEndEid, pollingInterval, names);
+    }
+    catch (const MCTPException& ex)
+    {
+        warning(
+            "Failed to create PCIeMCTPDDevice at [ interface: {PCIE_INTERFACE}, BDF: {PCIE_BDF} ]: {EXCEPTION}",
+            "PCIE_INTERFACE", interface, "PCIE_BDF", sAddress, "EXCEPTION", ex);
         return {};
     }
 }
