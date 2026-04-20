@@ -84,7 +84,8 @@ bool isAdc(const std::filesystem::path& parentPath)
     std::string name;
     std::getline(nameFile, name);
 
-    return name == "iio_hwmon" || name == "tps53679" || name == "nct3018y";
+    return name == "iio_hwmon" || name == "tps53679" || name == "nct3018y" ||
+           name == "pcf85053a";
 }
 
 // Determine whether the hwmon device uses 0-based (in0_input, in1_input, ...)
