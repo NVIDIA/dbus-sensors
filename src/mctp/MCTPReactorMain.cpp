@@ -88,7 +88,7 @@ class DBusAssociationServer : public AssociationServer
         objects;
 };
 
-static std::shared_ptr<MCTPDevice> deviceFromConfig(
+[[maybe_unused]] static std::shared_ptr<MCTPDevice> deviceFromConfig(
     const std::shared_ptr<sdbusplus::asio::connection>& connection,
     const SensorData& config)
 {
@@ -470,25 +470,29 @@ int main()
     boost::asio::post(io, [reactor, systemBus]() {
         auto gsc = std::make_shared<GetSensorConfiguration>(
             systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
-        gsc->getConfiguration({"MCTPUSBTarget"});
+        const std::vector<std::string_view> types{{"MCTPUSBTarget"}};
+        gsc->getConfiguration(types);
     });
 
     boost::asio::post(io, [reactor, systemBus]() {
         auto gsc = std::make_shared<GetSensorConfiguration>(
             systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
-        gsc->getConfiguration({"MCTPSPIDevice"});
+        const std::vector<std::string_view> types{{"MCTPSPIDevice"}};
+        gsc->getConfiguration(types);
     });
 
     boost::asio::post(io, [reactor, systemBus]() {
         auto gsc = std::make_shared<GetSensorConfiguration>(
             systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
-        gsc->getConfiguration({"MCTPXROTTarget"});
+        const std::vector<std::string_view> types{{"MCTPXROTTarget"}};
+        gsc->getConfiguration(types);
     });
 
     boost::asio::post(io, [reactor, systemBus]() {
         auto gsc = std::make_shared<GetSensorConfiguration>(
             systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
-        gsc->getConfiguration({"MCTPPCIeTarget"});
+        const std::vector<std::string_view> types{{"MCTPPCIeTarget"}};
+        gsc->getConfiguration(types);
     });
 
     struct utsname unameData{};
@@ -507,7 +511,9 @@ int main()
                 auto gsc = std::make_shared<GetSensorConfiguration>(
                     systemBus,
                     std::bind_front(manageMCTPEntity, systemBus, reactor));
-                gsc->getConfiguration({"MCTPUSBGadgetTarget"});
+                const std::vector<std::string_view> types{
+                    {"MCTPUSBGadgetTarget"}};
+                gsc->getConfiguration(types);
             });
         }
         else

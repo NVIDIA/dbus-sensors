@@ -454,7 +454,10 @@ TEST(HeartbeatMainPaths, addedSpiEndpointCallable)
 {
     boost::asio::io_context io;
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
-    EXPECT_ANY_THROW(addedSPIEndpoint(conn, 8, io));
+    // addedSPIEndpoint catches std::system_error / std::logic_error and logs;
+    // it no longer rethrows, so a null bus must not be treated as throwing
+    // here.
+    EXPECT_NO_THROW(addedSPIEndpoint(conn, 8, io));
 }
 
 // NOTE: TestMockHeartbeatService and its tests (MockHeartbeatService.*,

@@ -493,6 +493,13 @@ uint8_t USBGadgetMCTPDevice::eid() const
     return localEID;
 }
 
+std::size_t USBGadgetMCTPDevice::id() const
+{
+    std::size_t h1 = std::hash<std::string>{}(name);
+    std::size_t h2 = std::hash<std::string>{}(gadgetName);
+    return h1 ^ (h2 << 1) ^ (static_cast<std::size_t>(localEID) << 2);
+}
+
 void USBGadgetMCTPDevice::subscribe([[maybe_unused]] Event&& degraded,
                                     [[maybe_unused]] Event&& available,
                                     Event&& removed)

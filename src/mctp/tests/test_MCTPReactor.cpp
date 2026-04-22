@@ -8,6 +8,7 @@
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/message.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -35,6 +36,7 @@ class MockMCTPDevice : public MCTPDevice
                 (override));
     MOCK_METHOD(void, remove, (), (override));
     MOCK_METHOD(std::string, describe, (), (const, override));
+    MOCK_METHOD(std::size_t, id, (), (const, override));
 };
 
 class MockMCTPEndpoint : public MCTPEndpoint
@@ -118,6 +120,8 @@ sd_bus_message* buildReactorInterfacesAddedMessage(
 class TestReactorMCTPDDevice : public MCTPDDevice
 {
   public:
+    // MCTPDevice::id() is derived from interface+physaddr only, not staticEid;
+    // use a distinct physaddr per instance when multiple mctpd mocks coexist.
     TestReactorMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
         uint8_t staticEid) :
@@ -125,6 +129,16 @@ class TestReactorMCTPDDevice : public MCTPDDevice
                     std::vector<uint8_t>{0x20}, staticEid, std::nullopt,
                     std::nullopt, std::nullopt, std::nullopt, std::nullopt,
                     {"reactor-mctpd"})
+    {}
+
+    // Variant constructor that accepts a custom physical address so that
+    // multiple mctpd mocks with distinct IDs (interface+physaddr) can coexist.
+    TestReactorMCTPDDevice(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        uint8_t staticEid, std::vector<uint8_t> physAddr) :
+        MCTPDDevice(connection, "reactor-mctpd", "usbreactor0",
+                    std::move(physAddr), staticEid, std::nullopt, std::nullopt,
+                    std::nullopt, std::nullopt, std::nullopt, {"reactor-mctpd"})
     {}
 
     // Variant constructor that exposes bridge pool parameters so that
@@ -183,6 +197,7 @@ class MCTPReactorFixture : public testing::Test
     {
         reactor = std::make_shared<MCTPReactor>(assoc);
         device = std::make_shared<MockMCTPDevice>();
+        EXPECT_CALL(*device, id()).WillRepeatedly(testing::Return(0U));
         EXPECT_CALL(*device, describe())
             .WillRepeatedly(testing::Return("mock device"));
 
@@ -217,7 +232,8 @@ TEST_F(MCTPReactorFixture, manageNullDevice)
 
 TEST_F(MCTPReactorFixture, manageMockDeviceSetupFailure)
 {
-    EXPECT_CALL(*device, remove());
+    // Setup error leaves state Unassigned; unmanageMCTPDevice calls terminate()
+    // (repository + states only), not device->remove().
     EXPECT_CALL(*device, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(
             std::make_error_code(std::errc::permission_denied), endpoint));
@@ -295,10 +311,13 @@ TEST_F(MCTPReactorFixture, manageMockDeviceRemoved)
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation))
         .Times(2);
+
+    // state is Recovered — unmanageMCTPDevice is a no-op (no second
+    // disassociate).
     EXPECT_CALL(
         assoc,
         disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
-        .Times(2);
+        .Times(1);
 
     EXPECT_CALL(*endpoint, remove()).WillOnce([&]() {
         removeHandler(endpoint);
@@ -350,6 +369,7 @@ TEST_F(MCTPReactorFixture, removedCallbackForForeignDeviceDoesNotDeferSetup)
 {
     std::function<void(const std::shared_ptr<MCTPEndpoint>& ep)> removeHandler;
     auto foreignDevice = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*foreignDevice, id()).WillRepeatedly(testing::Return(1U));
     EXPECT_CALL(*foreignDevice, describe())
         .WillRepeatedly(testing::Return("foreign device"));
 
@@ -363,17 +383,34 @@ TEST_F(MCTPReactorFixture, removedCallbackForForeignDeviceDoesNotDeferSetup)
         disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
         .Times(1);
 
+    // Fixture's device() is registered first; gmock uses the first matching
+    // expectation, so we must clear and re-establish before a custom action.
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(endpoint.get()));
+    EXPECT_CALL(*endpoint, describe())
+        .WillRepeatedly(testing::Return("mock endpoint"));
+    EXPECT_CALL(*endpoint, eid()).WillRepeatedly(testing::Return(9));
+    EXPECT_CALL(*endpoint, network()).WillRepeatedly(testing::Return(1));
+    // trackEndpoint: device() in states[.], next(ep->device(), ...), and
+    // inventoryFor (3x while managed); the removed callback must then return
+    // the "foreign" device to exercise that path.
+    const std::shared_ptr<MockMCTPDevice> managedDevice = this->device;
+    int epDeviceCall = 0;
+    EXPECT_CALL(*endpoint, device())
+        .WillRepeatedly(
+            testing::Invoke([managedDevice, foreignDevice, &epDeviceCall] {
+                ++epDeviceCall;
+                return (epDeviceCall <= 3) ? managedDevice : foreignDevice;
+            }));
     EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_))
         .WillOnce(testing::SaveArg<2>(&removeHandler));
-    EXPECT_CALL(*endpoint, device())
-        .WillOnce(testing::Return(device))
-        .WillOnce(testing::Return(foreignDevice));
 
     // No deferred retry expected because removed endpoint belongs to foreign
     // device at callback time.
     EXPECT_CALL(*device, setup(testing::_))
         .Times(1)
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), endpoint));
+    // Removed still leaves state[0] Assigned, so unmanageMCTPDevice(Assigned)
+    // calls device->remove().
     EXPECT_CALL(*device, remove()).Times(1);
 
     reactor->manageMCTPDevice("/test", device);
@@ -389,7 +426,9 @@ TEST_F(MCTPReactorFixture, setupSuccessWithNullEndpointDoesNotAssociate)
     EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
     EXPECT_CALL(*device, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), nullptr));
-    EXPECT_CALL(*device, remove()).Times(1);
+    // Setup "success" with a null ep leaves state Assigning; unmanage only
+    // quarantines, it does not call device->remove().
+    EXPECT_CALL(*device, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", device);
     reactor->unmanageMCTPDevice("/test");
@@ -400,7 +439,8 @@ TEST_F(MCTPReactorFixture, specificEidRetryIgnoresFailedNonMctpdDevice)
     EXPECT_CALL(*device, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(
             std::make_error_code(std::errc::timed_out), endpoint));
-    EXPECT_CALL(*device, remove()).Times(1);
+    // Setup failure -> Unassigned; unmanageMCTPDevice terminates (no remove()).
+    EXPECT_CALL(*device, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", device);
     EXPECT_TRUE(reactor->isRetrying(0));
@@ -472,6 +512,7 @@ TEST(MCTPReactor, replaceConfiguration)
         .WillRepeatedly(testing::SaveArg<2>(&removeHandler));
 
     auto initial = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*initial, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*initial, describe())
         .WillRepeatedly(testing::Return("mock device: initial"));
     EXPECT_CALL(*initial, setup(testing::_))
@@ -479,17 +520,31 @@ TEST(MCTPReactor, replaceConfiguration)
     EXPECT_CALL(*initial, remove()).WillOnce([&]() { endpoint->remove(); });
 
     auto replacement = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*replacement, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*replacement, describe())
         .WillRepeatedly(testing::Return("mock device: replacement"));
     EXPECT_CALL(*replacement, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), endpoint));
     EXPECT_CALL(*replacement, remove()).WillOnce([&]() { endpoint->remove(); });
 
+    // Per track: states[.], next(.), inventoryFor(.) = 3 calls. Replaced
+    // device: removed used 2x (switch+next). Second track: 3+ replacement.
+    int epDevCalls = 0;
     EXPECT_CALL(*endpoint, device())
-        .WillOnce(testing::Return(initial))
-        .WillOnce(testing::Return(initial))
-        .WillOnce(testing::Return(replacement))
-        .WillOnce(testing::Return(replacement));
+        .WillRepeatedly(
+            testing::Invoke([&epDevCalls, initial,
+                             replacement]() -> std::shared_ptr<MCTPDevice> {
+                ++epDevCalls;
+                if (epDevCalls <= 3)
+                {
+                    return initial;
+                }
+                if (epDevCalls <= 5)
+                {
+                    return initial;
+                }
+                return replacement;
+            }));
 
     reactor->manageMCTPDevice("/test", initial);
     reactor->manageMCTPDevice("/test", replacement);
@@ -640,7 +695,9 @@ TEST_F(MCTPReactorFixture, setupFailureMarksBroadcastAsRetrying)
     EXPECT_CALL(*device, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(
             std::make_error_code(std::errc::timed_out), endpoint));
-    EXPECT_CALL(*device, remove());
+    // Unassigned path terminates; device->remove() is only for Assigned
+    // unmanage, so terminate is used (no remove).
+    EXPECT_CALL(*device, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", device);
     EXPECT_TRUE(reactor->isRetrying(0));
@@ -655,6 +712,7 @@ TEST(MCTPReactor, callbackAfterReactorDestroyedIsSafe)
     auto device = std::make_shared<MockMCTPDevice>();
     auto endpoint = std::make_shared<MockMCTPEndpoint>();
 
+    EXPECT_CALL(*device, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*device, describe())
         .WillRepeatedly(testing::Return("mock device"));
     EXPECT_CALL(*endpoint, describe())
@@ -685,6 +743,8 @@ TEST(MCTPReactor, endpointWithMissingInventorySkipsAssociation)
     EXPECT_CALL(assoc, associate(testing::_, testing::_)).Times(0);
     EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
 
+    EXPECT_CALL(*managed, id()).WillRepeatedly(testing::Return(0U));
+    EXPECT_CALL(*foreign, id()).WillRepeatedly(testing::Return(1U));
     EXPECT_CALL(*managed, describe())
         .WillRepeatedly(testing::Return("managed device"));
     EXPECT_CALL(*foreign, describe())
@@ -697,7 +757,9 @@ TEST(MCTPReactor, endpointWithMissingInventorySkipsAssociation)
 
     EXPECT_CALL(*managed, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), endpoint));
-    EXPECT_CALL(*managed, remove());
+    // track bails (no association); unmanage for Assigning/Quarantine path does
+    // not call MCTPDevice::remove().
+    EXPECT_CALL(*managed, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", managed);
     reactor->unmanageMCTPDevice("/test");
@@ -710,11 +772,15 @@ TEST_F(MCTPReactorFixture, subscribeFailureDefersSetup)
             testing::Throw(MCTPException("Failed to register signal match")));
     EXPECT_CALL(*device, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), endpoint));
-    EXPECT_CALL(*device, remove());
+    // trackEndpoint throw moves to Quarantine; unmanage on Quarantine is a
+    // no-op, so no device->remove(). isRetrying uses failureCounts, cleared on
+    // setup success before subscribe, so the broadcast is not in retry.
+    EXPECT_CALL(*device, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", device);
-    EXPECT_TRUE(reactor->isRetrying(0));
+    EXPECT_FALSE(reactor->isRetrying(0));
     reactor->unmanageMCTPDevice("/test");
+    EXPECT_FALSE(reactor->isRetrying(0));
 }
 
 TEST_F(MCTPReactorFixture, endpointDegradedAndAvailableCallbacksExecute)
@@ -768,7 +834,8 @@ TEST(MCTPReactor, specificEidRetryingPathWithMctpdDevice)
         EXPECT_TRUE(reactor->isRetrying(42));
         EXPECT_FALSE(reactor->isRetrying(43));
         reactor->unmanageMCTPDevice("/test");
-        EXPECT_EQ(dev->removeCalls, 1);
+        // Unassigned -> terminate; remove() is only for Assigned unmanage.
+        EXPECT_EQ(dev->removeCalls, 0);
         EXPECT_FALSE(reactor->isRetrying(42));
     }
     catch (const std::exception& ex)
@@ -786,7 +853,8 @@ TEST(MCTPReactor, specificEidRetryingMatchesLaterFailedMctpdDevice)
         MockAssociationServer assoc{};
         auto reactor = std::make_shared<MCTPReactor>(assoc);
 
-        auto first = std::make_shared<TestReactorMCTPDDevice>(conn, 41);
+        auto first = std::make_shared<TestReactorMCTPDDevice>(
+            conn, 41, std::vector<uint8_t>{0x20});
         first->setupHandler =
             [](std::function<void(const std::error_code& ec,
                                   const std::shared_ptr<MCTPEndpoint>& ep)>&&
@@ -795,7 +863,8 @@ TEST(MCTPReactor, specificEidRetryingMatchesLaterFailedMctpdDevice)
                                  nullptr);
             };
 
-        auto second = std::make_shared<TestReactorMCTPDDevice>(conn, 42);
+        auto second = std::make_shared<TestReactorMCTPDDevice>(
+            conn, 42, std::vector<uint8_t>{0x21});
         second->setupHandler =
             [](std::function<void(const std::error_code& ec,
                                   const std::shared_ptr<MCTPEndpoint>& ep)>&&
@@ -814,8 +883,9 @@ TEST(MCTPReactor, specificEidRetryingMatchesLaterFailedMctpdDevice)
 
         reactor->unmanageMCTPDevice("/test/first");
         reactor->unmanageMCTPDevice("/test/second");
-        EXPECT_EQ(first->removeCalls, 1);
-        EXPECT_EQ(second->removeCalls, 1);
+        // Both devices stuck in Unassigned; terminate, not remove().
+        EXPECT_EQ(first->removeCalls, 0);
+        EXPECT_EQ(second->removeCalls, 0);
     }
     catch (const std::exception& ex)
     {
@@ -1463,7 +1533,8 @@ TEST_F(MCTPReactorFixture, manageMCTPDeviceNullThenRealDeviceAtSamePath)
 
     EXPECT_CALL(*device, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), nullptr));
-    EXPECT_CALL(*device, remove());
+    // Null-ep "success" leaves Assigning; unmanage quarantines, no remove().
+    EXPECT_CALL(*device, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", device);
     reactor->unmanageMCTPDevice("/test");
@@ -1482,7 +1553,8 @@ TEST_F(MCTPReactorFixture, manageMCTPDeviceSetupErrorDoesNotAssociate)
     EXPECT_CALL(*device, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(
             std::make_error_code(std::errc::io_error), nullptr));
-    EXPECT_CALL(*device, remove());
+    // Unassigned: terminate, not remove().
+    EXPECT_CALL(*device, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", device);
     reactor->unmanageMCTPDevice("/test");
@@ -1535,10 +1607,12 @@ TEST(MCTPReactor, manageMCTPDeviceSkipsNonMctpdDevices)
     MockAssociationServer assoc{};
     auto reactor = std::make_shared<MCTPReactor>(assoc);
     auto dev = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*dev, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*dev, describe()).WillRepeatedly(testing::Return("mock-dev"));
     EXPECT_CALL(*dev, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), nullptr));
-    EXPECT_CALL(*dev, remove());
+    // Success with null ep -> Assigning; unmanage quarantines (no remove).
+    EXPECT_CALL(*dev, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test/mock", dev);
     reactor->unmanageMCTPDevice("/test/mock");
@@ -1549,11 +1623,13 @@ TEST(MCTPReactor, isRetryingSkipsNonMctpdDevices)
     MockAssociationServer assoc{};
     auto reactor = std::make_shared<MCTPReactor>(assoc);
     auto dev = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*dev, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*dev, describe()).WillRepeatedly(testing::Return("mock-fail"));
     EXPECT_CALL(*dev, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(
             std::make_error_code(std::errc::timed_out), nullptr));
-    EXPECT_CALL(*dev, remove());
+    // Unassigned: terminate, no device->remove().
+    EXPECT_CALL(*dev, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test/fail", dev);
     EXPECT_TRUE(reactor->isRetrying(0)); // Broadcast retry is true
@@ -1592,7 +1668,9 @@ TEST(MCTPReactor, deferredRetryClearsOnSuccessWithoutEndpointObject)
         reactor->tick();
         EXPECT_FALSE(reactor->isRetrying(55));
         reactor->unmanageMCTPDevice("/test");
-        EXPECT_EQ(dev->removeCalls, 1);
+        // Second setup succeeds with null ep; state stays Assigning. Unmanage
+        // quarantines; remove() is only for Assigned.
+        EXPECT_EQ(dev->removeCalls, 0);
     }
     catch (const std::exception& ex)
     {

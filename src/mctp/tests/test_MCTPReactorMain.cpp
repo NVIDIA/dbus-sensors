@@ -462,8 +462,8 @@ TEST(ManageMCTPEntity, withValidUSBGadgetDeviceDefersSetupOnFailure)
             {"Interface", std::string("mctpusb0")},
             {"LocalEID", std::string("10")}}}}}};
     // USBGadget setup calls doSystemSetup() (system command), which fails in
-    // CI. On failure the reactor calls deferSetup() — no D-Bus access, no
-    // crash.
+    // CI. On failure the setup callback still completes without D-Bus access,
+    // no crash.
     EXPECT_NO_THROW(manageMCTPEntity(conn, reactor, entities));
 }
 

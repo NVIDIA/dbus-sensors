@@ -8,6 +8,7 @@
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <set>
@@ -49,6 +50,7 @@ class USBGadgetMCTPDevice :
     void remove() override;
     std::string describe() const override;
     std::optional<std::string> getNameForEid(uint8_t eid) const override;
+    std::size_t id() const override;
 
     // MCTPEndpoint interface
     int network() const override;

@@ -7,6 +7,8 @@
 #include <boost/system/detail/error_code.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <phosphor-logging/lg2/flags.hpp>
+#include <sdbusplus/message.hpp>
+#include <sdbusplus/message/native_types.hpp>
 
 #include <charconv>
 #include <cstdint>
@@ -20,6 +22,30 @@
 #include <vector>
 
 PHOSPHOR_LOG2_USING;
+namespace
+{
+constexpr const char* mctpdEndpointControlIface =
+    "au.com.codeconstruct.MCTP.Endpoint1";
+
+std::optional<uint8_t> eidFromMctpdEndpointPath(const std::string& path)
+{
+    constexpr std::string_view needle = "/endpoints/";
+    const auto pos = path.find(needle);
+    if (pos == std::string::npos)
+    {
+        return std::nullopt;
+    }
+    const char* begin = path.data() + pos + needle.size();
+    const char* end = path.data() + path.size();
+    unsigned long v = 0;
+    auto [ptr, ec] = std::from_chars(begin, end, v);
+    if (ec != std::errc{} || ptr != end || v > 255)
+    {
+        return std::nullopt;
+    }
+    return static_cast<uint8_t>(v);
+}
+} // namespace
 
 void MCTPReactor::untrackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep)
 {
@@ -185,6 +211,8 @@ void MCTPReactor::setupEndpoint(const std::shared_ptr<MCTPDevice>& dev)
                 case MCTPDeviceState::Pending:
                     break;
             }
+            // Track failed setup (isRetrying / log suppression; fork addition)
+            self->failureCounts[dev]++;
             return;
         }
 
@@ -289,6 +317,26 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
         case MCTPDeviceState::Unmanaged:
             devices.add(path, device);
             next(device, MCTPDeviceState::Assigning);
+            info("MCTP device inventory added at '{INVENTORY_PATH}'",
+                 "INVENTORY_PATH", path);
+            if (auto mctpDevice =
+                    std::dynamic_pointer_cast<MCTPDDevice>(device))
+            {
+                // There could be case where Discovery Notify is expected to do
+                // device discovery thus setup match rule before hand and setup
+                // callback for the same
+                mctpDevice->onDiscoveryMatchRule();
+                mctpDevice->setRequestSetupCallback(
+                    [weak{weak_from_this()}](
+                        const std::shared_ptr<MCTPDDevice>& requestingDevice) {
+                        auto self = weak.lock();
+                        if (!self)
+                        {
+                            return;
+                        }
+                        self->setupEndpoint(requestingDevice);
+                    });
+            }
             setupEndpoint(device);
             break;
         case MCTPDeviceState::Assigning:
@@ -356,6 +404,10 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
             terminate(device);
             break;
         case MCTPDeviceState::Assigned:
+            failureCounts.erase(device);
+            // Remove the device from the repository before notifying the device
+            // itself of removal so we don't defer its setup
+            devices.remove(device);
             debug("Stopping management of MCTP device at [ {MCTP_DEVICE} ]",
                   "MCTP_DEVICE", device->describe());
             next(device, MCTPDeviceState::Removing);
@@ -395,6 +447,7 @@ void MCTPReactor::terminate(const std::shared_ptr<MCTPDevice>& dev)
         "DEVICE_ID", lg2::hex, dev->id(), "DEVICE_DESCRIPTION", dev->describe(),
         "CURRENT_STATE", states[dev->id()]);
     devices.remove(dev);
+    failureCounts.erase(dev);
     states.erase(dev->id());
 }
 
