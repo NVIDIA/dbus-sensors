@@ -81,6 +81,12 @@ class NvidiaInfo
                std::shared_ptr<sdbusplus::asio::object_server> obj,
                std::string invPath);
 
+    // Request a one-shot startup inventory refresh from upstream producers
+    // by setting Refresh=true on every xyz.openbmc_project.Control.Trigger
+    // object whose path contains "InventoryData" under
+    // /xyz/openbmc_project/control.
+    void triggerInventoryRefresh();
+
   private:
     std::shared_ptr<boost::asio::io_context> ioCtx;
     std::shared_ptr<sdbusplus::asio::connection> bus;

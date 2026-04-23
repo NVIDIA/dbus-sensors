@@ -17,6 +17,7 @@
 #include "NvidiaInfo.hpp"
 
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -48,6 +49,15 @@ int main()
 
         const std::string svc(std::string(nvidia::info::nvidiaInfoService));
         connection->request_name(svc.c_str());
+
+        // Ask upstream producers (e.g. pldm) to push current inventory to us
+        // at startup, equivalent to bmcweb's
+        // NvidiaComputerSystem.RefreshInventory action. Posted to the io
+        // context so it fires once the event loop is running, after all
+        // match rules and the bus name request have settled.
+        boost::asio::post(*io, [infoService]() {
+            infoService->triggerInventoryRefresh();
+        });
 
         io->run();
 

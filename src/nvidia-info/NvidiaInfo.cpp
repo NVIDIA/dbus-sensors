@@ -322,6 +322,75 @@ void NvidiaInfo::setupMotherboardMatch()
         });
 }
 
+void NvidiaInfo::triggerInventoryRefresh()
+{
+    static constexpr std::string_view triggerInterface =
+        "xyz.openbmc_project.Control.Trigger";
+    static constexpr std::string_view inventoryDataTag = "InventoryData";
+    static constexpr std::string_view controlRoot =
+        "/xyz/openbmc_project/control";
+
+    using SubTreeType = std::vector<std::pair<
+        std::string,
+        std::vector<std::pair<std::string, std::vector<std::string>>>>>;
+
+    lg2::info("Requesting startup inventory refresh from upstream producers");
+
+    bus->async_method_call(
+        [this](const boost::system::error_code& ec,
+               const SubTreeType& subtree) {
+            if (ec)
+            {
+                lg2::info(
+                    "Inventory refresh: Control.Trigger subtree not ready: {E}",
+                    "E", ec.message());
+                return;
+            }
+
+            bool any = false;
+            for (const auto& [path, services] : subtree)
+            {
+                if (path.find(inventoryDataTag) == std::string::npos ||
+                    services.empty())
+                {
+                    continue;
+                }
+                const std::string& svc = services.front().first;
+                any = true;
+
+                lg2::info("Inventory refresh: Refresh=true -> {S} {P}", "S",
+                          svc, "P", path);
+
+                bus->async_method_call(
+                    [path](const boost::system::error_code& setEc) {
+                        if (setEc)
+                        {
+                            lg2::error("Inventory refresh: failed to set "
+                                       "Refresh on {P}: {E}",
+                                       "P", path, "E", setEc.message());
+                            return;
+                        }
+                        lg2::info("Inventory refresh: triggered on {P}", "P",
+                                  path);
+                    },
+                    svc, path, "org.freedesktop.DBus.Properties", "Set",
+                    std::string(triggerInterface), std::string("Refresh"),
+                    std::variant<bool>(true));
+            }
+
+            if (!any)
+            {
+                lg2::info("Inventory refresh: no Control.Trigger "
+                          "InventoryData paths found under {R}",
+                          "R", std::string(controlRoot));
+            }
+        },
+        std::string(mapperBusName), std::string(mapperPath),
+        std::string(mapperInterface), "GetSubTree",
+        std::string(controlRoot), 0,
+        std::vector<std::string>{std::string(triggerInterface)});
+}
+
 void NvidiaInfo::discoverMotherboardPath(std::function<void()> callback)
 {
     std::string searchPath = inventoryPath;
