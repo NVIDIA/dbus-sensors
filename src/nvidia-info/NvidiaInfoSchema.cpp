@@ -115,20 +115,22 @@ const char* slotTypeName(SlotType s)
     return "OEM";
 }
 
-void from_json(const Json& /*j*/, TerminusData& /*t*/)
+void from_json(const Json& j, TerminusData& t)
 {
-    // Later commits populate sections here, e.g.:
-    //   j.at("Processor").get_to(t.cpus);
+    j.at("Processor").get_to(t.cpus);
+    // Later commits populate the remaining sections:
     //   j.at("Memory").get_to(t.dimms);
+    //   j.at("PCIeSlots").get_to(t.pcieSlots);
+    //   j.at("Security").get_to(t.tpms);
 }
 
 namespace
 {
 
-// Used by later commits to validate each element of a per-section vector,
-// tagging any std::invalid_argument with "<Section>[<index>]: <message>".
+// Validates each element of a per-section vector, tagging any
+// std::invalid_argument the element threw with "<Section>[<index>]: ...".
 template <typename T>
-[[maybe_unused]] void validateEach(std::vector<T>& v, const char* section)
+void validateEach(std::vector<T>& v, const char* section)
 {
     for (std::size_t i = 0; i < v.size(); ++i)
     {
@@ -146,9 +148,9 @@ template <typename T>
 
 } // namespace
 
-void validate(TerminusData& /*t*/)
+void validate(TerminusData& t)
 {
-    // Later commits will call validateEach(...) per section.
+    validateEach(t.cpus, "Processor");
 }
 
 } // namespace info

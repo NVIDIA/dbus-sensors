@@ -346,10 +346,15 @@ void NvidiaInfo::createInfoFromFile(const std::string& filePath)
             std::format("CreateInfoFromFile rejected: {}", e.what()).c_str());
     }
 
-    discoverPaths([this, terminusName, td = std::move(td)]() mutable {
+    // Wrap td in a shared_ptr: the discoverPaths callback is type-erased
+    // through std::function, which requires its target to be copyable.
+    // TerminusData now contains non-copyable NvidiaCpu objects, so we
+    // indirect through a shared_ptr and move out of it on invocation.
+    auto tdPtr = std::make_shared<TerminusData>(std::move(td));
+    discoverPaths([this, terminusName, tdPtr]() mutable {
         try
         {
-            updateTerminusInfo(terminusName, std::move(td));
+            updateTerminusInfo(terminusName, std::move(*tdPtr));
         }
         catch (const std::exception& e)
         {
@@ -391,10 +396,11 @@ void NvidiaInfo::createInfoFromJsonString(int32_t processorModuleIndex,
             std::format("CreateInfo rejected: {}", e.what()).c_str());
     }
 
-    discoverPaths([this, terminusName, td = std::move(td)]() mutable {
+    auto tdPtr = std::make_shared<TerminusData>(std::move(td));
+    discoverPaths([this, terminusName, tdPtr]() mutable {
         try
         {
-            updateTerminusInfo(terminusName, std::move(td));
+            updateTerminusInfo(terminusName, std::move(*tdPtr));
         }
         catch (const std::exception& e)
         {
@@ -419,7 +425,31 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         motherboardPath.empty() ? "(not found)" : motherboardPath, "N",
         processorModulePaths.size());
 
+    // Move first so any previously-published CPUs (from a prior successful
+    // CreateInfo at the same terminusName) are destroyed and their D-Bus
+    // interfaces removed before we publish the new ones.
     terminusInfos[terminusName].terminus = std::move(td);
+    auto& stored = terminusInfos[terminusName].terminus;
+
+    const uint64_t moduleIndex = parseModuleIndex(terminusName);
+    const auto cpuCount = static_cast<uint64_t>(stored.cpus.size());
+
+    for (std::size_t i = 0; i < stored.cpus.size(); ++i)
+    {
+        const uint64_t cpuIndex =
+            moduleIndex * cpuCount + static_cast<uint64_t>(i);
+
+        const std::string cpuPath =
+            std::format("{}/cpu/CPU_{}", inventoryPath, cpuIndex);
+        const std::string componentPath =
+            std::format("{}/component/HGX_CPU_{}", inventoryPath, cpuIndex);
+        const std::string boardPath = std::format(
+            "{}/board/HGX_ProcessorModule_{}", inventoryPath, moduleIndex);
+
+        stored.cpus[i].publish(*objServer, cpuPath, componentPath, boardPath,
+                               cpuIndex);
+        lg2::info("Published CPU {I} at {P}", "I", cpuIndex, "P", cpuPath);
+    }
 
     lg2::info("NVIDIA inventory update complete for terminus={T}", "T",
               terminusName);
