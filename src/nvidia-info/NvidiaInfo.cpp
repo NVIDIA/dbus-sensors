@@ -451,6 +451,15 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         lg2::info("Published CPU {I} at {P}", "I", cpuIndex, "P", cpuPath);
     }
 
+    for (std::size_t i = 0; i < stored.dimms.size(); ++i)
+    {
+        const std::string dimmPath =
+            std::format("{}/dimm/ProcessorModule_{}_Memory_{}", inventoryPath,
+                        moduleIndex, i);
+        stored.dimms[i].publish(*objServer, dimmPath, motherboardPath);
+        lg2::info("Created DIMM {I} at {P}", "I", i, "P", dimmPath);
+    }
+
     lg2::info("NVIDIA inventory update complete for terminus={T}", "T",
               terminusName);
 }
