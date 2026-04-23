@@ -106,8 +106,9 @@ static constexpr auto sensorTypes =
         {"TMP464", I2CDeviceType{"tmp464", true}},
         {"TMP468", I2CDeviceType{"tmp468", true}},
         {"TMP75", I2CDeviceType{"tmp75", true}},
-        {"TMP75C", I2CDeviceType{"tmp75c", true}},
+        {"ADT7461", I2CDeviceType{"adt7461", true}},
         {"W83773G", I2CDeviceType{"w83773g", true}},
+        {"TMP75C", I2CDeviceType{"tmp75c", true}},
     });
 
 std::string getPlatform()
