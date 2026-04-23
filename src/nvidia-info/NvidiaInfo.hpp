@@ -38,6 +38,8 @@ namespace nvidia::info
 inline constexpr std::string_view defaultInfoPath =
     "/xyz/openbmc_project/inventory/system";
 
+inline constexpr std::string_view persistedJsonDir = "/var/lib/nvidia-info";
+
 inline constexpr std::string_view mapperBusName =
     "xyz.openbmc_project.ObjectMapper";
 inline constexpr std::string_view mapperPath =
@@ -61,6 +63,7 @@ inline constexpr std::string_view nvidiaInfoInterface =
 
 struct TerminusInfo
 {
+    std::string rawJson;
     TerminusData terminus;
 };
 
@@ -100,7 +103,10 @@ class NvidiaInfo
                                   const std::string& jsonStr);
 
     void clearTerminusInfo(const std::string& terminusName);
-    void updateTerminusInfo(const std::string& terminusName, TerminusData td);
+    void updateTerminusInfo(const std::string& terminusName, TerminusData td,
+                            std::string rawJson);
+
+    void loadPersistedInfoFiles();
 
     void setupMotherboardMatch();
     void discoverMotherboardPath(std::function<void()> callback);

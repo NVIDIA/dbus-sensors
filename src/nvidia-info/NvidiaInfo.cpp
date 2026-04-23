@@ -29,6 +29,8 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -40,12 +42,96 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <variant>
 #include <vector>
 
 namespace nvidia::info
 {
+
+namespace
+{
+
+bool persistInfoJson(int32_t processorModuleIndex, const std::string& jsonStr)
+{
+    namespace fs = std::filesystem;
+
+    const fs::path dir{std::string(persistedJsonDir)};
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (ec)
+    {
+        lg2::error("Failed to create info directory {D}: {E}", "D",
+                   persistedJsonDir, "E", ec.message());
+        return false;
+    }
+
+    const fs::path finalPath =
+        dir / std::format("ProcessorModule_{}_Info.json", processorModuleIndex);
+    const fs::path tempPath = std::format("{}.tmp", finalPath.string());
+
+    try
+    {
+        std::ofstream out(tempPath.string(),
+                          std::ios::binary | std::ios::out | std::ios::trunc);
+        if (!out.good())
+        {
+            lg2::error("Failed to open temp info file {F}", "F",
+                       tempPath.string());
+            return false;
+        }
+        out << jsonStr;
+        out.flush();
+        if (!out.good())
+        {
+            lg2::error("Failed to write temp info file {F}", "F",
+                       tempPath.string());
+            fs::remove(tempPath, ec);
+            return false;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Exception while writing temp info file {F}: {E}", "F",
+                   tempPath.string(), "E", e.what());
+        ec.clear();
+        fs::remove(tempPath, ec);
+        return false;
+    }
+
+    fs::rename(tempPath, finalPath, ec);
+    if (ec)
+    {
+        lg2::error("Failed to rename {T} to {F}: {E}", "T", tempPath.string(),
+                   "F", finalPath.string(), "E", ec.message());
+        fs::remove(tempPath, ec);
+        return false;
+    }
+
+    lg2::info("Persisted info JSON to {F}", "F", finalPath.string());
+    return true;
+}
+
+void removePersistedFile(int32_t processorModuleIndex)
+{
+    namespace fs = std::filesystem;
+    const fs::path path = fs::path(std::string(persistedJsonDir)) /
+        std::format("ProcessorModule_{}_Info.json", processorModuleIndex);
+    std::error_code ec;
+    fs::remove(path, ec);
+    if (ec)
+    {
+        lg2::warning("Failed to remove stale persisted file {F}: {E}", "F",
+                     path.string(), "E", ec.message());
+    }
+    else
+    {
+        lg2::info("Removed stale persisted file: {F}", "F", path.string());
+    }
+}
+
+} // namespace
 
 NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
                        std::shared_ptr<sdbusplus::asio::connection> conn,
@@ -56,7 +142,28 @@ NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
 {
     lg2::info("NVIDIA Info inventory path: {I}", "I", inventoryPath);
 
+    {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::create_directories(fs::path(std::string(persistedJsonDir)), ec);
+        if (ec)
+        {
+            lg2::error("Failed to create info directory {D}: {E}", "D",
+                       persistedJsonDir, "E", ec.message());
+        }
+    }
+
     setupMotherboardMatch();
+
+    try
+    {
+        loadPersistedInfoFiles();
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Failed to recover persisted info files on startup: {E}",
+                   "E", e.what());
+    }
 
     const std::string serviceObjPath(nvidiaInfoObjPath);
     const std::string serviceInterfaceName(nvidiaInfoInterface);
@@ -158,7 +265,50 @@ void NvidiaInfo::setupMotherboardMatch()
                                 {
                                     return;
                                 }
-                                discoverPaths([]() {});
+                                discoverPaths([this]() {
+                                    try
+                                    {
+                                        if (terminusInfos.empty())
+                                        {
+                                            return;
+                                        }
+                                        if (motherboardPath.empty() &&
+                                            processorModulePaths.empty())
+                                        {
+                                            return;
+                                        }
+                                        for (auto& [name, inv] : terminusInfos)
+                                        {
+                                            if (inv.rawJson.empty())
+                                            {
+                                                continue;
+                                            }
+                                            try
+                                            {
+                                                TerminusData td =
+                                                    Json::parse(inv.rawJson)
+                                                        .get<TerminusData>();
+                                                validate(td);
+                                                updateTerminusInfo(
+                                                    name, std::move(td),
+                                                    std::string(inv.rawJson));
+                                            }
+                                            catch (const std::exception& e)
+                                            {
+                                                lg2::error(
+                                                    "Deferred replay failed "
+                                                    "for terminus {T}: {E}",
+                                                    "T", name, "E", e.what());
+                                            }
+                                        }
+                                    }
+                                    catch (const std::exception& e)
+                                    {
+                                        lg2::error("Exception in deferred "
+                                                   "motherboard discovery: {E}",
+                                                   "E", e.what());
+                                    }
+                                });
                             });
                         break;
                     }
@@ -340,7 +490,8 @@ void NvidiaInfo::createInfoFromFile(const std::string& filePath)
         lg2::critical("CreateInfoFromFile rejected for terminus {T}: {E}", "T",
                       terminusName, "E", e.what());
         clearTerminusInfo(terminusName);
-        // removePersistedFile is added in a later commit.
+        removePersistedFile(
+            static_cast<int32_t>(parseModuleIndex(terminusName)));
         throw sdbusplus::exception::SdBusError(
             -EINVAL,
             std::format("CreateInfoFromFile rejected: {}", e.what()).c_str());
@@ -351,10 +502,12 @@ void NvidiaInfo::createInfoFromFile(const std::string& filePath)
     // TerminusData now contains non-copyable NvidiaCpu objects, so we
     // indirect through a shared_ptr and move out of it on invocation.
     auto tdPtr = std::make_shared<TerminusData>(std::move(td));
-    discoverPaths([this, terminusName, tdPtr]() mutable {
+    auto rawPtr = std::make_shared<std::string>(std::move(rawJson));
+    discoverPaths([this, terminusName, tdPtr, rawPtr]() mutable {
         try
         {
-            updateTerminusInfo(terminusName, std::move(*tdPtr));
+            updateTerminusInfo(terminusName, std::move(*tdPtr),
+                               std::move(*rawPtr));
         }
         catch (const std::exception& e)
         {
@@ -390,33 +543,47 @@ void NvidiaInfo::createInfoFromJsonString(int32_t processorModuleIndex,
         lg2::critical("CreateInfo rejected for terminus {T}: {E}", "T",
                       terminusName, "E", e.what());
         clearTerminusInfo(terminusName);
-        // removePersistedFile is added in a later commit.
+        removePersistedFile(processorModuleIndex);
         throw sdbusplus::exception::SdBusError(
             -EINVAL,
             std::format("CreateInfo rejected: {}", e.what()).c_str());
     }
 
     auto tdPtr = std::make_shared<TerminusData>(std::move(td));
-    discoverPaths([this, terminusName, tdPtr]() mutable {
+    auto rawPtr = std::make_shared<std::string>(jsonStr);
+    discoverPaths([this, terminusName, processorModuleIndex, tdPtr,
+                   rawPtr]() mutable {
         try
         {
-            updateTerminusInfo(terminusName, std::move(*tdPtr));
+            updateTerminusInfo(terminusName, std::move(*tdPtr),
+                               std::string(*rawPtr));
         }
         catch (const std::exception& e)
         {
             lg2::error("CreateInfo: exception publishing terminus {T}: {E}",
                        "T", terminusName, "E", e.what());
+            return;
+        }
+        if (!persistInfoJson(processorModuleIndex, *rawPtr))
+        {
+            lg2::critical(
+                "Failed to persist info JSON for terminus {T}; exiting "
+                "to preserve round-trip guarantee",
+                "T", terminusName);
+            std::exit(EXIT_FAILURE);
         }
     });
 }
 
 void NvidiaInfo::clearTerminusInfo(const std::string& terminusName)
 {
-    terminusInfos[terminusName] = TerminusInfo{};
+    // Preserve rawJson so the deferred replay loop can re-parse the last
+    // known good payload once motherboard/ProcessorModule paths appear.
+    terminusInfos[terminusName].terminus = TerminusData{};
 }
 
 void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
-                                    TerminusData td)
+                                    TerminusData td, std::string rawJson)
 {
     lg2::info(
         "Updating NVIDIA inventory for terminus={T} (motherboard={M}, "
@@ -425,11 +592,15 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         motherboardPath.empty() ? "(not found)" : motherboardPath, "N",
         processorModulePaths.size());
 
-    // Move first so any previously-published CPUs (from a prior successful
-    // CreateInfo at the same terminusName) are destroyed and their D-Bus
-    // interfaces removed before we publish the new ones.
-    terminusInfos[terminusName].terminus = std::move(td);
-    auto& stored = terminusInfos[terminusName].terminus;
+    // Destruct old publisher objects first (removes their D-Bus interfaces)
+    // before replacing with the new ones. Handles first-call and
+    // replay-call cases uniformly.
+    clearTerminusInfo(terminusName);
+
+    auto& entry = terminusInfos[terminusName];
+    entry.terminus = std::move(td);
+    entry.rawJson = std::move(rawJson);
+    auto& stored = entry.terminus;
 
     const uint64_t moduleIndex = parseModuleIndex(terminusName);
     const auto cpuCount = static_cast<uint64_t>(stored.cpus.size());
@@ -499,6 +670,65 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
 
     lg2::info("NVIDIA inventory update complete for terminus={T}", "T",
               terminusName);
+}
+
+void NvidiaInfo::loadPersistedInfoFiles()
+{
+    namespace fs = std::filesystem;
+    static constexpr std::string_view fileSuffix = "_Info.json";
+
+    std::error_code ec;
+    const fs::path infoDir{std::string(persistedJsonDir)};
+    const bool dirExists = fs::exists(infoDir, ec);
+    if (ec)
+    {
+        lg2::error(
+            "Info directory {D} could not be checked: error code {C}, {M}", "D",
+            persistedJsonDir, "C", ec.value(), "M", ec.message());
+        return;
+    }
+    if (!dirExists)
+    {
+        lg2::info("Info directory {D} does not exist, skipping recovery", "D",
+                  persistedJsonDir);
+        return;
+    }
+
+    try
+    {
+        for (const auto& entry : fs::directory_iterator(infoDir))
+        {
+            if (!entry.is_regular_file())
+            {
+                continue;
+            }
+
+            const std::string filename = entry.path().filename().string();
+            if (!filename.ends_with(fileSuffix))
+            {
+                continue;
+            }
+
+            lg2::info("Recovery: loading existing info file: {F}", "F",
+                      entry.path().string());
+            try
+            {
+                createInfoFromFile(entry.path().string());
+            }
+            catch (const std::exception& e)
+            {
+                lg2::error(
+                    "Recovery: exception while loading info file {F}, "
+                    "skipped: {E}",
+                    "F", entry.path().string(), "E", e.what());
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Failed to scan info directory {D}: {E}", "D",
+                   persistedJsonDir, "E", e.what());
+    }
 }
 
 } // namespace nvidia::info
