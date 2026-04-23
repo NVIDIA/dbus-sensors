@@ -119,8 +119,8 @@ void from_json(const Json& j, TerminusData& t)
 {
     j.at("Processor").get_to(t.cpus);
     j.at("Memory").get_to(t.dimms);
+    j.at("PCIeSlots").get_to(t.pcieSlots);
     // Later commits populate the remaining sections:
-    //   j.at("PCIeSlots").get_to(t.pcieSlots);
     //   j.at("Security").get_to(t.tpms);
 }
 
@@ -152,6 +152,7 @@ void validate(TerminusData& t)
 {
     validateEach(t.cpus, "Processor");
     validateEach(t.dimms, "Memory");
+    validateEach(t.pcieSlots, "PCIeSlots");
 }
 
 } // namespace info

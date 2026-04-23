@@ -460,6 +460,34 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         lg2::info("Created DIMM {I} at {P}", "I", i, "P", dimmPath);
     }
 
+    if (!stored.pcieSlots.empty())
+    {
+        auto it = processorModulePaths.find(moduleIndex);
+        if (it == processorModulePaths.end())
+        {
+            lg2::error("No processor module path found for module index {I} "
+                       "(terminus {T}) — skipping PCIe slot publish",
+                       "I", moduleIndex, "T", terminusName);
+        }
+        else
+        {
+            const std::string& modulePath = it->second;
+            for (std::size_t i = 0; i < stored.pcieSlots.size(); ++i)
+            {
+                if (!stored.pcieSlots[i].isPresent())
+                {
+                    continue;
+                }
+                std::string pciePath = std::format(
+                    "{}/{}_pcieslot{}", modulePath, terminusName, i);
+                stored.pcieSlots[i].publish(*objServer, pciePath, modulePath,
+                                            moduleIndex);
+                lg2::info("Created PCIe slot inventory object: {P}", "P",
+                          pciePath);
+            }
+        }
+    }
+
     lg2::info("NVIDIA inventory update complete for terminus={T}", "T",
               terminusName);
 }

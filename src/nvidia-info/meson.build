@@ -3,6 +3,7 @@ nvidia_info_sources = files(
     'NvidiaInfoCpu.cpp',
     'NvidiaInfoDimm.cpp',
     'NvidiaInfoMain.cpp',
+    'NvidiaInfoPcie.cpp',
     'NvidiaInfoSchema.cpp',
 )
 
