@@ -19,9 +19,14 @@
 #include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus/match.hpp>
 
 #include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -30,6 +35,19 @@ namespace nvidia::info
 
 inline constexpr std::string_view defaultInfoPath =
     "/xyz/openbmc_project/inventory/system";
+
+inline constexpr std::string_view mapperBusName =
+    "xyz.openbmc_project.ObjectMapper";
+inline constexpr std::string_view mapperPath =
+    "/xyz/openbmc_project/object_mapper";
+inline constexpr std::string_view mapperInterface =
+    "xyz.openbmc_project.ObjectMapper";
+inline constexpr std::string_view systemInterface =
+    "xyz.openbmc_project.Inventory.Item.System";
+inline constexpr std::string_view boardInterface =
+    "xyz.openbmc_project.Inventory.Item.Board";
+inline constexpr std::string_view processorModuleInterface =
+    "xyz.openbmc_project.Inventory.Item.ProcessorModule";
 
 // D-Bus service constants for the CreateInfo method
 inline constexpr std::string_view nvidiaInfoService =
@@ -59,13 +77,24 @@ class NvidiaInfo
     std::shared_ptr<sdbusplus::asio::object_server> objServer;
 
     std::string inventoryPath;
+    std::string motherboardPath;
+    std::map<uint64_t, std::string> processorModulePaths;
+    std::unique_ptr<sdbusplus::bus::match_t> interfaceAddedMatch;
 
     // D-Bus interface that exposes CreateInfo method
     std::shared_ptr<sdbusplus::asio::dbus_interface> serviceIface;
 
+    static std::string extractTerminusName(const std::string& filePath);
+    static uint64_t parseModuleIndex(std::string_view terminusName);
+
     void createInfoFromFile(const std::string& filePath);
     void createInfoFromJsonString(int32_t processorModuleIndex,
                                   const std::string& jsonStr);
+
+    void setupMotherboardMatch();
+    void discoverMotherboardPath(std::function<void()> callback);
+    void discoverProcessorModulePaths(std::function<void()> callback);
+    void discoverPaths(std::function<void()> callback);
 };
 
 } // namespace nvidia::info
