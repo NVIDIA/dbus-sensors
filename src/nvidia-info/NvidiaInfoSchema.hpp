@@ -20,6 +20,7 @@
 #include "NvidiaInfoDimm.hpp"
 #include "NvidiaInfoEnums.hpp"
 #include "NvidiaInfoPcie.hpp"
+#include "NvidiaInfoTpm.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -31,13 +32,13 @@ namespace info
 {
 
 // A parsed and (after validate()) validated in-memory representation of a
-// per-terminus Info JSON payload. Later commits will grow this with
-// vector<NvidiaTpm>.
+// per-terminus Info JSON payload.
 struct TerminusData
 {
     std::vector<NvidiaCpu> cpus;
     std::vector<NvidiaDimm> dimms;
     std::vector<NvidiaPcie> pcieSlots;
+    std::vector<NvidiaTpm> tpms;
 };
 
 void from_json(const Json& j, TerminusData& t);

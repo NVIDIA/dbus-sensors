@@ -488,6 +488,15 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         }
     }
 
+    for (std::size_t i = 0; i < stored.tpms.size(); ++i)
+    {
+        std::string tpmPath =
+            std::format("{}/chassis/motherboard/{}_tpm{}", inventoryPath,
+                        terminusName, i);
+        stored.tpms[i].publish(*objServer, tpmPath);
+        lg2::info("Created TPM inventory object: {P}", "P", tpmPath);
+    }
+
     lg2::info("NVIDIA inventory update complete for terminus={T}", "T",
               terminusName);
 }
