@@ -21,17 +21,23 @@
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/exception.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
 
+#include <cerrno>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <format>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -298,15 +304,125 @@ void NvidiaInfo::discoverPaths(std::function<void()> callback)
 void NvidiaInfo::createInfoFromFile(const std::string& filePath)
 {
     lg2::info("CreateInfoFromFile called (file={F})", "F", filePath);
-    discoverPaths([]() {});
+
+    std::string rawJson;
+    try
+    {
+        std::ifstream in(filePath);
+        if (!in.good())
+        {
+            throw std::runtime_error(
+                std::format("failed to open {}", filePath));
+        }
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        rawJson = ss.str();
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("createInfoFromFile: {E}", "E", e.what());
+        throw sdbusplus::exception::SdBusError(
+            -EINVAL,
+            std::format("CreateInfoFromFile read failed: {}", e.what())
+                .c_str());
+    }
+
+    const std::string terminusName = extractTerminusName(filePath);
+
+    TerminusData td;
+    try
+    {
+        td = Json::parse(rawJson).get<TerminusData>();
+        validate(td);
+    }
+    catch (const std::exception& e)
+    {
+        lg2::critical("CreateInfoFromFile rejected for terminus {T}: {E}", "T",
+                      terminusName, "E", e.what());
+        clearTerminusInfo(terminusName);
+        // removePersistedFile is added in a later commit.
+        throw sdbusplus::exception::SdBusError(
+            -EINVAL,
+            std::format("CreateInfoFromFile rejected: {}", e.what()).c_str());
+    }
+
+    discoverPaths([this, terminusName, td = std::move(td)]() mutable {
+        try
+        {
+            updateTerminusInfo(terminusName, std::move(td));
+        }
+        catch (const std::exception& e)
+        {
+            lg2::error(
+                "CreateInfoFromFile: exception publishing terminus {T}: {E}",
+                "T", terminusName, "E", e.what());
+        }
+    });
 }
 
 void NvidiaInfo::createInfoFromJsonString(int32_t processorModuleIndex,
                                           const std::string& jsonStr)
 {
+    if (processorModuleIndex != 0 && processorModuleIndex != 1)
+    {
+        throw sdbusplus::exception::SdBusError(
+            -EINVAL, "processor module index must be 0 or 1");
+    }
+    const std::string terminusName =
+        std::format("ProcessorModule_{}", processorModuleIndex);
+
     lg2::info("CreateInfo called (JSON length={L}, processorModule={M})", "L",
               jsonStr.size(), "M", processorModuleIndex);
-    discoverPaths([]() {});
+
+    TerminusData td;
+    try
+    {
+        td = Json::parse(jsonStr).get<TerminusData>();
+        validate(td);
+    }
+    catch (const std::exception& e)
+    {
+        lg2::critical("CreateInfo rejected for terminus {T}: {E}", "T",
+                      terminusName, "E", e.what());
+        clearTerminusInfo(terminusName);
+        // removePersistedFile is added in a later commit.
+        throw sdbusplus::exception::SdBusError(
+            -EINVAL,
+            std::format("CreateInfo rejected: {}", e.what()).c_str());
+    }
+
+    discoverPaths([this, terminusName, td = std::move(td)]() mutable {
+        try
+        {
+            updateTerminusInfo(terminusName, std::move(td));
+        }
+        catch (const std::exception& e)
+        {
+            lg2::error("CreateInfo: exception publishing terminus {T}: {E}",
+                       "T", terminusName, "E", e.what());
+        }
+    });
+}
+
+void NvidiaInfo::clearTerminusInfo(const std::string& terminusName)
+{
+    terminusInfos[terminusName] = TerminusInfo{};
+}
+
+void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
+                                    TerminusData td)
+{
+    lg2::info(
+        "Updating NVIDIA inventory for terminus={T} (motherboard={M}, "
+        "processor_modules={N})",
+        "T", terminusName, "M",
+        motherboardPath.empty() ? "(not found)" : motherboardPath, "N",
+        processorModulePaths.size());
+
+    terminusInfos[terminusName].terminus = std::move(td);
+
+    lg2::info("NVIDIA inventory update complete for terminus={T}", "T",
+              terminusName);
 }
 
 } // namespace nvidia::info

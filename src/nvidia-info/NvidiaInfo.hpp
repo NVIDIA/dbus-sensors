@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "NvidiaInfoSchema.hpp"
+
 #include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -57,6 +59,11 @@ inline constexpr std::string_view nvidiaInfoObjPath =
 inline constexpr std::string_view nvidiaInfoInterface =
     "xyz.openbmc_project.NvidiaInfo";
 
+struct TerminusInfo
+{
+    TerminusData terminus;
+};
+
 class NvidiaInfo
 {
   public:
@@ -79,6 +86,7 @@ class NvidiaInfo
     std::string inventoryPath;
     std::string motherboardPath;
     std::map<uint64_t, std::string> processorModulePaths;
+    std::map<std::string, TerminusInfo> terminusInfos;
     std::unique_ptr<sdbusplus::bus::match_t> interfaceAddedMatch;
 
     // D-Bus interface that exposes CreateInfo method
@@ -90,6 +98,9 @@ class NvidiaInfo
     void createInfoFromFile(const std::string& filePath);
     void createInfoFromJsonString(int32_t processorModuleIndex,
                                   const std::string& jsonStr);
+
+    void clearTerminusInfo(const std::string& terminusName);
+    void updateTerminusInfo(const std::string& terminusName, TerminusData td);
 
     void setupMotherboardMatch();
     void discoverMotherboardPath(std::function<void()> callback);

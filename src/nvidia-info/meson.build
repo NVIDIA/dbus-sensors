@@ -1,6 +1,7 @@
 nvidia_info_sources = files(
     'NvidiaInfo.cpp',
     'NvidiaInfoMain.cpp',
+    'NvidiaInfoSchema.cpp',
 )
 
 nvidia_info_include_dir = include_directories('.', is_system: true)
