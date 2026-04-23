@@ -195,6 +195,10 @@ if get_option('nvidia-gpu').allowed()
     subdir('nvidia-gpu')
 endif
 
+if get_option('nvidia-info').allowed()
+    subdir('nvidia-info')
+endif
+
 if get_option('procstatus').allowed()
     executable(
         'processorstatus',

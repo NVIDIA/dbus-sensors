@@ -101,6 +101,12 @@ option(
     description: 'Enable GPU sensor.',
 )
 option(
+    'nvidia-info',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable NVIDIA JSON-based hardware info.',
+)
+option(
     'external',
     type: 'feature',
     value: 'enabled',
