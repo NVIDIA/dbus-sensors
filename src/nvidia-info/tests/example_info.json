@@ -1,0 +1,80 @@
+{
+  "Processor": [
+    {
+      "Socket": 1,
+      "Family": "ARMv9",
+      "Manufacturer": "NVIDIA",
+      "Id": "0x036b0410",
+      "Version": "Vera B01",
+      "MaxSpeedInMhz": 4000,
+      "SerialNumber": "00000000-00000000-00000000-00000001",
+      "CoreCount": 88,
+      "ThreadCount": 176,
+      "Model": "Vera",
+      "ModelRevision": "B01",
+      "SKU": "VERA-000"
+    }
+  ],
+  "Memory": [
+    {
+      "MemoryTotalWidth": 144,
+      "MemoryDataWidth": 128,
+      "MemorySizeKB": 26843545,
+      "FormFactor": "SOCAMM",
+      "MemoryDeviceLocator": "LP5x_16",
+      "MemoryType": "LPDDR5_SDRAM",
+      "MaxMemorySpeedInMHz": 7500,
+      "Manufacturer": "SAMSUNG",
+      "SerialNumber": "0000000000000001",
+      "SKU": "MEM-LP5X-192G",
+      "PartNumber": "M564KYLC3CK0-CCTS7",
+      "MemoryConfiguredSpeedInMhz": 7500,
+      "Model": "LPDDR5-7500",
+      "ECC": true,
+      "MemoryMedia": "DRAM",
+      "ProcessorModuleIndex": 1
+    },
+    {
+      "MemoryTotalWidth": 144,
+      "MemoryDataWidth": 128,
+      "MemorySizeKB": 26843545,
+      "FormFactor": "SOCAMM",
+      "MemoryDeviceLocator": "LP5x_17",
+      "MemoryType": "LPDDR5_SDRAM",
+      "MaxMemorySpeedInMHz": 7500,
+      "Manufacturer": "SAMSUNG",
+      "SerialNumber": "0000000000000002",
+      "SKU": "MEM-LP5X-192G",
+      "PartNumber": "M564KYLC3CK0-CCTS7",
+      "MemoryConfiguredSpeedInMhz": 7500,
+      "Model": "LPDDR5-7500",
+      "ECC": true,
+      "MemoryMedia": "DRAM",
+      "ProcessorModuleIndex": 1
+    }
+  ],
+  "PCIeSlots": [
+    {
+      "Present": true,
+      "Generation": 5,
+      "HotPluggable": true,
+      "SlotType": "CEM",
+      "MaxLinkSpeed": 5,
+      "MaxLinkWidth": 16,
+      "ProcessorModuleIndex": 1,
+      "SegmentControllerIndex": 0,
+      "PortType": "Bi-directional",
+      "PortProtocol": "CXL",
+      "RootPort": 0,
+      "LocationCode": "UPHY0:0-15",
+      "Lanes": 16
+    }
+  ],
+  "TPM": [
+    {
+      "Manufacturer": "NTC",
+      "MajorSpecVersion": "2.0",
+      "Version": "7.2.3.0"
+    }
+  ]
+}

@@ -1,0 +1,323 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "description": "Schema for nvidia-info per-terminus JSON files (e.g. ProcessorModule_0_Info.json). Processors and memory modules listed in Processor[] and Memory[] are treated as present. PCIe slots require a Present field.",
+    "type": "object",
+    "properties": {
+        "Processor": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/Processor" }
+        },
+        "Memory": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/Memory" }
+        },
+        "PCIeSlots": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/PCIeSlot" }
+        },
+        "TPM": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/TPM" }
+        }
+    },
+    "required": ["Processor", "Memory", "PCIeSlots", "TPM"],
+    "$defs": {
+        "Processor": {
+            "type": "object",
+            "properties": {
+                "Socket": {
+                    "description": "Socket index for the processor (0-255)",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255
+                },
+                "Family": {
+                    "description": "Processor family (e.g., ARMv9)",
+                    "type": "string"
+                },
+                "Manufacturer": {
+                    "description": "Processor manufacturer name",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "Id": {
+                    "description": "Processor ID as a 64-bit value in hexadecimal: 1–16 hex digits, optional leading 0x or 0X (e.g. 0x036b0410 or 036b0410).",
+                    "type": "string",
+                    "pattern": "^(0[xX])?[0-9a-fA-F]{1,16}$"
+                },
+                "Version": {
+                    "description": "Processor version string (e.g., Vera B01)",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "MaxSpeedInMhz": {
+                    "description": "Maximum processor speed in MHz (PoR Max frequency, must be > 0)",
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "SerialNumber": {
+                    "description": "Processor serial number (ECID from bl params)",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "PartNumber": {
+                    "description": "Processor part number from FRU",
+                    "type": "string"
+                },
+                "CoreCount": {
+                    "description": "Number of processor cores (must be > 0)",
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "ThreadCount": {
+                    "description": "Number of processor threads (must be > 0)",
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "Model": {
+                    "description": "Processor model name (e.g., Vera)",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "ModelRevision": {
+                    "description": "Processor model revision (e.g., B01)",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "SKU": {
+                    "description": "Processor SKU identifier",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "Socket",
+                "Family",
+                "Manufacturer",
+                "Id",
+                "Version",
+                "MaxSpeedInMhz",
+                "SerialNumber",
+                "CoreCount",
+                "ThreadCount",
+                "Model",
+                "ModelRevision",
+                "SKU"
+            ]
+        },
+        "Memory": {
+            "type": "object",
+            "properties": {
+                "MemoryTotalWidth": {
+                    "description": "Total width of the memory device in bits",
+                    "type": "integer"
+                },
+                "MemoryDataWidth": {
+                    "description": "Data width of the memory device in bits",
+                    "type": "integer"
+                },
+                "MemorySizeKB": {
+                    "description": "Size of the memory device in kilobytes",
+                    "type": "integer"
+                },
+                "FormFactor": {
+                    "description": "Physical form factor of the memory device.",
+                    "$comment": "Allow-list: the `enum` array is the complete set of accepted FormFactor strings.",
+                    "type": "string",
+                    "enum": [
+                        "RDIMM",
+                        "UDIMM",
+                        "SO_DIMM",
+                        "LRDIMM",
+                        "Mini_RDIMM",
+                        "Mini_UDIMM",
+                        "SO_RDIMM_72b",
+                        "SO_UDIMM_72b",
+                        "SO_DIMM_16b",
+                        "SO_DIMM_32b",
+                        "Die",
+                        "SOCAMM"
+                    ]
+                },
+                "MemoryDeviceLocator": {
+                    "description": "Location of the memory device (e.g., LP5x_0)",
+                    "type": "string",
+                    "minLength": 1
+                },
+                "MemoryType": {
+                    "description": "Memory device type; must be one of the allowed DeviceType values.",
+                    "type": "string",
+                    "enum": [
+                        "DDR", "DDR2", "DDR3", "DDR4", "DDR4E_SDRAM",
+                        "DDR5", "LPDDR5_SDRAM", "LPDDR4_SDRAM",
+                        "LPDDR3_SDRAM", "DDR2_SDRAM_FB_DIMM",
+                        "DDR2_SDRAM_FB_DIMM_PROBE", "DDR_SGRAM",
+                        "ROM", "SDRAM", "EDO", "FastPageMode",
+                        "PipelinedNibble", "Logical", "HBM", "HBM2", "HBM3"
+                    ]
+                },
+                "MaxMemorySpeedInMHz": {
+                    "description": "Maximum memory speed in MHz",
+                    "type": "integer"
+                },
+                "Manufacturer": {
+                    "description": "Memory manufacturer name",
+                    "type": "string"
+                },
+                "SerialNumber": {
+                    "description": "Memory device serial number",
+                    "type": "string"
+                },
+                "SKU": {
+                    "description": "Memory device SKU identifier",
+                    "type": "string"
+                },
+                "PartNumber": {
+                    "description": "Memory device part number",
+                    "type": "string"
+                },
+                "MemoryConfiguredSpeedInMhz": {
+                    "description": "Configured memory speed in MHz",
+                    "type": "integer"
+                },
+                "Model": {
+                    "description": "Memory device model name",
+                    "type": "string"
+                },
+                "ECC": {
+                    "description": "Whether ECC is supported",
+                    "type": "boolean"
+                },
+                "MemoryMedia": {
+                    "description": "Memory media type; must be one of the allowed literals (case-sensitive in JSON).",
+                    "type": "string",
+                    "enum": ["DRAM", "NAND", "Intel3DXPoint"]
+                },
+                "ProcessorModuleIndex": {
+                    "description": "Processor module index this memory belongs to",
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "MemoryTotalWidth",
+                "MemoryDataWidth",
+                "MemorySizeKB",
+                "FormFactor",
+                "MemoryDeviceLocator",
+                "MemoryType",
+                "MaxMemorySpeedInMHz",
+                "Manufacturer",
+                "SerialNumber",
+                "SKU",
+                "PartNumber",
+                "MemoryConfiguredSpeedInMhz",
+                "Model",
+                "ECC",
+                "MemoryMedia",
+                "ProcessorModuleIndex"
+            ]
+        },
+        "PCIeSlot": {
+            "type": "object",
+            "properties": {
+                "Present": {
+                    "description": "Whether the PCIe slot is present.",
+                    "type": "boolean"
+                },
+                "Generation": {
+                    "description": "PCIe generation number (0=unknown, 1-6 = Gen1-Gen6)",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 6
+                },
+                "HotPluggable": {
+                    "description": "Whether the slot supports hot-plugging",
+                    "type": "boolean"
+                },
+                "SlotType": {
+                    "description": "Physical slot type (e.g., CEM, U2, None)",
+                    "type": "string"
+                },
+                "MaxLinkSpeed": {
+                    "description": "Maximum link speed generation number (0-6)",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 6
+                },
+                "MaxLinkWidth": {
+                    "description": "Maximum number of PCIe lanes (0-64)",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 64
+                },
+                "Lanes": {
+                    "description": "Number of active PCIe lanes (0-64)",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 64
+                },
+                "ProcessorModuleIndex": {
+                    "description": "Processor module index this slot belongs to",
+                    "type": "integer"
+                },
+                "SegmentControllerIndex": {
+                    "description": "Segment controller (UPHY) index",
+                    "type": "integer"
+                },
+                "PortType": {
+                    "description": "Port type (e.g., Bi-directional, None)",
+                    "type": "string"
+                },
+                "PortProtocol": {
+                    "description": "Port protocol (e.g., PCIe, CXL, NVCHI, None)",
+                    "type": "string"
+                },
+                "RootPort": {
+                    "description": "Root port index within the segment controller",
+                    "type": "integer"
+                },
+                "LocationCode": {
+                    "description": "Physical lane location code (e.g., UPHY0:0-16)",
+                    "type": "string",
+                    "minLength": 1
+                }
+            },
+            "required": [
+                "Present",
+                "Generation",
+                "HotPluggable",
+                "SlotType",
+                "MaxLinkSpeed",
+                "MaxLinkWidth",
+                "Lanes",
+                "ProcessorModuleIndex",
+                "SegmentControllerIndex",
+                "PortType",
+                "PortProtocol",
+                "RootPort",
+                "LocationCode"
+            ]
+        },
+        "TPM": {
+            "type": "object",
+            "properties": {
+                "Manufacturer": {
+                    "description": "TPM vendor/manufacturer ID",
+                    "type": "string"
+                },
+                "MajorSpecVersion": {
+                    "description": "TPM major specification version",
+                    "type": "string"
+                },
+                "Version": {
+                    "description": "TPM firmware version",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "Manufacturer",
+                "MajorSpecVersion",
+                "Version"
+            ]
+        }
+    }
+}
