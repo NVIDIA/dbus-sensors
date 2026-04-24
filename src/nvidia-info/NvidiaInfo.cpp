@@ -53,13 +53,47 @@ namespace nvidia::info
 namespace
 {
 
+inline constexpr std::string_view persistedFilenamePrefix = "ProcessorModule_";
+inline constexpr std::string_view persistedFilenameSuffix = "_Info.json";
+
+std::filesystem::path persistedPathFor(int32_t processorModuleIndex)
+{
+    return std::filesystem::path(std::string(persistedJsonDir)) /
+           std::format("{}{}{}", persistedFilenamePrefix,
+                       processorModuleIndex, persistedFilenameSuffix);
+}
+
+// Strict inverse of persistedPathFor(): returns the module index encoded in
+// a filename of exactly the form "ProcessorModule_<digit>_Info.json", where
+// <digit> is a single character in [0-9]. Any other name returns nullopt
+// and must be ignored by callers. Restricting to one digit makes the
+// canonical-form check trivial (no leading-zero aliasing is possible) and
+// caps the supported module indices at 0..9.
+std::optional<int32_t> moduleIndexFromPersistedFilename(
+    std::string_view filename)
+{
+    if (!filename.starts_with(persistedFilenamePrefix) ||
+        !filename.ends_with(persistedFilenameSuffix))
+    {
+        return std::nullopt;
+    }
+    const std::string_view digits = filename.substr(
+        persistedFilenamePrefix.size(),
+        filename.size() - persistedFilenamePrefix.size() -
+            persistedFilenameSuffix.size());
+    if (digits.size() != 1 || digits[0] < '0' || digits[0] > '9')
+    {
+        return std::nullopt;
+    }
+    return digits[0] - '0';
+}
+
 bool persistInfoJson(int32_t processorModuleIndex, const std::string& jsonStr)
 {
     namespace fs = std::filesystem;
 
-    const fs::path dir{std::string(persistedJsonDir)};
     std::error_code ec;
-    fs::create_directories(dir, ec);
+    fs::create_directories(fs::path(std::string(persistedJsonDir)), ec);
     if (ec)
     {
         lg2::error("Failed to create info directory {D}: {E}", "D",
@@ -67,8 +101,7 @@ bool persistInfoJson(int32_t processorModuleIndex, const std::string& jsonStr)
         return false;
     }
 
-    const fs::path finalPath =
-        dir / std::format("ProcessorModule_{}_Info.json", processorModuleIndex);
+    const fs::path finalPath = persistedPathFor(processorModuleIndex);
     const fs::path tempPath = std::format("{}.tmp", finalPath.string());
 
     try
@@ -116,8 +149,7 @@ bool persistInfoJson(int32_t processorModuleIndex, const std::string& jsonStr)
 void removePersistedFile(int32_t processorModuleIndex)
 {
     namespace fs = std::filesystem;
-    const fs::path path = fs::path(std::string(persistedJsonDir)) /
-        std::format("ProcessorModule_{}_Info.json", processorModuleIndex);
+    const fs::path path = persistedPathFor(processorModuleIndex);
     std::error_code ec;
     fs::remove(path, ec);
     if (ec)
@@ -195,38 +227,6 @@ NvidiaInfo::~NvidiaInfo()
     }
 }
 
-std::string NvidiaInfo::extractTerminusName(const std::string& filePath)
-{
-    namespace fs = std::filesystem;
-    std::string filename = fs::path(filePath).stem().string();
-    if (filename.ends_with("_Info"))
-    {
-        return filename.substr(0, filename.rfind('_'));
-    }
-    return filename;
-}
-
-uint64_t NvidiaInfo::parseModuleIndex(std::string_view terminusName)
-{
-    uint64_t moduleIndex = 0;
-    std::string_view sv(terminusName);
-    const auto pos = sv.rfind('_');
-    if (pos != std::string_view::npos)
-    {
-        sv.remove_prefix(pos + 1);
-        auto [ptr, ec] =
-            std::from_chars(sv.data(), sv.data() + sv.size(), moduleIndex);
-        if (ec != std::errc{} || ptr != sv.data() + sv.size())
-        {
-            lg2::warning(
-                "Failed to parse module index from terminus '{NAME}', using 0",
-                "NAME", std::string(terminusName));
-            moduleIndex = 0;
-        }
-    }
-    return moduleIndex;
-}
-
 void NvidiaInfo::setupMotherboardMatch()
 {
     interfaceAddedMatch = std::make_unique<sdbusplus::bus::match_t>(
@@ -290,7 +290,8 @@ void NvidiaInfo::setupMotherboardMatch()
                                                         .get<TerminusData>();
                                                 validate(td);
                                                 updateTerminusInfo(
-                                                    name, std::move(td),
+                                                    name, inv.moduleIndex,
+                                                    std::move(td),
                                                     std::string(inv.rawJson));
                                             }
                                             catch (const std::exception& e)
@@ -467,24 +468,24 @@ void NvidiaInfo::discoverProcessorModulePaths(std::function<void()> callback)
 
             for (const auto& path : paths)
             {
-                auto pos = path.rfind('_');
-                if (pos != std::string::npos)
+                const auto pos = path.rfind('_');
+                if (pos == std::string::npos)
                 {
-                    try
-                    {
-                        uint64_t idx = std::stoull(path.substr(pos + 1));
-                        processorModulePaths[idx] = path;
-                        lg2::info(
-                            "Discovered processor module {I} at path: {P}", "I",
-                            idx, "P", path);
-                    }
-                    catch (const std::exception& ex)
-                    {
-                        lg2::warning(
-                            "Could not parse module index from path {P}: {E}",
-                            "P", path, "E", ex.what());
-                    }
+                    continue;
                 }
+                const char* first = path.data() + pos + 1;
+                const char* last = path.data() + path.size();
+                uint64_t idx = 0;
+                auto [ptr, ec2] = std::from_chars(first, last, idx);
+                if (ec2 != std::errc{} || ptr != last)
+                {
+                    lg2::warning("Could not parse module index from path {P}",
+                                 "P", path);
+                    continue;
+                }
+                processorModulePaths[idx] = path;
+                lg2::info("Discovered processor module {I} at path: {P}", "I",
+                          idx, "P", path);
             }
 
             if (cb)
@@ -522,32 +523,83 @@ void NvidiaInfo::discoverPaths(std::function<void()> callback)
 
 void NvidiaInfo::createInfoFromFile(const std::string& filePath)
 {
+    // Best-effort: file-based ingestion is used both for the D-Bus
+    // CreateInfoFromFile method and for scanning the persistence directory
+    // at startup. A broken file in the directory must never fail the D-Bus
+    // call or abort startup recovery — log and skip instead.
     lg2::info("CreateInfoFromFile called (file={F})", "F", filePath);
+
+    const std::string filename =
+        std::filesystem::path(filePath).filename().string();
+    const auto moduleIndex = moduleIndexFromPersistedFilename(filename);
+    if (!moduleIndex)
+    {
+        lg2::warning("Skipping info file {F}: filename {N} is not of the form "
+                     "ProcessorModule_<N>_Info.json",
+                     "F", filePath, "N", filename);
+        return;
+    }
 
     std::string rawJson;
     try
     {
-        std::ifstream in(filePath);
-        if (!in.good())
+        std::ifstream in(filePath, std::ios::binary);
+        if (!in)
         {
-            throw std::runtime_error(
-                std::format("failed to open {}", filePath));
+            lg2::warning("Skipping unreadable info file {F}", "F", filePath);
+            return;
         }
-        std::ostringstream ss;
-        ss << in.rdbuf();
-        rawJson = ss.str();
+        rawJson.assign(std::istreambuf_iterator<char>(in),
+                       std::istreambuf_iterator<char>());
     }
     catch (const std::exception& e)
     {
-        lg2::error("createInfoFromFile: {E}", "E", e.what());
-        throw sdbusplus::exception::SdBusError(
-            -EINVAL,
-            std::format("CreateInfoFromFile read failed: {}", e.what())
-                .c_str());
+        lg2::warning("Skipping info file {F} (read error): {E}", "F", filePath,
+                     "E", e.what());
+        return;
     }
 
-    const std::string terminusName = extractTerminusName(filePath);
+    try
+    {
+        processAndPublish(std::format("ProcessorModule_{}", *moduleIndex),
+                          std::move(rawJson), *moduleIndex,
+                          /*persistOnSuccess=*/false, "CreateInfoFromFile");
+    }
+    catch (const std::exception& e)
+    {
+        // processAndPublish already logged the parse/validate failure and
+        // cleared any stale terminus state. Swallow so a bad file in the
+        // persistence directory doesn't fail the caller.
+        lg2::warning("Skipping info file {F}: {E}", "F", filePath, "E",
+                     e.what());
+    }
+}
 
+void NvidiaInfo::createInfoFromJsonString(int32_t processorModuleIndex,
+                                          const std::string& jsonStr)
+{
+    // Must match the range accepted by moduleIndexFromPersistedFilename().
+    // If we ever persisted an index outside this range, startup recovery
+    // would silently refuse to load it back.
+    if (processorModuleIndex < 0 || processorModuleIndex > 9)
+    {
+        throw sdbusplus::exception::SdBusError(
+            -EINVAL, "processor module index must be in the range 0..9");
+    }
+
+    lg2::info("CreateInfo called (JSON length={L}, processorModule={M})", "L",
+              jsonStr.size(), "M", processorModuleIndex);
+
+    processAndPublish(std::format("ProcessorModule_{}", processorModuleIndex),
+                      jsonStr, processorModuleIndex,
+                      /*persistOnSuccess=*/true, "CreateInfo");
+}
+
+void NvidiaInfo::processAndPublish(std::string terminusName,
+                                   std::string rawJson, int32_t moduleIndex,
+                                   bool persistOnSuccess,
+                                   std::string_view context)
+{
     TerminusData td;
     try
     {
@@ -556,89 +608,43 @@ void NvidiaInfo::createInfoFromFile(const std::string& filePath)
     }
     catch (const std::exception& e)
     {
-        lg2::critical("CreateInfoFromFile rejected for terminus {T}: {E}", "T",
+        lg2::critical("{C} rejected for terminus {T}: {E}", "C", context, "T",
                       terminusName, "E", e.what());
         clearTerminusInfo(terminusName);
-        removePersistedFile(
-            static_cast<int32_t>(parseModuleIndex(terminusName)));
+        removePersistedFile(moduleIndex);
         throw sdbusplus::exception::SdBusError(
             -EINVAL,
-            std::format("CreateInfoFromFile rejected: {}", e.what()).c_str());
+            std::format("{} rejected: {}", context, e.what()).c_str());
     }
 
-    // Wrap td in a shared_ptr: the discoverPaths callback is type-erased
+    // Wrap td/rawJson in shared_ptrs: the discoverPaths callback is type-erased
     // through std::function, which requires its target to be copyable.
-    // TerminusData now contains non-copyable NvidiaCpu objects, so we
-    // indirect through a shared_ptr and move out of it on invocation.
+    // TerminusData contains non-copyable NvidiaCpu objects, so we indirect
+    // through shared_ptrs and move out of them on invocation.
     auto tdPtr = std::make_shared<TerminusData>(std::move(td));
     auto rawPtr = std::make_shared<std::string>(std::move(rawJson));
-    discoverPaths([this, terminusName, tdPtr, rawPtr]() mutable {
+    discoverPaths([this, name = std::move(terminusName), tdPtr, rawPtr,
+                   moduleIndex, persistOnSuccess,
+                   contextStr = std::string(context)]() mutable {
         try
         {
-            updateTerminusInfo(terminusName, std::move(*tdPtr),
-                               std::move(*rawPtr));
+            // Move rawJson when we don't need to retain it for persistence.
+            updateTerminusInfo(
+                name, moduleIndex, std::move(*tdPtr),
+                persistOnSuccess ? *rawPtr : std::move(*rawPtr));
         }
         catch (const std::exception& e)
         {
-            lg2::error(
-                "CreateInfoFromFile: exception publishing terminus {T}: {E}",
-                "T", terminusName, "E", e.what());
-        }
-    });
-}
-
-void NvidiaInfo::createInfoFromJsonString(int32_t processorModuleIndex,
-                                          const std::string& jsonStr)
-{
-    if (processorModuleIndex != 0 && processorModuleIndex != 1)
-    {
-        throw sdbusplus::exception::SdBusError(
-            -EINVAL, "processor module index must be 0 or 1");
-    }
-    const std::string terminusName =
-        std::format("ProcessorModule_{}", processorModuleIndex);
-
-    lg2::info("CreateInfo called (JSON length={L}, processorModule={M})", "L",
-              jsonStr.size(), "M", processorModuleIndex);
-
-    TerminusData td;
-    try
-    {
-        td = Json::parse(jsonStr).get<TerminusData>();
-        validate(td);
-    }
-    catch (const std::exception& e)
-    {
-        lg2::critical("CreateInfo rejected for terminus {T}: {E}", "T",
-                      terminusName, "E", e.what());
-        clearTerminusInfo(terminusName);
-        removePersistedFile(processorModuleIndex);
-        throw sdbusplus::exception::SdBusError(
-            -EINVAL,
-            std::format("CreateInfo rejected: {}", e.what()).c_str());
-    }
-
-    auto tdPtr = std::make_shared<TerminusData>(std::move(td));
-    auto rawPtr = std::make_shared<std::string>(jsonStr);
-    discoverPaths([this, terminusName, processorModuleIndex, tdPtr,
-                   rawPtr]() mutable {
-        try
-        {
-            updateTerminusInfo(terminusName, std::move(*tdPtr),
-                               std::string(*rawPtr));
-        }
-        catch (const std::exception& e)
-        {
-            lg2::error("CreateInfo: exception publishing terminus {T}: {E}",
-                       "T", terminusName, "E", e.what());
+            lg2::error("{C}: exception publishing terminus {T}: {E}", "C",
+                       contextStr, "T", name, "E", e.what());
             return;
         }
-        if (!persistInfoJson(processorModuleIndex, *rawPtr))
+        if (persistOnSuccess && !persistInfoJson(moduleIndex, *rawPtr))
         {
             lg2::critical(
                 "Failed to persist info JSON for terminus {T}; exiting "
                 "to preserve round-trip guarantee",
-                "T", terminusName);
+                "T", name);
             std::exit(EXIT_FAILURE);
         }
     });
@@ -652,7 +658,8 @@ void NvidiaInfo::clearTerminusInfo(const std::string& terminusName)
 }
 
 void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
-                                    TerminusData td, std::string rawJson)
+                                    int32_t moduleIndex, TerminusData td,
+                                    std::string rawJson)
 {
     lg2::info(
         "Updating NVIDIA inventory for terminus={T} (motherboard={M}, "
@@ -669,22 +676,25 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
     auto& entry = terminusInfos[terminusName];
     entry.terminus = std::move(td);
     entry.rawJson = std::move(rawJson);
+    entry.moduleIndex = moduleIndex;
     auto& stored = entry.terminus;
 
-    const uint64_t moduleIndex = parseModuleIndex(terminusName);
+    // Callees downstream (maps, publish signatures, path arithmetic) are
+    // all uint64_t; widen here once since the caller-facing type is int32_t.
+    const auto moduleIdx = static_cast<uint64_t>(moduleIndex);
     const auto cpuCount = static_cast<uint64_t>(stored.cpus.size());
 
     for (std::size_t i = 0; i < stored.cpus.size(); ++i)
     {
-        const uint64_t cpuIndex =
-            moduleIndex * cpuCount + static_cast<uint64_t>(i);
+        const uint64_t cpuIndex = moduleIdx * cpuCount +
+                                  static_cast<uint64_t>(i);
 
         const std::string cpuPath =
             std::format("{}/cpu/CPU_{}", inventoryPath, cpuIndex);
         const std::string componentPath =
             std::format("{}/component/HGX_CPU_{}", inventoryPath, cpuIndex);
         const std::string boardPath = std::format(
-            "{}/board/HGX_ProcessorModule_{}", inventoryPath, moduleIndex);
+            "{}/board/HGX_ProcessorModule_{}", inventoryPath, moduleIdx);
 
         stored.cpus[i].publish(*objServer, cpuPath, componentPath, boardPath,
                                cpuIndex);
@@ -695,19 +705,19 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
     {
         const std::string dimmPath =
             std::format("{}/dimm/ProcessorModule_{}_Memory_{}", inventoryPath,
-                        moduleIndex, i);
+                        moduleIdx, i);
         stored.dimms[i].publish(*objServer, dimmPath, motherboardPath);
         lg2::info("Created DIMM {I} at {P}", "I", i, "P", dimmPath);
     }
 
     if (!stored.pcieSlots.empty())
     {
-        auto it = processorModulePaths.find(moduleIndex);
+        auto it = processorModulePaths.find(moduleIdx);
         if (it == processorModulePaths.end())
         {
             lg2::error("No processor module path found for module index {I} "
                        "(terminus {T}) — skipping PCIe slot publish",
-                       "I", moduleIndex, "T", terminusName);
+                       "I", moduleIdx, "T", terminusName);
         }
         else
         {
@@ -721,7 +731,7 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
                 std::string pciePath = std::format(
                     "{}/{}_pcieslot{}", modulePath, terminusName, i);
                 stored.pcieSlots[i].publish(*objServer, pciePath, modulePath,
-                                            moduleIndex);
+                                            moduleIdx);
                 lg2::info("Created PCIe slot inventory object: {P}", "P",
                           pciePath);
             }
@@ -743,60 +753,88 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
 
 void NvidiaInfo::loadPersistedInfoFiles()
 {
+    // Recovery scans the persistence directory, but accepts *only* filenames
+    // that match the exact shape we produce in persistedPathFor():
+    // "ProcessorModule_<non-negative digits>_Info.json". Anything else is
+    // silently ignored, since no well-formed write of ours could have
+    // produced it. This supports an arbitrary number of module indices
+    // without a hardcoded list.
     namespace fs = std::filesystem;
-    static constexpr std::string_view fileSuffix = "_Info.json";
 
     std::error_code ec;
     const fs::path infoDir{std::string(persistedJsonDir)};
-    const bool dirExists = fs::exists(infoDir, ec);
+    if (!fs::exists(infoDir, ec))
+    {
+        if (ec)
+        {
+            lg2::error("Info directory {D} could not be checked: {M}", "D",
+                       persistedJsonDir, "M", ec.message());
+        }
+        return;
+    }
+
+    fs::directory_iterator dirIt(infoDir, ec);
     if (ec)
     {
-        lg2::error(
-            "Info directory {D} could not be checked: error code {C}, {M}", "D",
-            persistedJsonDir, "C", ec.value(), "M", ec.message());
-        return;
-    }
-    if (!dirExists)
-    {
-        lg2::info("Info directory {D} does not exist, skipping recovery", "D",
-                  persistedJsonDir);
+        lg2::error("Failed to open info directory {D}: {E}", "D",
+                   persistedJsonDir, "E", ec.message());
         return;
     }
 
-    try
+    for (const auto& entry : dirIt)
     {
-        for (const auto& entry : fs::directory_iterator(infoDir))
+        if (!entry.is_regular_file())
         {
-            if (!entry.is_regular_file())
-            {
-                continue;
-            }
-
-            const std::string filename = entry.path().filename().string();
-            if (!filename.ends_with(fileSuffix))
-            {
-                continue;
-            }
-
-            lg2::info("Recovery: loading existing info file: {F}", "F",
-                      entry.path().string());
-            try
-            {
-                createInfoFromFile(entry.path().string());
-            }
-            catch (const std::exception& e)
-            {
-                lg2::error(
-                    "Recovery: exception while loading info file {F}, "
-                    "skipped: {E}",
-                    "F", entry.path().string(), "E", e.what());
-            }
+            continue;
         }
-    }
-    catch (const std::exception& e)
-    {
-        lg2::error("Failed to scan info directory {D}: {E}", "D",
-                   persistedJsonDir, "E", e.what());
+
+        const std::string filename = entry.path().filename().string();
+        const auto moduleIndex = moduleIndexFromPersistedFilename(filename);
+        if (!moduleIndex)
+        {
+            continue;
+        }
+
+        const fs::path& path = entry.path();
+        std::string rawJson;
+        try
+        {
+            std::ifstream in(path, std::ios::binary);
+            if (!in)
+            {
+                lg2::warning(
+                    "Recovery: cannot open persisted file {F}, skipping", "F",
+                    path.string());
+                continue;
+            }
+            rawJson.assign(std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>());
+        }
+        catch (const std::exception& e)
+        {
+            lg2::warning("Recovery: read error for {F}: {E}, skipping", "F",
+                         path.string(), "E", e.what());
+            continue;
+        }
+
+        lg2::info("Recovery: loading persisted info for module {I} from {F}",
+                  "I", *moduleIndex, "F", path.string());
+        try
+        {
+            // persistOnSuccess=false: the content is already on disk; no need
+            // to rewrite it. processAndPublish will still remove the bad file
+            // on parse/validate failure, which is the right behavior for our
+            // own persisted state.
+            processAndPublish(
+                std::format("ProcessorModule_{}", *moduleIndex),
+                std::move(rawJson), *moduleIndex,
+                /*persistOnSuccess=*/false, "Recovery");
+        }
+        catch (const std::exception& e)
+        {
+            lg2::warning("Recovery: persisted file {F} rejected: {E}", "F",
+                         path.string(), "E", e.what());
+        }
     }
 }
 

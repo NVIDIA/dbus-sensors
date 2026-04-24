@@ -65,6 +65,10 @@ struct TerminusInfo
 {
     std::string rawJson;
     TerminusData terminus;
+    // Authoritative module index for this terminus. Only meaningful when
+    // rawJson is non-empty (empty rawJson entries are tombstones left behind
+    // by clearTerminusInfo, which the deferred replay loop skips).
+    int32_t moduleIndex{0};
 };
 
 class NvidiaInfo
@@ -101,15 +105,22 @@ class NvidiaInfo
     // D-Bus interface that exposes CreateInfo method
     std::shared_ptr<sdbusplus::asio::dbus_interface> serviceIface;
 
-    static std::string extractTerminusName(const std::string& filePath);
-    static uint64_t parseModuleIndex(std::string_view terminusName);
-
     void createInfoFromFile(const std::string& filePath);
     void createInfoFromJsonString(int32_t processorModuleIndex,
                                   const std::string& jsonStr);
 
+    // Parse + validate rawJson, then (async after path discovery) publish.
+    // On parse/validate failure, clears any existing terminus state, removes
+    // the persisted file for moduleIndex, and throws SdBusError.
+    // If persistOnSuccess is true, writes rawJson to the persisted file after
+    // a successful publish.
+    void processAndPublish(std::string terminusName, std::string rawJson,
+                           int32_t moduleIndex, bool persistOnSuccess,
+                           std::string_view context);
+
     void clearTerminusInfo(const std::string& terminusName);
-    void updateTerminusInfo(const std::string& terminusName, TerminusData td,
+    void updateTerminusInfo(const std::string& terminusName,
+                            int32_t moduleIndex, TerminusData td,
                             std::string rawJson);
 
     void loadPersistedInfoFiles();
