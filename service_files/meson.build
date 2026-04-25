@@ -22,6 +22,7 @@ unit_files = [
     ['mctp', 'xyz.openbmc_project.mctpreactor.service'],
     ['mcu', 'xyz.openbmc_project.mcutempsensor.service'],
     ['nvidia-gpu', 'xyz.openbmc_project.nvidiagpusensor.service'],
+    ['nvidia-info', 'xyz.openbmc_project.nvidiainfo.service'],
     ['nvme', 'xyz.openbmc_project.nvmesensor.service'],
     ['nvme-mi', 'xyz.openbmc_project.nvmemisensor.service'],
     ['psu', 'xyz.openbmc_project.psusensor.service'],
