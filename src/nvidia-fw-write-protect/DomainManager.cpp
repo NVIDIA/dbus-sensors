@@ -536,7 +536,7 @@ auto DomainManager::scopedEntityInit(std::shared_ptr<Source> source,
                                 entityName]() -> sdbusplus::async::task<> {
                 co_await initializeEntitySource(std::move(source), entityName);
             }),
-        exec::default_task_context<void>(exec::inline_scheduler{}));
+        exec::default_task_context<void>(stdexec::inline_scheduler{}));
 
     co_await it->second.on_empty();
     entityInitScopes.erase(entityName);
