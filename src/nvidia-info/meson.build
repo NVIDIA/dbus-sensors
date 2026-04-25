@@ -11,13 +11,32 @@ nvidia_info_sources = files(
 nvidia_info_include_dir = include_directories('.', is_system: true)
 sensor_include_dir = include_directories('../..')
 
+# Embed the per-terminus JSON schema directly into the binary so runtime
+# validation does not depend on any on-disk schema location.
+fs = import('fs')
+nvidia_info_schema_embed = configure_file(
+    input: 'NvidiaInfoSchemaEmbed.hpp.in',
+    output: 'NvidiaInfoSchemaEmbed.hpp',
+    configuration: {'SCHEMA_JSON': fs.read('schema.json')},
+)
+
+nlohmann_json_schema_validator_dep = dependency(
+    'nlohmann_json_schema_validator',
+    include_type: 'system',
+)
+
 executable(
     'nvidiainfo',
     nvidia_info_sources,
+    nvidia_info_schema_embed,
     cpp_args: ['-DJSON_IMPLICIT_CONVERSIONS=0'],
     implicit_include_directories: false,
     include_directories: [nvidia_info_include_dir, sensor_include_dir],
-    dependencies: [default_deps, nlohmann_json_dep],
+    dependencies: [
+        default_deps,
+        nlohmann_json_dep,
+        nlohmann_json_schema_validator_dep,
+    ],
     install: true,
     install_dir: '/usr/libexec/dbus-sensors',
 )

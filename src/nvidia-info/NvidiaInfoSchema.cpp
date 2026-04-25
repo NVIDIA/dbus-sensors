@@ -17,9 +17,13 @@
 #include "NvidiaInfoSchema.hpp"
 
 #include "NvidiaInfoEnums.hpp"
+#include "NvidiaInfoSchemaEmbed.hpp"
+
+#include <nlohmann/json-schema.hpp>
 
 #include <cstddef>
 #include <format>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -173,6 +177,21 @@ void from_json(const Json& j, TerminusData& t)
 namespace
 {
 
+// One-time-built validator over the embedded schema text. Held by
+// unique_ptr so the type need not be moveable, and constructed lazily on
+// first call so a malformed schema surfaces as a clear startup error
+// rather than a static-init failure.
+const nlohmann::json_schema::json_validator& terminusSchemaValidator()
+{
+    static const std::unique_ptr<nlohmann::json_schema::json_validator>
+        validator = []() {
+            auto p = std::make_unique<nlohmann::json_schema::json_validator>();
+            p->set_root_schema(Json::parse(schemaJsonText));
+            return p;
+        }();
+    return *validator;
+}
+
 // Validates each element of a per-section vector, tagging any
 // std::invalid_argument the element threw with "<Section>[<index>]: ...".
 template <typename T>
@@ -193,6 +212,22 @@ void validateEach(std::vector<T>& v, const char* section)
 }
 
 } // namespace
+
+void validateAgainstSchema(const Json& doc)
+{
+    try
+    {
+        terminusSchemaValidator().validate(doc);
+    }
+    catch (const std::exception& e)
+    {
+        // Re-tag as invalid_argument so processAndPublish() treats schema
+        // failures the same as legacy parse/validate failures (caller logs
+        // and rejects via SdBusError).
+        throw std::invalid_argument(
+            std::format("schema validation failed: {}", e.what()));
+    }
+}
 
 void validate(TerminusData& t)
 {

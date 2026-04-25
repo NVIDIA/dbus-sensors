@@ -452,9 +452,8 @@ void NvidiaInfo::discoverProcessorModulePaths(std::function<void()> callback)
                                    const std::vector<std::string>& paths) {
             if (ec)
             {
-                lg2::error(
-                    "GetSubTreePaths (ProcessorModule) discovery failed: {E}",
-                    "E", ec.message());
+                lg2::error("Failed to query processor module paths: {E}", "E",
+                           ec.message());
                 if (cb)
                 {
                     cb();
@@ -528,8 +527,8 @@ void NvidiaInfo::createInfoFromJsonString(int32_t processorModuleIndex,
             -EINVAL, "processor module index must be in the range 0..9");
     }
 
-    lg2::info("CreateInfo called (JSON length={L}, processorModule={M})", "L",
-              jsonStr.size(), "M", processorModuleIndex);
+    lg2::info("CreateInfo called for processor module {I} (JSON length {L})",
+              "I", processorModuleIndex, "L", jsonStr.size());
 
     processAndPublish(std::format("ProcessorModule_{}", processorModuleIndex),
                       jsonStr, processorModuleIndex,
@@ -543,7 +542,16 @@ void NvidiaInfo::processAndPublish(
     TerminusData td;
     try
     {
-        td = Json::parse(rawJson).get<TerminusData>();
+        Json doc = Json::parse(rawJson);
+        // Schema validation runs first so structural problems (missing
+        // required fields, wrong types, out-of-range integers, bad
+        // enum values, malformed Id strings, ...) are caught with
+        // JSON-Pointer error context before from_json() ever runs.
+        validateAgainstSchema(doc);
+        td = doc.get<TerminusData>();
+        // Per-section validate() now only does derivation (e.g. CPU Id
+        // hex parse into idValue); the schema has already enforced the
+        // structural and range constraints.
         validate(td);
     }
     catch (const std::exception& e)
@@ -584,7 +592,7 @@ void NvidiaInfo::clearTerminusInfo(const std::string& terminusName)
 void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
                                     int32_t moduleIndex, TerminusData td)
 {
-    lg2::info("Updating NVIDIA inventory for terminus={T}", "T", terminusName);
+    lg2::info("Updating NVIDIA inventory for terminus {T}", "T", terminusName);
 
     // Destruct old publisher objects first (removes their D-Bus interfaces)
     // before replacing with the new ones. Handles first-call and
@@ -615,7 +623,6 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
 
         stored.cpus[i].publish(*objServer, cpuPath, componentPath, boardPath,
                                cpuIndex);
-        lg2::info("Published CPU {I} at {P}", "I", cpuIndex, "P", cpuPath);
     }
 
     for (std::size_t i = 0; i < stored.dimms.size(); ++i)
@@ -624,7 +631,6 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
             std::format("{}/dimm/ProcessorModule_{}_Memory_{}", inventoryPath,
                         moduleIdx, i);
         stored.dimms[i].publish(*objServer, dimmPath);
-        lg2::info("Created DIMM {I} at {P}", "I", i, "P", dimmPath);
     }
 
     for (std::size_t i = 0; i < stored.pcieSlots.size(); ++i)
@@ -637,7 +643,6 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
             std::format("{}/board/HGX_ProcessorModule_{}/pcieslot{}",
                         inventoryPath, moduleIdx, i);
         stored.pcieSlots[i].publish(*objServer, pciePath, moduleIdx);
-        lg2::info("Created PCIe slot inventory object: {P}", "P", pciePath);
     }
 
     for (std::size_t i = 0; i < stored.tpms.size(); ++i)
@@ -645,7 +650,6 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         std::string tpmPath = std::format("{}/chassis/motherboard/{}_tpm{}",
                                           inventoryPath, terminusName, i);
         stored.tpms[i].publish(*objServer, tpmPath);
-        lg2::info("Created TPM inventory object: {P}", "P", tpmPath);
     }
 
     // Opportunistically populate Association.Definitions on the DIMM and
@@ -655,7 +659,7 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
     // patch the Associations properties later.
     attachAssociationsFor(terminusName);
 
-    lg2::info("NVIDIA inventory update complete for terminus={T}", "T",
+    lg2::info("NVIDIA inventory update complete for terminus {T}", "T",
               terminusName);
 }
 
@@ -675,8 +679,8 @@ void NvidiaInfo::loadPersistedInfoFiles()
     {
         if (ec)
         {
-            lg2::error("Info directory {D} could not be checked: {M}", "D",
-                       persistedJsonDir, "M", ec.message());
+            lg2::error("Info directory {D} could not be checked: {E}", "D",
+                       persistedJsonDir, "E", ec.message());
         }
         return;
     }

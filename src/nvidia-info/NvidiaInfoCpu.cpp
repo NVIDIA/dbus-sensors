@@ -18,7 +18,8 @@
 
 #include "NvidiaInfoEnums.hpp"
 
-#include <cctype>
+#include <phosphor-logging/lg2.hpp>
+
 #include <charconv>
 #include <cstdint>
 #include <stdexcept>
@@ -37,15 +38,7 @@ void from_json(const Json& j, NvidiaCpu& c)
 {
     j.at("Socket").get_to(c.socketNum);
     j.at("Family").get_to(c.family);
-    // Schema permits either "Id" or "ID" for the hex processor id string.
-    if (j.contains("Id"))
-    {
-        j.at("Id").get_to(c.idStr);
-    }
-    else
-    {
-        j.at("ID").get_to(c.idStr);
-    }
+    j.at("Id").get_to(c.idStr);
     j.at("CoreCount").get_to(c.coreCount);
     j.at("ThreadCount").get_to(c.threadCount);
     j.at("MaxSpeedInMhz").get_to(c.maxSpeedInMhz);
@@ -59,67 +52,26 @@ void from_json(const Json& j, NvidiaCpu& c)
 
 void NvidiaCpu::validate()
 {
-    if (socketNum > 255)
-    {
-        throw std::invalid_argument("Socket must be 0-255");
-    }
-    if (coreCount == 0)
-    {
-        throw std::invalid_argument("CoreCount must be > 0");
-    }
-    if (threadCount == 0)
-    {
-        throw std::invalid_argument("ThreadCount must be > 0");
-    }
-    if (maxSpeedInMhz == 0)
-    {
-        throw std::invalid_argument("MaxSpeedInMhz must be > 0");
-    }
-    if (manufacturer.empty())
-    {
-        throw std::invalid_argument("Manufacturer must be non-empty");
-    }
-    if (model.empty())
-    {
-        throw std::invalid_argument("Model must be non-empty");
-    }
-    if (modelRevision.empty())
-    {
-        throw std::invalid_argument("ModelRevision must be non-empty");
-    }
-    if (serialNumber.empty())
-    {
-        throw std::invalid_argument("SerialNumber must be non-empty");
-    }
-    if (version.empty())
-    {
-        throw std::invalid_argument("Version must be non-empty");
-    }
-
-    // "Id" accepts an optional 0x/0X prefix followed by 1-16 hex digits.
+    // The schema (validated up-front in processAndPublish) already enforces
+    // the structural rules for this struct: Socket 0-255, CoreCount /
+    // ThreadCount / MaxSpeedInMhz >= 1, non-empty Manufacturer / Model /
+    // ModelRevision / SerialNumber / Version, and Id matches
+    //   ^(0[xX])?[0-9a-fA-F]{1,16}$
+    // The only work left here is *derivation*: parse the hex Id string
+    // into idValue (the uint64_t shape that publish() registers as the
+    // Item.Cpu "Id" property). The schema's pattern guarantees the
+    // from_chars call below will succeed.
     std::string_view sv(idStr);
     if (sv.size() >= 2 && sv[0] == '0' && (sv[1] == 'x' || sv[1] == 'X'))
     {
         sv.remove_prefix(2);
-    }
-    if (sv.empty() || sv.size() > 16)
-    {
-        throw std::invalid_argument(
-            "Id must be 1-16 hex digits with optional 0x/0X prefix");
-    }
-    for (unsigned char ch : sv)
-    {
-        if (std::isxdigit(ch) == 0)
-        {
-            throw std::invalid_argument(
-                "Id must contain only hex digits (0-9, a-f, A-F)");
-        }
     }
     uint64_t parsed = 0;
     const auto [ptr, ec] =
         std::from_chars(sv.data(), sv.data() + sv.size(), parsed, 16);
     if (ec != std::errc{} || ptr != sv.data() + sv.size())
     {
+        // Should be unreachable after schema validation; defensive.
         throw std::invalid_argument("Id hex parse failed");
     }
     idValue = parsed;
@@ -227,6 +179,8 @@ void NvidiaCpu::publish(sdbusplus::asio::object_server& objServer,
     chassisInstance.register_property("InstanceNumber", cpuIndex);
 
     initializeAll();
+
+    lg2::info("Published CPU at {P}", "P", cpuPath);
 }
 
 } // namespace info

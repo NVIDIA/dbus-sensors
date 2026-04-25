@@ -18,9 +18,10 @@
 
 #include "NvidiaInfoEnums.hpp"
 
+#include <phosphor-logging/lg2.hpp>
+
 #include <cstdint>
 #include <format>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -68,15 +69,10 @@ std::string generationSuffix(uint32_t gen)
 
 void from_json(const Json& j, NvidiaPcie& c)
 {
-    // SlotType has OEM as its enum fallback, so any unknown string decodes
-    // to OEM. An empty string is still rejected here because once decoded
-    // it is indistinguishable from a legitimate "OEM".
-    std::string rawSlotType;
-    j.at("SlotType").get_to(rawSlotType);
-    if (rawSlotType.empty())
-    {
-        throw std::invalid_argument("PCIe SlotType must be non-empty");
-    }
+    // SlotType: any unknown string decodes to OEM via the enum's
+    // from_json fallback. The JSON schema rejects empty strings up-front
+    // (PCIeSlot.SlotType has minLength: 1), which is what disambiguates
+    // "client sent ''" from "client sent 'OEM'".
     c.slotType = j.at("SlotType").get<SlotType>();
 
     j.at("LocationCode").get_to(c.locationCode);
@@ -95,26 +91,11 @@ void from_json(const Json& j, NvidiaPcie& c)
 
 void NvidiaPcie::validate()
 {
-    if (generation > 6)
-    {
-        throw std::invalid_argument("PCIe Generation must be 0-6");
-    }
-    if (lanes > 64)
-    {
-        throw std::invalid_argument("PCIe Lanes must be 0-64");
-    }
-    if (maxLinkSpeed > 6)
-    {
-        throw std::invalid_argument("PCIe MaxLinkSpeed must be 0-6");
-    }
-    if (maxLinkWidth > 64)
-    {
-        throw std::invalid_argument("PCIe MaxLinkWidth must be 0-64");
-    }
-    if (locationCode.empty())
-    {
-        throw std::invalid_argument("PCIe LocationCode must be non-empty");
-    }
+    // Nothing to do. The JSON schema (validated up-front in
+    // processAndPublish) covers every constraint that used to live here:
+    // Generation/MaxLinkSpeed 0-6, Lanes/MaxLinkWidth 0-64, non-empty
+    // LocationCode, non-empty SlotType. Kept as a no-op so the generic
+    // validateEach<>() walker still has a uniform shape across sections.
 }
 
 void NvidiaPcie::publish(sdbusplus::asio::object_server& objServer,
@@ -161,6 +142,8 @@ void NvidiaPcie::publish(sdbusplus::asio::object_server& objServer,
     assocIface = lastIface();
 
     initializeAll();
+
+    lg2::info("Published PCIe slot at {P}", "P", pciePath);
 }
 
 void NvidiaPcie::attach(const std::string& processorModulePath)

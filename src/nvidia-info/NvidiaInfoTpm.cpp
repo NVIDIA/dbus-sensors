@@ -34,8 +34,10 @@ void from_json(const Json& j, NvidiaTpm& t)
 
 void NvidiaTpm::validate()
 {
-    // All TPM fields are optional; nothing to validate — matches original
-    // NvidiaInfoTpm behavior.
+    // Nothing to do. Required-field presence is enforced by the JSON
+    // schema (validated up-front in processAndPublish). Kept as a no-op so
+    // the generic validateEach<>() walker still has a uniform shape across
+    // sections.
 }
 
 void NvidiaTpm::publish(sdbusplus::asio::object_server& objServer,
@@ -75,7 +77,7 @@ void NvidiaTpm::publish(sdbusplus::asio::object_server& objServer,
 
     initializeAll();
 
-    lg2::info("Created TPM inventory object: {P}", "P", tpmPath);
+    lg2::info("Published TPM at {P}", "P", tpmPath);
 }
 
 } // namespace info

@@ -161,7 +161,8 @@
                 },
                 "Manufacturer": {
                     "description": "Memory manufacturer name",
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                 },
                 "SerialNumber": {
                     "description": "Memory device serial number",
@@ -235,7 +236,8 @@
                 },
                 "SlotType": {
                     "description": "Physical slot type (e.g., CEM, U2, None)",
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                 },
                 "MaxLinkSpeed": {
                     "description": "Maximum link speed generation number (0-6)",

@@ -44,8 +44,11 @@ namespace info
 class NvidiaCpu : public Publisher
 {
   public:
-    // Throws std::invalid_argument on any range or non-empty-string
-    // violation, or on an unparseable Id. Safe to call multiple times.
+    // Derivation step: parses idStr (a hex string the JSON schema has
+    // already shape-checked) into the uint64_t idValue that publish()
+    // registers as the Item.Cpu "Id" property. Safe to call multiple
+    // times. Throws std::invalid_argument only on the (post-schema,
+    // unreachable-in-practice) case where the hex parse fails.
     void validate();
 
     // Registers the 15 interfaces on objServer. Must be called after
