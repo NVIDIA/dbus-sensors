@@ -22,6 +22,7 @@
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace nvidia
@@ -49,10 +50,15 @@ class NvidiaPcie : public Publisher
 
     // Registers the 5 interfaces on objServer. Must be called after
     // validate(). The Publisher base retains objServer for destruction.
+    // The Association.Definitions interface is initialized with an empty
+    // Associations list; call attach() after discovery to populate it.
     void publish(sdbusplus::asio::object_server& objServer,
-                 const std::string& pciePath,
-                 const std::string& processorModulePath,
-                 uint64_t moduleIndex);
+                 const std::string& pciePath, uint64_t moduleIndex);
+
+    // Set the Association.Definitions Associations property to associate
+    // this PCIe slot with the given processor-module inventory path.
+    // Idempotent. Must be called after publish().
+    void attach(const std::string& processorModulePath);
 
     // JSON-populated fields. from_json fills these; validate() enforces
     // the rules below. The SlotType empty-string check happens in
@@ -70,6 +76,12 @@ class NvidiaPcie : public Publisher
     std::string portType;                // "PortType" (optional)
     std::string portProtocol;            // "PortProtocol" (optional)
     uint32_t rootPort{0};                // "RootPort" (optional)
+
+  private:
+    // Cached handle to the Association.Definitions interface registered
+    // by publish(); used by attach() to mutate Associations after the
+    // interface has been initialize()d.
+    std::shared_ptr<sdbusplus::asio::dbus_interface> assocIface;
 };
 
 void from_json(const Json& j, NvidiaPcie& c);

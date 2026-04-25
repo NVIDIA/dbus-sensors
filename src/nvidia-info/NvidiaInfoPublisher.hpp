@@ -92,6 +92,17 @@ class Publisher
         return *ifaces.back();
     }
 
+    // Return a copy of the shared_ptr to the most recently add()ed
+    // interface, so derived classes can cache it (e.g. to mutate a
+    // property after initializeAll() has run). Returns nullptr if no
+    // add() has been called yet. Returning a copy (rather than a
+    // reference into ifaces) keeps the result valid even if subsequent
+    // add() calls reallocate the underlying vector.
+    std::shared_ptr<sdbusplus::asio::dbus_interface> lastIface() const
+    {
+        return ifaces.empty() ? nullptr : ifaces.back();
+    }
+
     // Call initialize() on every interface added so far. Derived classes
     // call this once at the end of publish(); the original code split
     // initialize() calls per-path but the observable effect on D-Bus is

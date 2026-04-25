@@ -90,8 +90,7 @@ void NvidiaDimm::validate()
 }
 
 void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
-                         const std::string& dimmPath,
-                         const std::string& motherboardPath)
+                         const std::string& dimmPath)
 {
     const std::string memTypeStr =
         std::string(dimmDeviceTypePrefix) + memoryTypeName(memoryType);
@@ -149,10 +148,9 @@ void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
     {
         using AssocTuple = std::tuple<std::string, std::string, std::string>;
         using AssocList = std::vector<AssocTuple>;
-        AssocList assocs;
-        assocs.emplace_back("chassis", "memories", motherboardPath);
-        assoc.register_property("Associations", assocs);
+        assoc.register_property("Associations", AssocList{});
     }
+    assocIface = lastIface();
 
     auto& opStatus =
         add(dimmPath, "xyz.openbmc_project.State.Decorator.OperationalStatus",
@@ -160,6 +158,19 @@ void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
     opStatus.register_property("Functional", true);
 
     initializeAll();
+}
+
+void NvidiaDimm::attach(const std::string& motherboardPath)
+{
+    if (!assocIface)
+    {
+        return;
+    }
+    using AssocTuple = std::tuple<std::string, std::string, std::string>;
+    using AssocList = std::vector<AssocTuple>;
+    AssocList assocs;
+    assocs.emplace_back("chassis", "memories", motherboardPath);
+    assocIface->set_property("Associations", assocs);
 }
 
 } // namespace info

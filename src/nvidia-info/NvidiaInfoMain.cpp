@@ -42,13 +42,11 @@ int main()
         lg2::info("Starting NVIDIA Info Service");
 
         auto infoService = std::make_shared<nvidia::info::NvidiaInfo>(
-            io, connection, objServer,
-            std::string(nvidia::info::defaultInfoPath));
+            io, connection, objServer, nvidia::info::defaultInfoPath);
 
         lg2::info("NVIDIA Info Service started successfully");
 
-        const std::string svc(std::string(nvidia::info::nvidiaInfoService));
-        connection->request_name(svc.c_str());
+        connection->request_name(nvidia::info::nvidiaInfoService);
 
         // Ask upstream producers (e.g. pldm) to push current inventory to us
         // at startup, equivalent to bmcweb's

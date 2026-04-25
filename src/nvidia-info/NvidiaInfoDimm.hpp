@@ -22,6 +22,7 @@
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace nvidia
@@ -48,9 +49,16 @@ class NvidiaDimm : public Publisher
 
     // Registers the 8 interfaces on objServer. Must be called after
     // validate(). The Publisher base retains objServer for destruction.
+    // The Association.Definitions interface is initialized with an empty
+    // Associations list; call attach() after discovery to populate it.
     void publish(sdbusplus::asio::object_server& objServer,
-                 const std::string& dimmPath,
-                 const std::string& motherboardPath);
+                 const std::string& dimmPath);
+
+    // Set the Association.Definitions Associations property to associate
+    // this DIMM with the given motherboard inventory path. Idempotent.
+    // Must be called after publish() (i.e. after the interface has been
+    // initialize()d).
+    void attach(const std::string& motherboardPath);
 
     // JSON-populated fields. from_json fills these; validate() enforces
     // the rules described in NvidiaInfoEnums.hpp and below.
@@ -69,6 +77,12 @@ class NvidiaDimm : public Publisher
     std::string serialNumber; // "SerialNumber" (may be empty)
     std::string sku;          // "SKU" (may be empty)
     MemoryMedia memoryMedia{MemoryMedia::Unknown};   // "MemoryMedia"
+
+  private:
+    // Cached handle to the Association.Definitions interface registered
+    // by publish(); used by attach() to mutate Associations after the
+    // interface has been initialize()d.
+    std::shared_ptr<sdbusplus::asio::dbus_interface> assocIface;
 };
 
 void from_json(const Json& j, NvidiaDimm& d);

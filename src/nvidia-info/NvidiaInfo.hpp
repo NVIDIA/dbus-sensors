@@ -31,43 +31,43 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
+#include <vector>
 
 namespace nvidia::info
 {
 
-inline constexpr std::string_view defaultInfoPath =
+inline constexpr const char* defaultInfoPath =
     "/xyz/openbmc_project/inventory/system";
 
-inline constexpr std::string_view persistedJsonDir = "/var/lib/nvidia-info";
+inline constexpr const char* persistedJsonDir = "/var/lib/nvidia-info";
 
-inline constexpr std::string_view mapperBusName =
+inline constexpr const char* mapperBusName =
     "xyz.openbmc_project.ObjectMapper";
-inline constexpr std::string_view mapperPath =
+inline constexpr const char* mapperPath =
     "/xyz/openbmc_project/object_mapper";
-inline constexpr std::string_view mapperInterface =
+inline constexpr const char* mapperInterface =
     "xyz.openbmc_project.ObjectMapper";
-inline constexpr std::string_view systemInterface =
+inline constexpr const char* systemInterface =
     "xyz.openbmc_project.Inventory.Item.System";
-inline constexpr std::string_view boardInterface =
+inline constexpr const char* boardInterface =
     "xyz.openbmc_project.Inventory.Item.Board";
-inline constexpr std::string_view processorModuleInterface =
+inline constexpr const char* processorModuleInterface =
     "xyz.openbmc_project.Inventory.Item.ProcessorModule";
 
 // D-Bus service constants for the CreateInfo method
-inline constexpr std::string_view nvidiaInfoService =
+inline constexpr const char* nvidiaInfoService =
     "xyz.openbmc_project.NvidiaInfo";
-inline constexpr std::string_view nvidiaInfoObjPath =
+inline constexpr const char* nvidiaInfoObjPath =
     "/xyz/openbmc_project/NvidiaInfo";
-inline constexpr std::string_view nvidiaInfoInterface =
+inline constexpr const char* nvidiaInfoInterface =
     "xyz.openbmc_project.NvidiaInfo";
 
 struct TerminusInfo
 {
-    std::string rawJson;
     TerminusData terminus;
-    // Authoritative module index for this terminus. Only meaningful when
-    // rawJson is non-empty (empty rawJson entries are tombstones left behind
-    // by clearTerminusInfo, which the deferred replay loop skips).
+    // Authoritative module index for this terminus, used to look up the
+    // discovered processor-module path when patching associations.
     int32_t moduleIndex{0};
 };
 
@@ -108,23 +108,46 @@ class NvidiaInfo
     void createInfoFromJsonString(int32_t processorModuleIndex,
                                   const std::string& jsonStr);
 
-    // Parse + validate rawJson, then (async after path discovery) publish.
-    // On parse/validate failure, clears any existing terminus state, removes
-    // the persisted file for moduleIndex, and throws SdBusError.
-    // If persistOnSuccess is true, writes rawJson to the persisted file after
-    // a successful publish.
+    // Parse + validate rawJson, then publish synchronously at synthesized
+    // inventory paths. On parse/validate failure, clears any existing
+    // terminus state, removes the persisted file for moduleIndex, and
+    // throws SdBusError. If persistOnSuccess is true, writes rawJson to
+    // the persisted file after a successful publish; a persistence failure
+    // is fatal (process exits).
     void processAndPublish(std::string terminusName, std::string rawJson,
                            int32_t moduleIndex, bool persistOnSuccess,
                            std::string_view context);
 
     void clearTerminusInfo(const std::string& terminusName);
     void updateTerminusInfo(const std::string& terminusName,
-                            int32_t moduleIndex, TerminusData td,
-                            std::string rawJson);
+                            int32_t moduleIndex, TerminusData td);
+
+    // Patch Association.Definitions on already-published DIMM and PCIe
+    // slot objects belonging to a single terminus, using whichever of
+    // motherboardPath / processorModulePaths have been discovered so
+    // far. Safe to call repeatedly; harmless if neither is known.
+    void attachAssociationsFor(const std::string& terminusName);
+
+    // Iterate every entry in terminusInfos and call attachAssociationsFor
+    // on each. Used after discoverPaths completes (startup probe and
+    // post-InterfacesAdded debounce paths).
+    void attachAllAssociations();
 
     void loadPersistedInfoFiles();
 
+    // Payload type carried by xyz.openbmc_project.ObjectManager's
+    // InterfacesAdded signal: a map from interface name to a map of property
+    // name to property value (across the D-Bus basic types we care about).
+    using InterfacesAddedMap = std::map<
+        std::string,
+        std::map<std::string,
+                 std::variant<bool, uint8_t, int16_t, uint16_t, int32_t,
+                              uint32_t, int64_t, uint64_t, double, std::string,
+                              std::vector<uint8_t>>>>;
+
     void setupMotherboardMatch();
+    void onInterfacesAdded(sdbusplus::message_t& msg);
+    void scheduleMotherboardDiscovery();
     void discoverMotherboardPath(std::function<void()> callback);
     void discoverProcessorModulePaths(std::function<void()> callback);
     void discoverPaths(std::function<void()> callback);

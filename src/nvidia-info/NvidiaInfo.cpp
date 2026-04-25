@@ -58,7 +58,7 @@ inline constexpr std::string_view persistedFilenameSuffix = "_Info.json";
 
 std::filesystem::path persistedPathFor(int32_t processorModuleIndex)
 {
-    return std::filesystem::path(std::string(persistedJsonDir)) /
+    return std::filesystem::path(persistedJsonDir) /
            std::format("{}{}{}", persistedFilenamePrefix,
                        processorModuleIndex, persistedFilenameSuffix);
 }
@@ -93,7 +93,7 @@ bool persistInfoJson(int32_t processorModuleIndex, const std::string& jsonStr)
     namespace fs = std::filesystem;
 
     std::error_code ec;
-    fs::create_directories(fs::path(std::string(persistedJsonDir)), ec);
+    fs::create_directories(fs::path(persistedJsonDir), ec);
     if (ec)
     {
         lg2::error("Failed to create info directory {D}: {E}", "D",
@@ -177,7 +177,7 @@ NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
     {
         namespace fs = std::filesystem;
         std::error_code ec;
-        fs::create_directories(fs::path(std::string(persistedJsonDir)), ec);
+        fs::create_directories(fs::path(persistedJsonDir), ec);
         if (ec)
         {
             lg2::error("Failed to create info directory {D}: {E}", "D",
@@ -197,10 +197,8 @@ NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
                    "E", e.what());
     }
 
-    const std::string serviceObjPath(nvidiaInfoObjPath);
-    const std::string serviceInterfaceName(nvidiaInfoInterface);
     serviceIface =
-        objServer->add_interface(serviceObjPath, serviceInterfaceName.c_str());
+        objServer->add_interface(nvidiaInfoObjPath, nvidiaInfoInterface);
 
     serviceIface->register_method(
         "CreateInfo",
@@ -213,6 +211,13 @@ NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
     lg2::info("NVIDIA Info service ready, D-Bus method registered at "
               "{P}/{I}",
               "P", nvidiaInfoObjPath, "I", nvidiaInfoInterface);
+
+    // Active startup probe: if the motherboard / ProcessorModule paths
+    // are already published by Entity Manager, attach associations now
+    // and avoid waiting for an InterfacesAdded that will never come. If
+    // nothing is found yet, this is a harmless no-op and the existing
+    // InterfacesAdded + 2s debounce path remains armed.
+    discoverPaths([this]() { attachAllAssociations(); });
 }
 
 NvidiaInfo::~NvidiaInfo()
@@ -230,101 +235,101 @@ void NvidiaInfo::setupMotherboardMatch()
         sdbusplus::bus::match::rules::interfacesAdded() +
             sdbusplus::bus::match::rules::argNpath(
                 0, "/xyz/openbmc_project/inventory/"),
-        [this](sdbusplus::message_t& msg) {
-            try
-            {
-                sdbusplus::message::object_path objPath;
-                std::map<std::string,
-                         std::map<std::string,
-                                  std::variant<bool, uint8_t, int16_t, uint16_t,
-                                               int32_t, uint32_t, int64_t,
-                                               uint64_t, double, std::string,
-                                               std::vector<uint8_t>>>>
-                    interfaces;
-                msg.read(objPath, interfaces);
+        [this](sdbusplus::message_t& msg) { onInterfacesAdded(msg); });
+}
 
-                for (const auto& [intf, properties] : interfaces)
-                {
-                    if (intf == systemInterface)
-                    {
-                        lg2::info(
-                            "System interface appeared at {P}, scheduling "
-                            "motherboard discovery after delay",
-                            "P", std::string(objPath));
-                        auto delayTimer =
-                            std::make_shared<boost::asio::steady_timer>(*ioCtx);
-                        delayTimer->expires_after(std::chrono::seconds(2));
-                        delayTimer->async_wait(
-                            [this,
-                             delayTimer](const boost::system::error_code& ec) {
-                                if (ec)
-                                {
-                                    return;
-                                }
-                                discoverPaths([this]() {
-                                    try
-                                    {
-                                        if (terminusInfos.empty())
-                                        {
-                                            return;
-                                        }
-                                        if (motherboardPath.empty() &&
-                                            processorModulePaths.empty())
-                                        {
-                                            return;
-                                        }
-                                        for (auto& [name, inv] : terminusInfos)
-                                        {
-                                            if (inv.rawJson.empty())
-                                            {
-                                                continue;
-                                            }
-                                            try
-                                            {
-                                                TerminusData td =
-                                                    Json::parse(inv.rawJson)
-                                                        .get<TerminusData>();
-                                                validate(td);
-                                                updateTerminusInfo(
-                                                    name, inv.moduleIndex,
-                                                    std::move(td),
-                                                    std::string(inv.rawJson));
-                                            }
-                                            catch (const std::exception& e)
-                                            {
-                                                lg2::error(
-                                                    "Deferred replay failed "
-                                                    "for terminus {T}: {E}",
-                                                    "T", name, "E", e.what());
-                                            }
-                                        }
-                                    }
-                                    catch (const std::exception& e)
-                                    {
-                                        lg2::error("Exception in deferred "
-                                                   "motherboard discovery: {E}",
-                                                   "E", e.what());
-                                    }
-                                });
-                            });
-                        break;
-                    }
-                }
-            }
-            catch (const std::exception& e)
+void NvidiaInfo::onInterfacesAdded(sdbusplus::message_t& msg)
+{
+    try
+    {
+        sdbusplus::message::object_path objPath;
+        InterfacesAddedMap interfaces;
+        msg.read(objPath, interfaces);
+
+        if (interfaces.find(systemInterface) == interfaces.end())
+        {
+            return;
+        }
+
+        lg2::info("System interface appeared at {P}, scheduling "
+                  "motherboard discovery after delay",
+                  "P", std::string(objPath));
+        scheduleMotherboardDiscovery();
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("Exception in interfacesAdded match callback: {E}", "E",
+                   e.what());
+    }
+}
+
+void NvidiaInfo::scheduleMotherboardDiscovery()
+{
+    // Shared-ownership timer: the async_wait callback keeps the timer alive
+    // until it fires (or is cancelled).
+    auto delayTimer = std::make_shared<boost::asio::steady_timer>(*ioCtx);
+    delayTimer->expires_after(std::chrono::seconds(2));
+    delayTimer->async_wait(
+        [this, delayTimer](const boost::system::error_code& ec) {
+            if (ec)
             {
-                lg2::error("Exception in interfacesAdded match callback: {E}",
-                           "E", e.what());
+                return;
             }
+            discoverPaths([this]() { attachAllAssociations(); });
         });
+}
+
+void NvidiaInfo::attachAssociationsFor(const std::string& terminusName)
+{
+    auto it = terminusInfos.find(terminusName);
+    if (it == terminusInfos.end())
+    {
+        return;
+    }
+    auto& entry = it->second;
+    auto& terminus = entry.terminus;
+    const auto moduleIdx = static_cast<uint64_t>(entry.moduleIndex);
+
+    if (!motherboardPath.empty())
+    {
+        for (auto& dimm : terminus.dimms)
+        {
+            dimm.attach(motherboardPath);
+        }
+    }
+
+    if (auto modIt = processorModulePaths.find(moduleIdx);
+        modIt != processorModulePaths.end())
+    {
+        for (auto& slot : terminus.pcieSlots)
+        {
+            if (!slot.isPresent())
+            {
+                continue;
+            }
+            slot.attach(modIt->second);
+        }
+    }
+}
+
+void NvidiaInfo::attachAllAssociations()
+{
+    if (motherboardPath.empty() && processorModulePaths.empty())
+    {
+        return;
+    }
+    for (auto& [name, _] : terminusInfos)
+    {
+        attachAssociationsFor(name);
+    }
 }
 
 void NvidiaInfo::triggerInventoryRefresh()
 {
-    static constexpr std::string_view triggerInterface =
+    static constexpr const char* triggerInterface =
         "xyz.openbmc_project.Control.Trigger";
     static constexpr std::string_view inventoryDataTag = "InventoryData";
-    static constexpr std::string_view controlRoot =
+    static constexpr const char* controlRoot =
         "/xyz/openbmc_project/control";
 
     using SubTreeType = std::vector<std::pair<
@@ -371,21 +376,18 @@ void NvidiaInfo::triggerInventoryRefresh()
                                   path);
                     },
                     svc, path, "org.freedesktop.DBus.Properties", "Set",
-                    std::string(triggerInterface), std::string("Refresh"),
-                    std::variant<bool>(true));
+                    triggerInterface, "Refresh", std::variant<bool>(true));
             }
 
             if (!any)
             {
                 lg2::info("Inventory refresh: no Control.Trigger "
                           "InventoryData paths found under {R}",
-                          "R", std::string(controlRoot));
+                          "R", controlRoot);
             }
         },
-        std::string(mapperBusName), std::string(mapperPath),
-        std::string(mapperInterface), "GetSubTree",
-        std::string(controlRoot), 0,
-        std::vector<std::string>{std::string(triggerInterface)});
+        mapperBusName, mapperPath, mapperInterface, "GetSubTree", controlRoot,
+        0, std::vector<std::string>{triggerInterface});
 }
 
 void NvidiaInfo::discoverMotherboardPath(std::function<void()> callback)
@@ -400,10 +402,10 @@ void NvidiaInfo::discoverMotherboardPath(std::function<void()> callback)
         requireExactMatch = true;
     }
 
-    std::vector<std::string> desiredInterfaces{std::string(systemInterface)};
+    std::vector<std::string> desiredInterfaces{systemInterface};
     if (requireExactMatch)
     {
-        desiredInterfaces.emplace_back(std::string(boardInterface));
+        desiredInterfaces.emplace_back(boardInterface);
     }
 
     bus->async_method_call(
@@ -437,14 +439,13 @@ void NvidiaInfo::discoverMotherboardPath(std::function<void()> callback)
                 cb();
             }
         },
-        std::string(mapperBusName), std::string(mapperPath),
-        std::string(mapperInterface), "GetSubTreePaths", searchPath, 0,
-        desiredInterfaces);
+        mapperBusName, mapperPath, mapperInterface, "GetSubTreePaths",
+        searchPath, 0, desiredInterfaces);
 }
 
 void NvidiaInfo::discoverProcessorModulePaths(std::function<void()> callback)
 {
-    std::vector<std::string> ifaces = {std::string(processorModuleInterface)};
+    std::vector<std::string> ifaces = {processorModuleInterface};
 
     bus->async_method_call(
         [this,
@@ -489,9 +490,8 @@ void NvidiaInfo::discoverProcessorModulePaths(std::function<void()> callback)
                 cb();
             }
         },
-        std::string(mapperBusName), std::string(mapperPath),
-        std::string(mapperInterface), "GetSubTreePaths", std::string("/"), 0,
-        ifaces);
+        mapperBusName, mapperPath, mapperInterface, "GetSubTreePaths",
+        "/xyz/openbmc_project/inventory/", 0, ifaces);
 }
 
 void NvidiaInfo::discoverPaths(std::function<void()> callback)
@@ -559,65 +559,44 @@ void NvidiaInfo::processAndPublish(std::string terminusName,
             std::format("{} rejected: {}", context, e.what()).c_str());
     }
 
-    // Wrap td/rawJson in shared_ptrs: the discoverPaths callback is type-erased
-    // through std::function, which requires its target to be copyable.
-    // TerminusData contains non-copyable NvidiaCpu objects, so we indirect
-    // through shared_ptrs and move out of them on invocation.
-    auto tdPtr = std::make_shared<TerminusData>(std::move(td));
-    auto rawPtr = std::make_shared<std::string>(std::move(rawJson));
-    discoverPaths([this, name = std::move(terminusName), tdPtr, rawPtr,
-                   moduleIndex, persistOnSuccess,
-                   contextStr = std::string(context)]() mutable {
-        try
-        {
-            // Move rawJson when we don't need to retain it for persistence.
-            updateTerminusInfo(
-                name, moduleIndex, std::move(*tdPtr),
-                persistOnSuccess ? *rawPtr : std::move(*rawPtr));
-        }
-        catch (const std::exception& e)
-        {
-            lg2::error("{C}: exception publishing terminus {T}: {E}", "C",
-                       contextStr, "T", name, "E", e.what());
-            return;
-        }
-        if (persistOnSuccess && !persistInfoJson(moduleIndex, *rawPtr))
-        {
-            lg2::critical(
-                "Failed to persist info JSON for terminus {T}; exiting "
-                "to preserve round-trip guarantee",
-                "T", name);
-            std::exit(EXIT_FAILURE);
-        }
-    });
+    try
+    {
+        updateTerminusInfo(terminusName, moduleIndex, std::move(td));
+    }
+    catch (const std::exception& e)
+    {
+        lg2::error("{C}: exception publishing terminus {T}: {E}", "C", context,
+                   "T", terminusName, "E", e.what());
+        return;
+    }
+
+    if (persistOnSuccess && !persistInfoJson(moduleIndex, rawJson))
+    {
+        lg2::critical(
+            "Failed to persist info JSON for terminus {T}; exiting "
+            "to preserve round-trip guarantee",
+            "T", terminusName);
+        std::exit(EXIT_FAILURE);
+    }
 }
 
 void NvidiaInfo::clearTerminusInfo(const std::string& terminusName)
 {
-    // Preserve rawJson so the deferred replay loop can re-parse the last
-    // known good payload once motherboard/ProcessorModule paths appear.
-    terminusInfos[terminusName].terminus = TerminusData{};
+    terminusInfos.erase(terminusName);
 }
 
 void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
-                                    int32_t moduleIndex, TerminusData td,
-                                    std::string rawJson)
+                                    int32_t moduleIndex, TerminusData td)
 {
-    lg2::info(
-        "Updating NVIDIA inventory for terminus={T} (motherboard={M}, "
-        "processor_modules={N})",
-        "T", terminusName, "M",
-        motherboardPath.empty() ? "(not found)" : motherboardPath, "N",
-        processorModulePaths.size());
+    lg2::info("Updating NVIDIA inventory for terminus={T}", "T", terminusName);
 
     // Destruct old publisher objects first (removes their D-Bus interfaces)
     // before replacing with the new ones. Handles first-call and
-    // replay-call cases uniformly.
+    // re-publish cases uniformly.
     clearTerminusInfo(terminusName);
 
     auto& entry = terminusInfos[terminusName];
     entry.terminus = std::move(td);
-    entry.rawJson = std::move(rawJson);
     entry.moduleIndex = moduleIndex;
     auto& stored = entry.terminus;
 
@@ -648,36 +627,21 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         const std::string dimmPath =
             std::format("{}/dimm/ProcessorModule_{}_Memory_{}", inventoryPath,
                         moduleIdx, i);
-        stored.dimms[i].publish(*objServer, dimmPath, motherboardPath);
+        stored.dimms[i].publish(*objServer, dimmPath);
         lg2::info("Created DIMM {I} at {P}", "I", i, "P", dimmPath);
     }
 
-    if (!stored.pcieSlots.empty())
+    for (std::size_t i = 0; i < stored.pcieSlots.size(); ++i)
     {
-        auto it = processorModulePaths.find(moduleIdx);
-        if (it == processorModulePaths.end())
+        if (!stored.pcieSlots[i].isPresent())
         {
-            lg2::error("No processor module path found for module index {I} "
-                       "(terminus {T}) — skipping PCIe slot publish",
-                       "I", moduleIdx, "T", terminusName);
+            continue;
         }
-        else
-        {
-            const std::string& modulePath = it->second;
-            for (std::size_t i = 0; i < stored.pcieSlots.size(); ++i)
-            {
-                if (!stored.pcieSlots[i].isPresent())
-                {
-                    continue;
-                }
-                std::string pciePath = std::format(
-                    "{}/{}_pcieslot{}", modulePath, terminusName, i);
-                stored.pcieSlots[i].publish(*objServer, pciePath, modulePath,
-                                            moduleIdx);
-                lg2::info("Created PCIe slot inventory object: {P}", "P",
-                          pciePath);
-            }
-        }
+        const std::string pciePath =
+            std::format("{}/board/HGX_ProcessorModule_{}/pcieslot{}",
+                        inventoryPath, moduleIdx, i);
+        stored.pcieSlots[i].publish(*objServer, pciePath, moduleIdx);
+        lg2::info("Created PCIe slot inventory object: {P}", "P", pciePath);
     }
 
     for (std::size_t i = 0; i < stored.tpms.size(); ++i)
@@ -688,6 +652,13 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         stored.tpms[i].publish(*objServer, tpmPath);
         lg2::info("Created TPM inventory object: {P}", "P", tpmPath);
     }
+
+    // Opportunistically populate Association.Definitions on the DIMM and
+    // PCIe slot objects we just registered, using whichever discovered
+    // paths are already known. If discovery has not yet completed, this
+    // is a harmless no-op; the post-discovery attachAllAssociations will
+    // patch the Associations properties later.
+    attachAssociationsFor(terminusName);
 
     lg2::info("NVIDIA inventory update complete for terminus={T}", "T",
               terminusName);
@@ -704,7 +675,7 @@ void NvidiaInfo::loadPersistedInfoFiles()
     namespace fs = std::filesystem;
 
     std::error_code ec;
-    const fs::path infoDir{std::string(persistedJsonDir)};
+    const fs::path infoDir{persistedJsonDir};
     if (!fs::exists(infoDir, ec))
     {
         if (ec)

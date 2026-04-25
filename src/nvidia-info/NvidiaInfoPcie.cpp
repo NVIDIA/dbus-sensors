@@ -111,9 +111,7 @@ void NvidiaPcie::validate()
 }
 
 void NvidiaPcie::publish(sdbusplus::asio::object_server& objServer,
-                         const std::string& pciePath,
-                         const std::string& processorModulePath,
-                         uint64_t moduleIndex)
+                         const std::string& pciePath, uint64_t moduleIndex)
 {
     const std::string generationStr =
         std::format("{}{}", pcieGenPrefix, generationSuffix(generation));
@@ -152,12 +150,24 @@ void NvidiaPcie::publish(sdbusplus::asio::object_server& objServer,
     {
         using AssocTuple = std::tuple<std::string, std::string, std::string>;
         using AssocList = std::vector<AssocTuple>;
-        AssocList assocs;
-        assocs.emplace_back("chassis", "pcie_slots", processorModulePath);
-        assoc.register_property("Associations", assocs);
+        assoc.register_property("Associations", AssocList{});
     }
+    assocIface = lastIface();
 
     initializeAll();
+}
+
+void NvidiaPcie::attach(const std::string& processorModulePath)
+{
+    if (!assocIface)
+    {
+        return;
+    }
+    using AssocTuple = std::tuple<std::string, std::string, std::string>;
+    using AssocList = std::vector<AssocTuple>;
+    AssocList assocs;
+    assocs.emplace_back("chassis", "pcie_slots", processorModulePath);
+    assocIface->set_property("Associations", assocs);
 }
 
 } // namespace info
