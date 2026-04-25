@@ -49,26 +49,24 @@ void NvidiaTpm::publish(sdbusplus::asio::object_server& objServer,
         model = "TPM " + majorSpecVersion;
     }
 
-    auto& tpm = add(
-        tpmPath, "xyz.openbmc_project.Inventory.Item.TrustedComponent",
-        objServer);
+    auto& tpm =
+        add(tpmPath, "xyz.openbmc_project.Inventory.Item.TrustedComponent",
+            objServer);
     tpm.register_property(
         "TrustedComponentType",
         std::string("xyz.openbmc_project.Inventory.Item.TrustedComponent."
                     "ComponentAttachType.Discrete"));
 
-    auto& item =
-        add(tpmPath, "xyz.openbmc_project.Inventory.Item", objServer);
+    auto& item = add(tpmPath, "xyz.openbmc_project.Inventory.Item", objServer);
     item.register_property("PrettyName", prettyName);
     item.register_property("Present", true);
 
-    auto& asset = add(
-        tpmPath, "xyz.openbmc_project.Inventory.Decorator.Asset", objServer);
+    auto& asset = add(tpmPath, "xyz.openbmc_project.Inventory.Decorator.Asset",
+                      objServer);
     asset.register_property("Manufacturer", manufacturer);
     asset.register_property("Model", model);
 
-    auto& ver =
-        add(tpmPath, "xyz.openbmc_project.Software.Version", objServer);
+    auto& ver = add(tpmPath, "xyz.openbmc_project.Software.Version", objServer);
     ver.register_property("Version", version);
     ver.register_property(
         "Purpose",

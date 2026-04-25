@@ -46,13 +46,20 @@ std::string generationSuffix(uint32_t gen)
 {
     switch (gen)
     {
-        case 1: return "Gen1";
-        case 2: return "Gen2";
-        case 3: return "Gen3";
-        case 4: return "Gen4";
-        case 5: return "Gen5";
-        case 6: return "Gen6";
-        default: break;
+        case 1:
+            return "Gen1";
+        case 2:
+            return "Gen2";
+        case 3:
+            return "Gen3";
+        case 4:
+            return "Gen4";
+        case 5:
+            return "Gen5";
+        case 6:
+            return "Gen6";
+        default:
+            break;
     }
     return "Unknown";
 }
@@ -118,8 +125,8 @@ void NvidiaPcie::publish(sdbusplus::asio::object_server& objServer,
     const std::string slotTypeStr =
         std::format("{}{}", pcieSlotTypePrefix, slotTypeName(slotType));
 
-    auto& pcie = add(
-        pciePath, "xyz.openbmc_project.Inventory.Item.PCIeSlot", objServer);
+    auto& pcie =
+        add(pciePath, "xyz.openbmc_project.Inventory.Item.PCIeSlot", objServer);
     pcie.register_property("Generation", generationStr);
     pcie.register_property("Lanes", lanes);
     pcie.register_property("HotPluggable", hotPluggable);
@@ -132,8 +139,7 @@ void NvidiaPcie::publish(sdbusplus::asio::object_server& objServer,
     pcie.register_property("RootPort", rootPort);
     pcie.register_property("MaxLinkWidth", maxLinkWidth);
 
-    auto& item =
-        add(pciePath, "xyz.openbmc_project.Inventory.Item", objServer);
+    auto& item = add(pciePath, "xyz.openbmc_project.Inventory.Item", objServer);
     item.register_property("PrettyName", std::string(""));
     item.register_property("Present", true);
 
@@ -145,8 +151,8 @@ void NvidiaPcie::publish(sdbusplus::asio::object_server& objServer,
     add(pciePath, "xyz.openbmc_project.Inventory.Connector.Embedded",
         objServer);
 
-    auto& assoc = add(
-        pciePath, "xyz.openbmc_project.Association.Definitions", objServer);
+    auto& assoc =
+        add(pciePath, "xyz.openbmc_project.Association.Definitions", objServer);
     {
         using AssocTuple = std::tuple<std::string, std::string, std::string>;
         using AssocList = std::vector<AssocTuple>;

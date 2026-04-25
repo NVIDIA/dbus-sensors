@@ -32,19 +32,32 @@ const char* formFactorName(FormFactor f)
 {
     switch (f)
     {
-        case FormFactor::RDIMM:        return "RDIMM";
-        case FormFactor::UDIMM:        return "UDIMM";
-        case FormFactor::SO_DIMM:      return "SO_DIMM";
-        case FormFactor::LRDIMM:       return "LRDIMM";
-        case FormFactor::Mini_RDIMM:   return "Mini_RDIMM";
-        case FormFactor::Mini_UDIMM:   return "Mini_UDIMM";
-        case FormFactor::SO_RDIMM_72b: return "SO_RDIMM_72b";
-        case FormFactor::SO_UDIMM_72b: return "SO_UDIMM_72b";
-        case FormFactor::SO_DIMM_16b:  return "SO_DIMM_16b";
-        case FormFactor::SO_DIMM_32b:  return "SO_DIMM_32b";
-        case FormFactor::Die:          return "Die";
-        case FormFactor::SOCAMM:       return "SOCAMM";
-        case FormFactor::Unknown:      break;
+        case FormFactor::RDIMM:
+            return "RDIMM";
+        case FormFactor::UDIMM:
+            return "UDIMM";
+        case FormFactor::SO_DIMM:
+            return "SO_DIMM";
+        case FormFactor::LRDIMM:
+            return "LRDIMM";
+        case FormFactor::Mini_RDIMM:
+            return "Mini_RDIMM";
+        case FormFactor::Mini_UDIMM:
+            return "Mini_UDIMM";
+        case FormFactor::SO_RDIMM_72b:
+            return "SO_RDIMM_72b";
+        case FormFactor::SO_UDIMM_72b:
+            return "SO_UDIMM_72b";
+        case FormFactor::SO_DIMM_16b:
+            return "SO_DIMM_16b";
+        case FormFactor::SO_DIMM_32b:
+            return "SO_DIMM_32b";
+        case FormFactor::Die:
+            return "Die";
+        case FormFactor::SOCAMM:
+            return "SOCAMM";
+        case FormFactor::Unknown:
+            break;
     }
     return "Unknown";
 }
@@ -53,29 +66,50 @@ const char* memoryTypeName(MemoryType t)
 {
     switch (t)
     {
-        case MemoryType::DDR:                      return "DDR";
-        case MemoryType::DDR2:                     return "DDR2";
-        case MemoryType::DDR3:                     return "DDR3";
-        case MemoryType::DDR4:                     return "DDR4";
-        case MemoryType::DDR4E_SDRAM:              return "DDR4E_SDRAM";
-        case MemoryType::DDR5:                     return "DDR5";
-        case MemoryType::LPDDR5_SDRAM:             return "LPDDR5_SDRAM";
-        case MemoryType::LPDDR4_SDRAM:             return "LPDDR4_SDRAM";
-        case MemoryType::LPDDR3_SDRAM:             return "LPDDR3_SDRAM";
-        case MemoryType::DDR2_SDRAM_FB_DIMM:       return "DDR2_SDRAM_FB_DIMM";
+        case MemoryType::DDR:
+            return "DDR";
+        case MemoryType::DDR2:
+            return "DDR2";
+        case MemoryType::DDR3:
+            return "DDR3";
+        case MemoryType::DDR4:
+            return "DDR4";
+        case MemoryType::DDR4E_SDRAM:
+            return "DDR4E_SDRAM";
+        case MemoryType::DDR5:
+            return "DDR5";
+        case MemoryType::LPDDR5_SDRAM:
+            return "LPDDR5_SDRAM";
+        case MemoryType::LPDDR4_SDRAM:
+            return "LPDDR4_SDRAM";
+        case MemoryType::LPDDR3_SDRAM:
+            return "LPDDR3_SDRAM";
+        case MemoryType::DDR2_SDRAM_FB_DIMM:
+            return "DDR2_SDRAM_FB_DIMM";
         case MemoryType::DDR2_SDRAM_FB_DIMM_PROBE:
             return "DDR2_SDRAM_FB_DIMM_PROBE";
-        case MemoryType::DDR_SGRAM:                return "DDR_SGRAM";
-        case MemoryType::ROM:                      return "ROM";
-        case MemoryType::SDRAM:                    return "SDRAM";
-        case MemoryType::EDO:                      return "EDO";
-        case MemoryType::FastPageMode:             return "FastPageMode";
-        case MemoryType::PipelinedNibble:          return "PipelinedNibble";
-        case MemoryType::Logical:                  return "Logical";
-        case MemoryType::HBM:                      return "HBM";
-        case MemoryType::HBM2:                     return "HBM2";
-        case MemoryType::HBM3:                     return "HBM3";
-        case MemoryType::Unknown:                  break;
+        case MemoryType::DDR_SGRAM:
+            return "DDR_SGRAM";
+        case MemoryType::ROM:
+            return "ROM";
+        case MemoryType::SDRAM:
+            return "SDRAM";
+        case MemoryType::EDO:
+            return "EDO";
+        case MemoryType::FastPageMode:
+            return "FastPageMode";
+        case MemoryType::PipelinedNibble:
+            return "PipelinedNibble";
+        case MemoryType::Logical:
+            return "Logical";
+        case MemoryType::HBM:
+            return "HBM";
+        case MemoryType::HBM2:
+            return "HBM2";
+        case MemoryType::HBM3:
+            return "HBM3";
+        case MemoryType::Unknown:
+            break;
     }
     return "Unknown";
 }
@@ -87,10 +121,14 @@ const char* memoryMediaTechName(MemoryMedia m)
 {
     switch (m)
     {
-        case MemoryMedia::DRAM:          return "DRAM";
-        case MemoryMedia::NAND:          return "Other";
-        case MemoryMedia::Intel3DXPoint: return "IntelOptane";
-        case MemoryMedia::Unknown:       break;
+        case MemoryMedia::DRAM:
+            return "DRAM";
+        case MemoryMedia::NAND:
+            return "Other";
+        case MemoryMedia::Intel3DXPoint:
+            return "IntelOptane";
+        case MemoryMedia::Unknown:
+            break;
     }
     return "Unknown";
 }
@@ -102,15 +140,24 @@ const char* slotTypeName(SlotType s)
 {
     switch (s)
     {
-        case SlotType::OEM:        return "OEM";
-        case SlotType::FullLength: return "FullLength";
-        case SlotType::HalfLength: return "HalfLength";
-        case SlotType::LowProfile: return "LowProfile";
-        case SlotType::Mini:       return "Mini";
-        case SlotType::M2:         return "M_2";
-        case SlotType::OCP3Small:  return "OCP3Small";
-        case SlotType::OCP3Large:  return "OCP3Large";
-        case SlotType::U2:         return "U_2";
+        case SlotType::OEM:
+            return "OEM";
+        case SlotType::FullLength:
+            return "FullLength";
+        case SlotType::HalfLength:
+            return "HalfLength";
+        case SlotType::LowProfile:
+            return "LowProfile";
+        case SlotType::Mini:
+            return "Mini";
+        case SlotType::M2:
+            return "M_2";
+        case SlotType::OCP3Small:
+            return "OCP3Small";
+        case SlotType::OCP3Large:
+            return "OCP3Large";
+        case SlotType::U2:
+            return "U_2";
     }
     return "OEM";
 }

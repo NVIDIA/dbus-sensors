@@ -51,24 +51,23 @@ class NvidiaCpu : public Publisher
     // Registers the 15 interfaces on objServer. Must be called after
     // validate(). The Publisher base retains objServer for destruction.
     void publish(sdbusplus::asio::object_server& objServer,
-                 const std::string& cpuPath,
-                 const std::string& componentPath,
+                 const std::string& cpuPath, const std::string& componentPath,
                  const std::string& boardPath, uint64_t cpuIndex);
 
     // JSON-populated fields. from_json fills these via j.at(key).get_to();
     // validate() enforces the range/non-empty rules below.
-    uint32_t socketNum{0};       // "Socket", 0-255
-    std::string family;          // "Family"
-    std::string idStr;           // "Id" or "ID" (hex string)
-    uint16_t coreCount{0};       // "CoreCount", >0
-    uint16_t threadCount{0};     // "ThreadCount", >0
-    uint32_t maxSpeedInMhz{0};   // "MaxSpeedInMhz", >0
-    std::string manufacturer;    // "Manufacturer", non-empty
-    std::string model;           // "Model", non-empty
-    std::string modelRevision;   // "ModelRevision", non-empty
-    std::string serialNumber;    // "SerialNumber", non-empty
-    std::string version;         // "Version", non-empty
-    std::string sku;             // "SKU" (may be empty)
+    uint32_t socketNum{0};     // "Socket", 0-255
+    std::string family;        // "Family"
+    std::string idStr;         // "Id" or "ID" (hex string)
+    uint16_t coreCount{0};     // "CoreCount", >0
+    uint16_t threadCount{0};   // "ThreadCount", >0
+    uint32_t maxSpeedInMhz{0}; // "MaxSpeedInMhz", >0
+    std::string manufacturer;  // "Manufacturer", non-empty
+    std::string model;         // "Model", non-empty
+    std::string modelRevision; // "ModelRevision", non-empty
+    std::string serialNumber;  // "SerialNumber", non-empty
+    std::string version;       // "Version", non-empty
+    std::string sku;           // "SKU" (may be empty)
 
     // Populated by validate() from idStr (hex-parsed). Passed to D-Bus as
     // the Item.Cpu "Id" property.

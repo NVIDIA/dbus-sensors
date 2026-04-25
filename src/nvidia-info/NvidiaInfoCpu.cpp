@@ -147,32 +147,31 @@ void NvidiaCpu::publish(sdbusplus::asio::object_server& objServer,
     cpu.register_property("ModelRevision", modelRevision);
     cpu.register_property("ProcessorType", std::string("CPU"));
 
-    auto& item =
-        add(cpuPath, "xyz.openbmc_project.Inventory.Item", objServer);
+    auto& item = add(cpuPath, "xyz.openbmc_project.Inventory.Item", objServer);
     item.register_property("PrettyName", model);
     item.register_property("Present", true);
 
-    auto& asset = add(
-        cpuPath, "xyz.openbmc_project.Inventory.Decorator.Asset", objServer);
+    auto& asset = add(cpuPath, "xyz.openbmc_project.Inventory.Decorator.Asset",
+                      objServer);
     asset.register_property("Manufacturer", manufacturer);
     asset.register_property("Model", model);
     asset.register_property("SerialNumber", serialNumber);
     asset.register_property("Name", cpuName);
 
-    auto& rev = add(
-        cpuPath, "xyz.openbmc_project.Inventory.Decorator.Revision", objServer);
+    auto& rev = add(cpuPath, "xyz.openbmc_project.Inventory.Decorator.Revision",
+                    objServer);
     rev.register_property("Version", version);
 
     auto& instance = add(
         cpuPath, "xyz.openbmc_project.Inventory.Decorator.Instance", objServer);
     instance.register_property("InstanceNumber", cpuIndex);
 
-    auto& skuIf = add(
-        cpuPath, "xyz.openbmc_project.Inventory.Decorator.SKU", objServer);
+    auto& skuIf =
+        add(cpuPath, "xyz.openbmc_project.Inventory.Decorator.SKU", objServer);
     skuIf.register_property("SKU", sku);
 
-    auto& assoc = add(
-        cpuPath, "xyz.openbmc_project.Association.Definitions", objServer);
+    auto& assoc =
+        add(cpuPath, "xyz.openbmc_project.Association.Definitions", objServer);
     {
         AssocList assocs;
         assocs.emplace_back("chassis", "all_processors", componentPath);
@@ -208,17 +207,18 @@ void NvidiaCpu::publish(sdbusplus::asio::object_server& objServer,
             objServer);
     chassisRev.register_property("Version", version);
 
-    auto& chassisAssoc = add(
-        componentPath, "xyz.openbmc_project.Association.Definitions", objServer);
+    auto& chassisAssoc =
+        add(componentPath, "xyz.openbmc_project.Association.Definitions",
+            objServer);
     {
         AssocList assocs;
         assocs.emplace_back("parent_chassis", "all_chassis", boardPath);
         chassisAssoc.register_property("Associations", assocs);
     }
 
-    auto& chassisOpStatus = add(
-        componentPath,
-        "xyz.openbmc_project.State.Decorator.OperationalStatus", objServer);
+    auto& chassisOpStatus =
+        add(componentPath,
+            "xyz.openbmc_project.State.Decorator.OperationalStatus", objServer);
     chassisOpStatus.register_property("Functional", true);
 
     auto& chassisInstance =

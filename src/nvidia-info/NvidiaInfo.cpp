@@ -59,8 +59,8 @@ inline constexpr std::string_view persistedFilenameSuffix = "_Info.json";
 std::filesystem::path persistedPathFor(int32_t processorModuleIndex)
 {
     return std::filesystem::path(persistedJsonDir) /
-           std::format("{}{}{}", persistedFilenamePrefix,
-                       processorModuleIndex, persistedFilenameSuffix);
+           std::format("{}{}{}", persistedFilenamePrefix, processorModuleIndex,
+                       persistedFilenameSuffix);
 }
 
 // Strict inverse of persistedPathFor(): returns the module index encoded in
@@ -77,10 +77,10 @@ std::optional<int32_t> moduleIndexFromPersistedFilename(
     {
         return std::nullopt;
     }
-    const std::string_view digits = filename.substr(
-        persistedFilenamePrefix.size(),
-        filename.size() - persistedFilenamePrefix.size() -
-            persistedFilenameSuffix.size());
+    const std::string_view digits =
+        filename.substr(persistedFilenamePrefix.size(),
+                        filename.size() - persistedFilenamePrefix.size() -
+                            persistedFilenameSuffix.size());
     if (digits.size() != 1 || digits[0] < '0' || digits[0] > '9')
     {
         return std::nullopt;
@@ -329,8 +329,7 @@ void NvidiaInfo::triggerInventoryRefresh()
     static constexpr const char* triggerInterface =
         "xyz.openbmc_project.Control.Trigger";
     static constexpr std::string_view inventoryDataTag = "InventoryData";
-    static constexpr const char* controlRoot =
-        "/xyz/openbmc_project/control";
+    static constexpr const char* controlRoot = "/xyz/openbmc_project/control";
 
     using SubTreeType = std::vector<std::pair<
         std::string,
@@ -537,10 +536,9 @@ void NvidiaInfo::createInfoFromJsonString(int32_t processorModuleIndex,
                       /*persistOnSuccess=*/true, "CreateInfo");
 }
 
-void NvidiaInfo::processAndPublish(std::string terminusName,
-                                   std::string rawJson, int32_t moduleIndex,
-                                   bool persistOnSuccess,
-                                   std::string_view context)
+void NvidiaInfo::processAndPublish(
+    std::string terminusName, std::string rawJson, int32_t moduleIndex,
+    bool persistOnSuccess, std::string_view context)
 {
     TerminusData td;
     try
@@ -555,8 +553,7 @@ void NvidiaInfo::processAndPublish(std::string terminusName,
         clearTerminusInfo(terminusName);
         removePersistedFile(moduleIndex);
         throw sdbusplus::exception::SdBusError(
-            -EINVAL,
-            std::format("{} rejected: {}", context, e.what()).c_str());
+            -EINVAL, std::format("{} rejected: {}", context, e.what()).c_str());
     }
 
     try
@@ -572,10 +569,9 @@ void NvidiaInfo::processAndPublish(std::string terminusName,
 
     if (persistOnSuccess && !persistInfoJson(moduleIndex, rawJson))
     {
-        lg2::critical(
-            "Failed to persist info JSON for terminus {T}; exiting "
-            "to preserve round-trip guarantee",
-            "T", terminusName);
+        lg2::critical("Failed to persist info JSON for terminus {T}; exiting "
+                      "to preserve round-trip guarantee",
+                      "T", terminusName);
         std::exit(EXIT_FAILURE);
     }
 }
@@ -607,8 +603,8 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
 
     for (std::size_t i = 0; i < stored.cpus.size(); ++i)
     {
-        const uint64_t cpuIndex = moduleIdx * cpuCount +
-                                  static_cast<uint64_t>(i);
+        const uint64_t cpuIndex =
+            moduleIdx * cpuCount + static_cast<uint64_t>(i);
 
         const std::string cpuPath =
             std::format("{}/cpu/CPU_{}", inventoryPath, cpuIndex);
@@ -646,9 +642,8 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
 
     for (std::size_t i = 0; i < stored.tpms.size(); ++i)
     {
-        std::string tpmPath =
-            std::format("{}/chassis/motherboard/{}_tpm{}", inventoryPath,
-                        terminusName, i);
+        std::string tpmPath = std::format("{}/chassis/motherboard/{}_tpm{}",
+                                          inventoryPath, terminusName, i);
         stored.tpms[i].publish(*objServer, tpmPath);
         lg2::info("Created TPM inventory object: {P}", "P", tpmPath);
     }
@@ -738,10 +733,9 @@ void NvidiaInfo::loadPersistedInfoFiles()
             // to rewrite it. processAndPublish will still remove the bad file
             // on parse/validate failure, which is the right behavior for our
             // own persisted state.
-            processAndPublish(
-                std::format("ProcessorModule_{}", *moduleIndex),
-                std::move(rawJson), *moduleIndex,
-                /*persistOnSuccess=*/false, "Recovery");
+            processAndPublish(std::format("ProcessorModule_{}", *moduleIndex),
+                              std::move(rawJson), *moduleIndex,
+                              /*persistOnSuccess=*/false, "Recovery");
         }
         catch (const std::exception& e)
         {

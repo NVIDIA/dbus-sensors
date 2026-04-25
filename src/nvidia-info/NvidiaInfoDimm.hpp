@@ -62,21 +62,21 @@ class NvidiaDimm : public Publisher
 
     // JSON-populated fields. from_json fills these; validate() enforces
     // the rules described in NvidiaInfoEnums.hpp and below.
-    uint32_t sizeKB{0};       // "MemorySizeKB" (optional)
-    uint16_t dataWidth{0};    // "MemoryDataWidth" (optional)
-    uint16_t totalWidth{0};   // "MemoryTotalWidth" (optional)
-    std::string locator;      // "MemoryDeviceLocator", non-empty
-    uint16_t maxSpeed{0};     // "MaxMemorySpeedInMHz" (optional)
-    uint16_t configSpeed{0};  // "MemoryConfiguredSpeedInMhz" (optional)
-    MemoryType memoryType{MemoryType::Unknown};      // "MemoryType"
-    FormFactor formFactor{FormFactor::Unknown};      // "FormFactor"
-    bool ecc{false};          // "ECC" (optional)
-    std::string manufacturer; // "Manufacturer", non-empty
-    std::string model;        // "Model" (may be empty)
-    std::string partNumber;   // "PartNumber" (may be empty)
-    std::string serialNumber; // "SerialNumber" (may be empty)
-    std::string sku;          // "SKU" (may be empty)
-    MemoryMedia memoryMedia{MemoryMedia::Unknown};   // "MemoryMedia"
+    uint32_t sizeKB{0};      // "MemorySizeKB" (optional)
+    uint16_t dataWidth{0};   // "MemoryDataWidth" (optional)
+    uint16_t totalWidth{0};  // "MemoryTotalWidth" (optional)
+    std::string locator;     // "MemoryDeviceLocator", non-empty
+    uint16_t maxSpeed{0};    // "MaxMemorySpeedInMHz" (optional)
+    uint16_t configSpeed{0}; // "MemoryConfiguredSpeedInMhz" (optional)
+    MemoryType memoryType{MemoryType::Unknown}; // "MemoryType"
+    FormFactor formFactor{FormFactor::Unknown}; // "FormFactor"
+    bool ecc{false};                            // "ECC" (optional)
+    std::string manufacturer;                   // "Manufacturer", non-empty
+    std::string model;                          // "Model" (may be empty)
+    std::string partNumber;                     // "PartNumber" (may be empty)
+    std::string serialNumber;                   // "SerialNumber" (may be empty)
+    std::string sku;                            // "SKU" (may be empty)
+    MemoryMedia memoryMedia{MemoryMedia::Unknown}; // "MemoryMedia"
 
   private:
     // Cached handle to the Association.Definitions interface registered

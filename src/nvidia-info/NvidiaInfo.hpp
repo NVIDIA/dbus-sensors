@@ -42,10 +42,8 @@ inline constexpr const char* defaultInfoPath =
 
 inline constexpr const char* persistedJsonDir = "/var/lib/nvidia-info";
 
-inline constexpr const char* mapperBusName =
-    "xyz.openbmc_project.ObjectMapper";
-inline constexpr const char* mapperPath =
-    "/xyz/openbmc_project/object_mapper";
+inline constexpr const char* mapperBusName = "xyz.openbmc_project.ObjectMapper";
+inline constexpr const char* mapperPath = "/xyz/openbmc_project/object_mapper";
 inline constexpr const char* mapperInterface =
     "xyz.openbmc_project.ObjectMapper";
 inline constexpr const char* systemInterface =

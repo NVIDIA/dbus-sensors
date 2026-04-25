@@ -86,8 +86,7 @@ class Publisher
                                          sdbusplus::asio::object_server& objs)
     {
         server = &objs;
-        auto iface =
-            objs.add_interface(path, std::string(interfaceName));
+        auto iface = objs.add_interface(path, std::string(interfaceName));
         ifaces.push_back(std::move(iface));
         return *ifaces.back();
     }

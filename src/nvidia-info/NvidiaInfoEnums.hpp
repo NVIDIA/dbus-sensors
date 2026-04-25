@@ -50,22 +50,23 @@ enum class FormFactor
 
 const char* formFactorName(FormFactor f);
 
-NLOHMANN_JSON_SERIALIZE_ENUM(FormFactor,
-                             {
-                                 {FormFactor::Unknown, nullptr},
-                                 {FormFactor::RDIMM, "RDIMM"},
-                                 {FormFactor::UDIMM, "UDIMM"},
-                                 {FormFactor::SO_DIMM, "SO_DIMM"},
-                                 {FormFactor::LRDIMM, "LRDIMM"},
-                                 {FormFactor::Mini_RDIMM, "Mini_RDIMM"},
-                                 {FormFactor::Mini_UDIMM, "Mini_UDIMM"},
-                                 {FormFactor::SO_RDIMM_72b, "SO_RDIMM_72b"},
-                                 {FormFactor::SO_UDIMM_72b, "SO_UDIMM_72b"},
-                                 {FormFactor::SO_DIMM_16b, "SO_DIMM_16b"},
-                                 {FormFactor::SO_DIMM_32b, "SO_DIMM_32b"},
-                                 {FormFactor::Die, "Die"},
-                                 {FormFactor::SOCAMM, "SOCAMM"},
-                             })
+NLOHMANN_JSON_SERIALIZE_ENUM(
+    FormFactor,
+    {
+        {FormFactor::Unknown, nullptr},
+        {FormFactor::RDIMM, "RDIMM"},
+        {FormFactor::UDIMM, "UDIMM"},
+        {FormFactor::SO_DIMM, "SO_DIMM"},
+        {FormFactor::LRDIMM, "LRDIMM"},
+        {FormFactor::Mini_RDIMM, "Mini_RDIMM"},
+        {FormFactor::Mini_UDIMM, "Mini_UDIMM"},
+        {FormFactor::SO_RDIMM_72b, "SO_RDIMM_72b"},
+        {FormFactor::SO_UDIMM_72b, "SO_UDIMM_72b"},
+        {FormFactor::SO_DIMM_16b, "SO_DIMM_16b"},
+        {FormFactor::SO_DIMM_32b, "SO_DIMM_32b"},
+        {FormFactor::Die, "Die"},
+        {FormFactor::SOCAMM, "SOCAMM"},
+    })
 
 // MemoryType: DIMM DeviceType values. Unknown is the fallback for unknown
 // strings; validate() rejects it. Names match the
@@ -169,20 +170,21 @@ enum class SlotType
 
 const char* slotTypeName(SlotType s);
 
-NLOHMANN_JSON_SERIALIZE_ENUM(SlotType,
-                             {
-                                 {SlotType::OEM, "OEM"},
-                                 {SlotType::FullLength, "FullLength"},
-                                 {SlotType::HalfLength, "HalfLength"},
-                                 {SlotType::LowProfile, "LowProfile"},
-                                 {SlotType::Mini, "Mini"},
-                                 {SlotType::M2, "M_2"},
-                                 {SlotType::M2, "M2"},
-                                 {SlotType::OCP3Small, "OCP3Small"},
-                                 {SlotType::OCP3Large, "OCP3Large"},
-                                 {SlotType::U2, "U_2"},
-                                 {SlotType::U2, "U2"},
-                             })
+NLOHMANN_JSON_SERIALIZE_ENUM(
+    SlotType,
+    {
+        {SlotType::OEM, "OEM"},
+        {SlotType::FullLength, "FullLength"},
+        {SlotType::HalfLength, "HalfLength"},
+        {SlotType::LowProfile, "LowProfile"},
+        {SlotType::Mini, "Mini"},
+        {SlotType::M2, "M_2"},
+        {SlotType::M2, "M2"},
+        {SlotType::OCP3Small, "OCP3Small"},
+        {SlotType::OCP3Large, "OCP3Large"},
+        {SlotType::U2, "U_2"},
+        {SlotType::U2, "U2"},
+    })
 
 } // namespace info
 } // namespace nvidia

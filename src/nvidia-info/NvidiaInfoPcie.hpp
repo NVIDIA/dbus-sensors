@@ -42,7 +42,10 @@ namespace info
 class NvidiaPcie : public Publisher
 {
   public:
-    bool isPresent() const { return present; }
+    bool isPresent() const
+    {
+        return present;
+    }
 
     // Throws std::invalid_argument on range or non-empty-string
     // violations. Safe to call multiple times.
@@ -64,18 +67,18 @@ class NvidiaPcie : public Publisher
     // the rules below. The SlotType empty-string check happens in
     // from_json because an empty string decodes to SlotType::OEM and is
     // indistinguishable here.
-    SlotType slotType{SlotType::OEM};    // "SlotType", OEM fallback
-    std::string locationCode;            // "LocationCode", non-empty
-    uint32_t generation{0};              // "Generation", 0-6
-    uint32_t lanes{0};                   // "Lanes", 0-64
-    uint32_t maxLinkSpeed{0};            // "MaxLinkSpeed", 0-6
-    uint32_t maxLinkWidth{0};            // "MaxLinkWidth", 0-64
-    bool present{false};                 // "Present" (optional)
-    bool hotPluggable{false};            // "HotPluggable" (optional)
-    uint32_t segmentControllerIndex{0};  // "SegmentControllerIndex"
-    std::string portType;                // "PortType" (optional)
-    std::string portProtocol;            // "PortProtocol" (optional)
-    uint32_t rootPort{0};                // "RootPort" (optional)
+    SlotType slotType{SlotType::OEM};   // "SlotType", OEM fallback
+    std::string locationCode;           // "LocationCode", non-empty
+    uint32_t generation{0};             // "Generation", 0-6
+    uint32_t lanes{0};                  // "Lanes", 0-64
+    uint32_t maxLinkSpeed{0};           // "MaxLinkSpeed", 0-6
+    uint32_t maxLinkWidth{0};           // "MaxLinkWidth", 0-64
+    bool present{false};                // "Present" (optional)
+    bool hotPluggable{false};           // "HotPluggable" (optional)
+    uint32_t segmentControllerIndex{0}; // "SegmentControllerIndex"
+    std::string portType;               // "PortType" (optional)
+    std::string portProtocol;           // "PortProtocol" (optional)
+    uint32_t rootPort{0};               // "RootPort" (optional)
 
   private:
     // Cached handle to the Association.Definitions interface registered

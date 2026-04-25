@@ -65,8 +65,7 @@ void NvidiaDimm::validate()
 {
     if (locator.empty())
     {
-        throw std::invalid_argument(
-            "MemoryDeviceLocator must be non-empty");
+        throw std::invalid_argument("MemoryDeviceLocator must be non-empty");
     }
     if (manufacturer.empty())
     {
@@ -79,8 +78,7 @@ void NvidiaDimm::validate()
     }
     if (formFactor == FormFactor::Unknown)
     {
-        throw std::invalid_argument(
-            "FormFactor must be a recognized value");
+        throw std::invalid_argument("FormFactor must be a recognized value");
     }
     if (memoryMedia == MemoryMedia::Unknown)
     {
@@ -116,13 +114,12 @@ void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
 
     add(dimmPath, "xyz.openbmc_project.Inventory.Connector.Slot", objServer);
 
-    auto& item =
-        add(dimmPath, "xyz.openbmc_project.Inventory.Item", objServer);
+    auto& item = add(dimmPath, "xyz.openbmc_project.Inventory.Item", objServer);
     item.register_property("PrettyName", std::string(""));
     item.register_property("Present", true);
 
-    auto& asset = add(
-        dimmPath, "xyz.openbmc_project.Inventory.Decorator.Asset", objServer);
+    auto& asset = add(dimmPath, "xyz.openbmc_project.Inventory.Decorator.Asset",
+                      objServer);
     asset.register_property("Manufacturer", manufacturer);
     asset.register_property("Model", model);
     asset.register_property("PartNumber", partNumber);
@@ -134,8 +131,9 @@ void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
             objServer);
     location.register_property("LocationCode", locator);
 
-    auto& locationType = add(
-        dimmPath, "xyz.openbmc_project.Inventory.Decorator.Location", objServer);
+    auto& locationType =
+        add(dimmPath, "xyz.openbmc_project.Inventory.Decorator.Location",
+            objServer);
     std::string locationTypeStr;
     if (formFactor == FormFactor::SOCAMM)
     {
@@ -143,8 +141,8 @@ void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
     }
     locationType.register_property("LocationType", locationTypeStr);
 
-    auto& assoc = add(
-        dimmPath, "xyz.openbmc_project.Association.Definitions", objServer);
+    auto& assoc =
+        add(dimmPath, "xyz.openbmc_project.Association.Definitions", objServer);
     {
         using AssocTuple = std::tuple<std::string, std::string, std::string>;
         using AssocList = std::vector<AssocTuple>;
