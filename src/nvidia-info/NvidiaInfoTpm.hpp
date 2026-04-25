@@ -28,31 +28,26 @@ namespace nvidia
 namespace info
 {
 
-// NvidiaTpm registers the 4 D-Bus interfaces that represent a single
-// Trusted Platform Module at
-// .../chassis/motherboard/<terminusName>_tpm<i>: Item.TrustedComponent,
-// Item, Decorator.Asset, and Software.Version.
-//
-// Default-constructed by the vector<NvidiaTpm> inside TerminusData,
-// populated via from_json, checked by validate(), and only then
-// registered on D-Bus by publish(). The Publisher base removes every
-// interface on destruction.
+// Represents one TPM at .../chassis/motherboard/<terminusName>_tpm<i>.
+// Lifecycle: from_json -> validate() -> publish().
 class NvidiaTpm : public Publisher
 {
   public:
-    // Every TPM field is optional in the original NvidiaInfoTpm, so this
-    // has no invariants to enforce. Kept declared so validateEach can
-    // invoke it uniformly with the other sections.
+    NvidiaTpm() = default;
+    NvidiaTpm(const NvidiaTpm&) = delete;
+    NvidiaTpm& operator=(const NvidiaTpm&) = delete;
+    NvidiaTpm(NvidiaTpm&&) = default;
+    NvidiaTpm& operator=(NvidiaTpm&&) = default;
+    ~NvidiaTpm() = default;
+
+    // No-op; kept for validateEach<>() symmetry.
     void validate();
 
-    // Registers the 4 interfaces on objServer. Must be called after
-    // validate(). The Publisher base retains objServer for destruction.
+    // Registers the D-Bus interfaces. Call after validate().
     void publish(sdbusplus::asio::object_server& objServer,
                  const std::string& tpmPath);
 
-    // JSON-populated fields. from_json fills these; all are optional and
-    // default to empty strings. PrettyName and Model are derived from
-    // majorSpecVersion inside publish().
+    // All optional; PrettyName/Model are derived from majorSpecVersion.
     std::string manufacturer;     // "Manufacturer" (optional)
     std::string version;          // "Version" (optional)
     std::string majorSpecVersion; // "MajorSpecVersion" (optional)

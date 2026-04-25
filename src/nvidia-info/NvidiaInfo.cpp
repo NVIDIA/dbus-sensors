@@ -38,8 +38,6 @@
 #include <map>
 #include <memory>
 #include <optional>
-#include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -63,12 +61,8 @@ std::filesystem::path persistedPathFor(int32_t processorModuleIndex)
                        persistedFilenameSuffix);
 }
 
-// Strict inverse of persistedPathFor(): returns the module index encoded in
-// a filename of exactly the form "ProcessorModule_<digit>_Info.json", where
-// <digit> is a single character in [0-9]. Any other name returns nullopt
-// and must be ignored by callers. Restricting to one digit makes the
-// canonical-form check trivial (no leading-zero aliasing is possible) and
-// caps the supported module indices at 0..9.
+// Inverse of persistedPathFor(); only single-digit indices accepted, which
+// avoids leading-zero aliasing and caps modules at 0..9.
 std::optional<int32_t> moduleIndexFromPersistedFilename(
     std::string_view filename)
 {
@@ -212,11 +206,8 @@ NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
               "{P}/{I}",
               "P", nvidiaInfoObjPath, "I", nvidiaInfoInterface);
 
-    // Active startup probe: if the motherboard / ProcessorModule paths
-    // are already published by Entity Manager, attach associations now
-    // and avoid waiting for an InterfacesAdded that will never come. If
-    // nothing is found yet, this is a harmless no-op and the existing
-    // InterfacesAdded + 2s debounce path remains armed.
+    // Probe in case Entity Manager already published the motherboard /
+    // ProcessorModule paths; otherwise the InterfacesAdded path covers it.
     discoverPaths([this]() { attachAllAssociations(); });
 }
 
@@ -265,8 +256,7 @@ void NvidiaInfo::onInterfacesAdded(sdbusplus::message_t& msg)
 
 void NvidiaInfo::scheduleMotherboardDiscovery()
 {
-    // Shared-ownership timer: the async_wait callback keeps the timer alive
-    // until it fires (or is cancelled).
+    // Timer kept alive by its own async_wait callback.
     auto delayTimer = std::make_shared<boost::asio::steady_timer>(*ioCtx);
     delayTimer->expires_after(std::chrono::seconds(2));
     delayTimer->async_wait(
@@ -518,9 +508,8 @@ void NvidiaInfo::discoverPaths(std::function<void()> callback)
 void NvidiaInfo::createInfoFromJsonString(int32_t processorModuleIndex,
                                           const std::string& jsonStr)
 {
-    // Must match the range accepted by moduleIndexFromPersistedFilename().
-    // If we ever persisted an index outside this range, startup recovery
-    // would silently refuse to load it back.
+    // Must match the single-digit range that recovery's filename regex
+    // accepts.
     if (processorModuleIndex < 0 || processorModuleIndex > 9)
     {
         throw sdbusplus::exception::SdBusError(
@@ -543,15 +532,9 @@ void NvidiaInfo::processAndPublish(
     try
     {
         Json doc = Json::parse(rawJson);
-        // Schema validation runs first so structural problems (missing
-        // required fields, wrong types, out-of-range integers, bad
-        // enum values, malformed Id strings, ...) are caught with
-        // JSON-Pointer error context before from_json() ever runs.
+        // Schema enforces structure; validate() does derivation only.
         validateAgainstSchema(doc);
         td = doc.get<TerminusData>();
-        // Per-section validate() now only does derivation (e.g. CPU Id
-        // hex parse into idValue); the schema has already enforced the
-        // structural and range constraints.
         validate(td);
     }
     catch (const std::exception& e)
@@ -594,9 +577,8 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
 {
     lg2::info("Updating NVIDIA inventory for terminus {T}", "T", terminusName);
 
-    // Destruct old publisher objects first (removes their D-Bus interfaces)
-    // before replacing with the new ones. Handles first-call and
-    // re-publish cases uniformly.
+    // Drop any old publishers (and their D-Bus interfaces) before
+    // re-registering.
     clearTerminusInfo(terminusName);
 
     auto& entry = terminusInfos[terminusName];
@@ -604,8 +586,6 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
     entry.moduleIndex = moduleIndex;
     auto& stored = entry.terminus;
 
-    // Callees downstream (maps, publish signatures, path arithmetic) are
-    // all uint64_t; widen here once since the caller-facing type is int32_t.
     const auto moduleIdx = static_cast<uint64_t>(moduleIndex);
     const auto cpuCount = static_cast<uint64_t>(stored.cpus.size());
 
@@ -652,11 +632,8 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         stored.tpms[i].publish(*objServer, tpmPath);
     }
 
-    // Opportunistically populate Association.Definitions on the DIMM and
-    // PCIe slot objects we just registered, using whichever discovered
-    // paths are already known. If discovery has not yet completed, this
-    // is a harmless no-op; the post-discovery attachAllAssociations will
-    // patch the Associations properties later.
+    // Best-effort attach with whatever paths are already known; later
+    // discovery patches the rest.
     attachAssociationsFor(terminusName);
 
     lg2::info("NVIDIA inventory update complete for terminus {T}", "T",
@@ -665,12 +642,8 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
 
 void NvidiaInfo::loadPersistedInfoFiles()
 {
-    // Recovery scans the persistence directory, but accepts *only* filenames
-    // that match the exact shape we produce in persistedPathFor():
-    // "ProcessorModule_<non-negative digits>_Info.json". Anything else is
-    // silently ignored, since no well-formed write of ours could have
-    // produced it. This supports an arbitrary number of module indices
-    // without a hardcoded list.
+    // Only files matching persistedPathFor()'s shape are accepted; others
+    // are ignored.
     namespace fs = std::filesystem;
 
     std::error_code ec;
@@ -733,10 +706,7 @@ void NvidiaInfo::loadPersistedInfoFiles()
                   "I", *moduleIndex, "F", path.string());
         try
         {
-            // persistOnSuccess=false: the content is already on disk; no need
-            // to rewrite it. processAndPublish will still remove the bad file
-            // on parse/validate failure, which is the right behavior for our
-            // own persisted state.
+            // Already on disk; processAndPublish still removes it on failure.
             processAndPublish(std::format("ProcessorModule_{}", *moduleIndex),
                               std::move(rawJson), *moduleIndex,
                               /*persistOnSuccess=*/false, "Recovery");

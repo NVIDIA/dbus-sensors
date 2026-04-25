@@ -31,8 +31,7 @@ namespace nvidia
 namespace info
 {
 
-// A parsed and (after validate()) validated in-memory representation of a
-// per-terminus Info JSON payload.
+// In-memory representation of a per-terminus Info JSON payload.
 struct TerminusData
 {
     std::vector<NvidiaCpu> cpus;
@@ -43,19 +42,13 @@ struct TerminusData
 
 void from_json(const Json& j, TerminusData& t);
 
-// Validates `doc` against the embedded JSON schema (schema.json, draft-07).
-// Throws std::invalid_argument on any structural, range, enum, regex, or
-// required-field violation. Must run before from_json/get<TerminusData>():
-// the schema is the authoritative guard for everything except the
-// derivation work that the per-section validate() methods still do
-// (e.g. CPU Id hex parse).
+// Validates doc against the embedded JSON schema. Authoritative guard for
+// structure; must run before get<TerminusData>(). Throws
+// std::invalid_argument on any violation.
 void validateAgainstSchema(const Json& doc);
 
-// Calls .validate() on each element of each section. Per-section validate()
-// is now scoped to derivation only (e.g. parsing strings into typed values
-// that publish() consumes); structural rejection happens earlier in
-// validateAgainstSchema(). Propagates the first std::invalid_argument
-// encountered, wrapped with section/index context.
+// Runs each section's validate() (derivation only). Throws the first
+// std::invalid_argument it encounters, wrapped with section/index context.
 void validate(TerminusData& t);
 
 } // namespace info

@@ -48,11 +48,8 @@ int main()
 
         connection->request_name(nvidia::info::nvidiaInfoService);
 
-        // Ask upstream producers (e.g. pldm) to push current inventory to us
-        // at startup, equivalent to bmcweb's
-        // NvidiaComputerSystem.RefreshInventory action. Posted to the io
-        // context so it fires once the event loop is running, after all
-        // match rules and the bus name request have settled.
+        // Posted so it fires after the event loop, match rules, and bus
+        // name request have settled.
         boost::asio::post(*io, [infoService]() {
             infoService->triggerInventoryRefresh();
         });

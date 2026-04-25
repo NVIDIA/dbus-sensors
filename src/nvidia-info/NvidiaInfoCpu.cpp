@@ -52,15 +52,7 @@ void from_json(const Json& j, NvidiaCpu& c)
 
 void NvidiaCpu::validate()
 {
-    // The schema (validated up-front in processAndPublish) already enforces
-    // the structural rules for this struct: Socket 0-255, CoreCount /
-    // ThreadCount / MaxSpeedInMhz >= 1, non-empty Manufacturer / Model /
-    // ModelRevision / SerialNumber / Version, and Id matches
-    //   ^(0[xX])?[0-9a-fA-F]{1,16}$
-    // The only work left here is *derivation*: parse the hex Id string
-    // into idValue (the uint64_t shape that publish() registers as the
-    // Item.Cpu "Id" property). The schema's pattern guarantees the
-    // from_chars call below will succeed.
+    // Schema already validated shape; just hex-parse idStr into idValue.
     std::string_view sv(idStr);
     if (sv.size() >= 2 && sv[0] == '0' && (sv[1] == 'x' || sv[1] == 'X'))
     {
@@ -71,7 +63,6 @@ void NvidiaCpu::validate()
         std::from_chars(sv.data(), sv.data() + sv.size(), parsed, 16);
     if (ec != std::errc{} || ptr != sv.data() + sv.size())
     {
-        // Should be unreachable after schema validation; defensive.
         throw std::invalid_argument("Id hex parse failed");
     }
     idValue = parsed;

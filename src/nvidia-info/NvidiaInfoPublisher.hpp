@@ -29,29 +29,14 @@ namespace nvidia
 namespace info
 {
 
-// Publisher is the shared base class for NvidiaCpu / NvidiaDimm / NvidiaPcie
-// / NvidiaTpm. Each of those types registers a fixed set of D-Bus
-// interfaces on an object_server in its publish() method, and must remove
-// them again when destroyed.
+// Shared base for NvidiaCpu / NvidiaDimm / NvidiaPcie / NvidiaTpm. Each
+// derived type add()s its D-Bus interfaces in publish(); the base
+// destructor unregisters whatever is still owned.
 //
-// Instead of storing one named std::shared_ptr<dbus_interface> per
-// interface and hand-maintaining a destructor init-list, derived classes
-// add() each interface and let the base destructor unregister them all in
-// one loop.
-//
-// Ownership rules (unchanged from the original four copies of this code):
-//   * server is a raw pointer cached on the first add(). Its lifetime is
-//     managed by NvidiaInfo::objServer (a shared_ptr), which outlives
-//     terminusInfos and therefore outlives every Publisher contained in
-//     it.
-//   * Publishers are owned by std::vector inside TerminusData, so they
-//     must be move-constructible and move-assignable. Copying is
-//     forbidden because the D-Bus interfaces are single-owner resources.
-//   * On move, the source's ifaces vector is left empty and its server
-//     pointer retains its value; the source's destructor therefore
-//     iterates an empty list and does nothing. The destination takes
-//     over the registered interfaces and will remove them on its own
-//     destruction.
+// Move-only because dbus_interface is a single-owner resource. The
+// `server` raw pointer is safe: it points at NvidiaInfo::objServer, which
+// outlives every Publisher. After a move, the moved-from object's
+// ifaces vector is empty so its destructor is a no-op.
 class Publisher
 {
   public:
@@ -77,10 +62,8 @@ class Publisher
     }
 
   protected:
-    // Add a new D-Bus interface at path, remember it for later
-    // unregistration, and return a reference the caller can use to
-    // register_property() on it. The first call on a given Publisher
-    // instance also latches the object_server pointer.
+    // Register an interface at path, remember it for unregistration, and
+    // return a reference for register_property().
     sdbusplus::asio::dbus_interface& add(const std::string& path,
                                          std::string_view interfaceName,
                                          sdbusplus::asio::object_server& objs)
@@ -91,21 +74,13 @@ class Publisher
         return *ifaces.back();
     }
 
-    // Return a copy of the shared_ptr to the most recently add()ed
-    // interface, so derived classes can cache it (e.g. to mutate a
-    // property after initializeAll() has run). Returns nullptr if no
-    // add() has been called yet. Returning a copy (rather than a
-    // reference into ifaces) keeps the result valid even if subsequent
-    // add() calls reallocate the underlying vector.
+    // Handle to the most recently add()ed interface, or nullptr.
     std::shared_ptr<sdbusplus::asio::dbus_interface> lastIface() const
     {
         return ifaces.empty() ? nullptr : ifaces.back();
     }
 
-    // Call initialize() on every interface added so far. Derived classes
-    // call this once at the end of publish(); the original code split
-    // initialize() calls per-path but the observable effect on D-Bus is
-    // the same.
+    // initialize() every interface added so far.
     void initializeAll()
     {
         for (auto& iface : ifaces)

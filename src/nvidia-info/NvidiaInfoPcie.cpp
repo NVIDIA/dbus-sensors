@@ -40,9 +40,7 @@ static constexpr std::string_view pcieSlotTypePrefix =
 namespace
 {
 
-// Maps the numeric PCIe generation to its phosphor-dbus-interfaces
-// Generations.* suffix. 0 and out-of-range values (validate() caps at 6)
-// map to Unknown.
+// Maps a numeric PCIe generation to its DBus Generations.* suffix.
 std::string generationSuffix(uint32_t gen)
 {
     switch (gen)
@@ -69,10 +67,7 @@ std::string generationSuffix(uint32_t gen)
 
 void from_json(const Json& j, NvidiaPcie& c)
 {
-    // SlotType: any unknown string decodes to OEM via the enum's
-    // from_json fallback. The JSON schema rejects empty strings up-front
-    // (PCIeSlot.SlotType has minLength: 1), which is what disambiguates
-    // "client sent ''" from "client sent 'OEM'".
+    // Schema rejects empty strings; unknown values fall back to OEM.
     c.slotType = j.at("SlotType").get<SlotType>();
 
     j.at("LocationCode").get_to(c.locationCode);
@@ -91,11 +86,8 @@ void from_json(const Json& j, NvidiaPcie& c)
 
 void NvidiaPcie::validate()
 {
-    // Nothing to do. The JSON schema (validated up-front in
-    // processAndPublish) covers every constraint that used to live here:
-    // Generation/MaxLinkSpeed 0-6, Lanes/MaxLinkWidth 0-64, non-empty
-    // LocationCode, non-empty SlotType. Kept as a no-op so the generic
-    // validateEach<>() walker still has a uniform shape across sections.
+    // Schema covers all PCIe constraints; no-op kept for validateEach<>
+    // symmetry.
 }
 
 void NvidiaPcie::publish(sdbusplus::asio::object_server& objServer,

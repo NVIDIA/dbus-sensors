@@ -25,12 +25,8 @@ namespace info
 
 using Json = nlohmann::json;
 
-// FormFactor: DIMM form factors. Unknown is the first entry and is the
-// fallback that NLOHMANN_JSON_SERIALIZE_ENUM decodes to when the incoming
-// JSON string matches no listed value. validate() (in later commits)
-// rejects Unknown. String spellings are sourced from schema.json and
-// match the phosphor-dbus-interfaces
-// xyz.openbmc_project.Inventory.Item.Dimm.FormFactor.* suffixes.
+// DIMM form factors. Unknown is the NLOHMANN_JSON_SERIALIZE_ENUM fallback;
+// the schema's enum allow-list rejects it.
 enum class FormFactor
 {
     Unknown,
@@ -68,9 +64,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
         {FormFactor::SOCAMM, "SOCAMM"},
     })
 
-// MemoryType: DIMM DeviceType values. Unknown is the fallback for unknown
-// strings; validate() rejects it. Names match the
-// xyz.openbmc_project.Inventory.Item.Dimm.DeviceType.* enum suffixes.
+// DIMM DeviceType values; Unknown is the schema-rejected fallback.
 enum class MemoryType
 {
     Unknown,
@@ -126,10 +120,9 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
         {MemoryType::HBM3, "HBM3"},
     })
 
-// MemoryMedia: storage technology behind the DIMM. The JSON spelling is
-// fixed (see schema.json); the phosphor-dbus-interfaces MemoryTech suffix
-// differs for NAND (remaps to Other) and Intel3DXPoint (remaps to
-// IntelOptane). memoryMediaTechName() performs that remap.
+// Storage technology behind the DIMM. memoryMediaTechName() remaps NAND
+// to "Other" and Intel3DXPoint to "IntelOptane" for the DBus MemoryTech
+// suffix.
 enum class MemoryMedia
 {
     Unknown,
@@ -148,13 +141,9 @@ NLOHMANN_JSON_SERIALIZE_ENUM(MemoryMedia,
                                  {MemoryMedia::Intel3DXPoint, "Intel3DXPoint"},
                              })
 
-// SlotType: PCIe slot form factor. OEM is the first entry and is the
-// fallback decoded from unrecognized strings (validate() rejects empty
-// SlotType in a later commit). Enum names omit underscores; slotTypeName()
-// inserts them to produce the
-// xyz.openbmc_project.Inventory.Item.PCIeSlot.SlotTypes.* suffix (e.g.
-// SlotType::M2 -> "M_2"). The JSON decoder accepts both the underscored
-// form ("M_2", "U_2") and the compact form ("M2", "U2").
+// PCIe slot form factor. OEM is the fallback for unrecognized strings.
+// JSON accepts both "M_2"/"U_2" and "M2"/"U2"; slotTypeName() always
+// emits the underscored DBus suffix.
 enum class SlotType
 {
     OEM,

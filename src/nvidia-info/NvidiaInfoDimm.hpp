@@ -30,38 +30,29 @@ namespace nvidia
 namespace info
 {
 
-// NvidiaDimm registers the 8 D-Bus interfaces that represent a single
-// memory module at .../dimm/ProcessorModule_M_Memory_N: Item.Dimm,
-// Connector.Slot, Item, Decorator.Asset, Decorator.LocationCode,
-// Decorator.Location, Association.Definitions, and
-// State.Decorator.OperationalStatus.
-//
-// Default-constructed by the vector<NvidiaDimm> inside TerminusData,
-// populated via from_json, checked by validate(), and only then
-// registered on D-Bus by publish(). The Publisher base removes every
-// interface on destruction.
+// Represents one DIMM at .../dimm/ProcessorModule_M_Memory_N. Lifecycle:
+// from_json -> validate() -> publish(); Publisher base unregisters on
+// destruction.
 class NvidiaDimm : public Publisher
 {
   public:
-    // Throws std::invalid_argument on rejected-enum or required-string
-    // violations. Safe to call multiple times.
+    NvidiaDimm() = default;
+    NvidiaDimm(const NvidiaDimm&) = delete;
+    NvidiaDimm& operator=(const NvidiaDimm&) = delete;
+    NvidiaDimm(NvidiaDimm&&) = default;
+    NvidiaDimm& operator=(NvidiaDimm&&) = default;
+    ~NvidiaDimm() = default;
+
     void validate();
 
-    // Registers the 8 interfaces on objServer. Must be called after
-    // validate(). The Publisher base retains objServer for destruction.
-    // The Association.Definitions interface is initialized with an empty
-    // Associations list; call attach() after discovery to populate it.
+    // Registers the D-Bus interfaces. Associations are empty until attach().
     void publish(sdbusplus::asio::object_server& objServer,
                  const std::string& dimmPath);
 
-    // Set the Association.Definitions Associations property to associate
-    // this DIMM with the given motherboard inventory path. Idempotent.
-    // Must be called after publish() (i.e. after the interface has been
-    // initialize()d).
+    // Associate this DIMM with the given motherboard path. Idempotent;
+    // must be called after publish().
     void attach(const std::string& motherboardPath);
 
-    // JSON-populated fields. from_json fills these; validate() enforces
-    // the rules described in NvidiaInfoEnums.hpp and below.
     uint32_t sizeKB{0};      // "MemorySizeKB" (optional)
     uint16_t dataWidth{0};   // "MemoryDataWidth" (optional)
     uint16_t totalWidth{0};  // "MemoryTotalWidth" (optional)
@@ -79,9 +70,7 @@ class NvidiaDimm : public Publisher
     MemoryMedia memoryMedia{MemoryMedia::Unknown}; // "MemoryMedia"
 
   private:
-    // Cached handle to the Association.Definitions interface registered
-    // by publish(); used by attach() to mutate Associations after the
-    // interface has been initialize()d.
+    // Cached Association.Definitions handle, mutated by attach().
     std::shared_ptr<sdbusplus::asio::dbus_interface> assocIface;
 };
 

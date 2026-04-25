@@ -24,11 +24,9 @@
 #include <sdbusplus/bus/match.hpp>
 
 #include <cstdint>
-#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -64,8 +62,7 @@ inline constexpr const char* nvidiaInfoInterface =
 struct TerminusInfo
 {
     TerminusData terminus;
-    // Authoritative module index for this terminus, used to look up the
-    // discovered processor-module path when patching associations.
+    // Module index used to look up the processor-module path for associations.
     int32_t moduleIndex{0};
 };
 
@@ -83,10 +80,8 @@ class NvidiaInfo
                std::shared_ptr<sdbusplus::asio::object_server> obj,
                std::string invPath);
 
-    // Request a one-shot startup inventory refresh from upstream producers
-    // by setting Refresh=true on every xyz.openbmc_project.Control.Trigger
-    // object whose path contains "InventoryData" under
-    // /xyz/openbmc_project/control.
+    // Sets Refresh=true on every Control.Trigger InventoryData object
+    // under /xyz/openbmc_project/control.
     void triggerInventoryRefresh();
 
   private:
@@ -106,12 +101,9 @@ class NvidiaInfo
     void createInfoFromJsonString(int32_t processorModuleIndex,
                                   const std::string& jsonStr);
 
-    // Parse + validate rawJson, then publish synchronously at synthesized
-    // inventory paths. On parse/validate failure, clears any existing
-    // terminus state, removes the persisted file for moduleIndex, and
-    // throws SdBusError. If persistOnSuccess is true, writes rawJson to
-    // the persisted file after a successful publish; a persistence failure
-    // is fatal (process exits).
+    // Parse, validate, and publish rawJson. On failure clears terminus
+    // state, removes the persisted file, and throws SdBusError. If
+    // persistOnSuccess is true, persistence failure is fatal.
     void processAndPublish(std::string terminusName, std::string rawJson,
                            int32_t moduleIndex, bool persistOnSuccess,
                            std::string_view context);
@@ -120,22 +112,16 @@ class NvidiaInfo
     void updateTerminusInfo(const std::string& terminusName,
                             int32_t moduleIndex, TerminusData td);
 
-    // Patch Association.Definitions on already-published DIMM and PCIe
-    // slot objects belonging to a single terminus, using whichever of
-    // motherboardPath / processorModulePaths have been discovered so
-    // far. Safe to call repeatedly; harmless if neither is known.
+    // Patch Association.Definitions on this terminus's DIMM and PCIe
+    // slot objects using whatever discovered paths are known. Idempotent.
     void attachAssociationsFor(const std::string& terminusName);
 
-    // Iterate every entry in terminusInfos and call attachAssociationsFor
-    // on each. Used after discoverPaths completes (startup probe and
-    // post-InterfacesAdded debounce paths).
+    // Run attachAssociationsFor on every known terminus.
     void attachAllAssociations();
 
     void loadPersistedInfoFiles();
 
-    // Payload type carried by xyz.openbmc_project.ObjectManager's
-    // InterfacesAdded signal: a map from interface name to a map of property
-    // name to property value (across the D-Bus basic types we care about).
+    // Payload of the ObjectManager InterfacesAdded signal.
     using InterfacesAddedMap = std::map<
         std::string,
         std::map<std::string,

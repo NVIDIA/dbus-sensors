@@ -64,12 +64,8 @@ void from_json(const Json& j, NvidiaDimm& d)
 
 void NvidiaDimm::validate()
 {
-    // Nothing to do. The JSON schema (validated up-front in
-    // processAndPublish) covers every constraint that used to live here:
-    // non-empty MemoryDeviceLocator and Manufacturer, plus the FormFactor,
-    // MemoryType, and MemoryMedia enum allow-lists. Kept as a no-op so the
-    // generic validateEach<>() walker in NvidiaInfoSchema.cpp still has a
-    // uniform shape across sections.
+    // Schema covers all DIMM constraints; no-op kept for validateEach<>
+    // symmetry.
 }
 
 void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,

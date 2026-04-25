@@ -34,10 +34,7 @@ void from_json(const Json& j, NvidiaTpm& t)
 
 void NvidiaTpm::validate()
 {
-    // Nothing to do. Required-field presence is enforced by the JSON
-    // schema (validated up-front in processAndPublish). Kept as a no-op so
-    // the generic validateEach<>() walker still has a uniform shape across
-    // sections.
+    // Schema covers required fields; no-op kept for validateEach<> symmetry.
 }
 
 void NvidiaTpm::publish(sdbusplus::asio::object_server& objServer,

@@ -29,36 +29,28 @@ namespace nvidia
 namespace info
 {
 
-// NvidiaCpu registers the 15 D-Bus interfaces that represent a single
-// processor: 8 on its .../cpu/CPU_N path (Item.Cpu, Item, Asset,
-// Revision, Instance, SKU, Association.Definitions, OperationalStatus)
-// and 7 on its matching .../component/HGX_CPU_N chassis-component path
-// (Item.Chassis, Item, Asset, Revision, Association.Definitions,
-// OperationalStatus, Instance).
-//
-// The object is default-constructed by the vector<NvidiaCpu> inside
-// TerminusData, populated via from_json, checked by validate(), and only
-// then registered on D-Bus by publish(). The Publisher base owns every
-// add()-ed interface and removes them all in its destructor, so dropping
-// the containing TerminusData unpublishes the CPU cleanly.
+// Represents one processor: publishes 8 interfaces on .../cpu/CPU_N and
+// 7 on the matching .../component/HGX_CPU_N chassis-component path.
+// Lifecycle: from_json populates -> validate() derives -> publish()
+// registers on D-Bus. Publisher base unregisters everything on destruction.
 class NvidiaCpu : public Publisher
 {
   public:
-    // Derivation step: parses idStr (a hex string the JSON schema has
-    // already shape-checked) into the uint64_t idValue that publish()
-    // registers as the Item.Cpu "Id" property. Safe to call multiple
-    // times. Throws std::invalid_argument only on the (post-schema,
-    // unreachable-in-practice) case where the hex parse fails.
+    NvidiaCpu() = default;
+    NvidiaCpu(const NvidiaCpu&) = delete;
+    NvidiaCpu& operator=(const NvidiaCpu&) = delete;
+    NvidiaCpu(NvidiaCpu&&) = default;
+    NvidiaCpu& operator=(NvidiaCpu&&) = default;
+    ~NvidiaCpu() = default;
+
+    // Parses hex idStr into idValue.
     void validate();
 
-    // Registers the 15 interfaces on objServer. Must be called after
-    // validate(). The Publisher base retains objServer for destruction.
+    // Registers the D-Bus interfaces. Call after validate().
     void publish(sdbusplus::asio::object_server& objServer,
                  const std::string& cpuPath, const std::string& componentPath,
                  const std::string& boardPath, uint64_t cpuIndex);
 
-    // JSON-populated fields. from_json fills these via j.at(key).get_to();
-    // validate() enforces the range/non-empty rules below.
     uint32_t socketNum{0};     // "Socket", 0-255
     std::string family;        // "Family"
     std::string idStr;         // "Id" or "ID" (hex string)
@@ -72,8 +64,7 @@ class NvidiaCpu : public Publisher
     std::string version;       // "Version", non-empty
     std::string sku;           // "SKU" (may be empty)
 
-    // Populated by validate() from idStr (hex-parsed). Passed to D-Bus as
-    // the Item.Cpu "Id" property.
+    // Hex-parsed from idStr by validate(); published as Item.Cpu "Id".
     uint64_t idValue{0};
 };
 

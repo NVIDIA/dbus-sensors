@@ -118,9 +118,8 @@ const char* memoryTypeName(MemoryType t)
     return "Unknown";
 }
 
-// NAND has no dedicated MemoryTech value in phosphor-dbus-interfaces and is
-// surfaced as "Other"; Intel3DXPoint surfaces as "IntelOptane". This matches
-// the original NvidiaInfoDimm.cpp behaviour.
+// NAND -> "Other" and Intel3DXPoint -> "IntelOptane" because DBus
+// MemoryTech has no dedicated values for them.
 const char* memoryMediaTechName(MemoryMedia m)
 {
     switch (m)
@@ -137,9 +136,8 @@ const char* memoryMediaTechName(MemoryMedia m)
     return "Unknown";
 }
 
-// Enum identifiers in C++ cannot contain an embedded underscore in the
-// middle of a digit pair like "M_2", so M2/U2 carry underscoreless names
-// and this helper restores the phosphor-dbus-interfaces spelling.
+// Restores the underscored DBus spelling ("M_2", "U_2") for enum values
+// whose C++ identifiers have no underscore.
 const char* slotTypeName(SlotType s)
 {
     switch (s)
@@ -177,10 +175,8 @@ void from_json(const Json& j, TerminusData& t)
 namespace
 {
 
-// One-time-built validator over the embedded schema text. Held by
-// unique_ptr so the type need not be moveable, and constructed lazily on
-// first call so a malformed schema surfaces as a clear startup error
-// rather than a static-init failure.
+// Lazily built so a malformed embedded schema surfaces at first use,
+// not as a static-init failure.
 const nlohmann::json_schema::json_validator& terminusSchemaValidator()
 {
     static const std::unique_ptr<nlohmann::json_schema::json_validator>
@@ -192,8 +188,7 @@ const nlohmann::json_schema::json_validator& terminusSchemaValidator()
     return *validator;
 }
 
-// Validates each element of a per-section vector, tagging any
-// std::invalid_argument the element threw with "<Section>[<index>]: ...".
+// Validates each element, tagging exceptions with "<Section>[<index>]:".
 template <typename T>
 void validateEach(std::vector<T>& v, const char* section)
 {
@@ -221,9 +216,8 @@ void validateAgainstSchema(const Json& doc)
     }
     catch (const std::exception& e)
     {
-        // Re-tag as invalid_argument so processAndPublish() treats schema
-        // failures the same as legacy parse/validate failures (caller logs
-        // and rejects via SdBusError).
+        // Re-tag so processAndPublish treats schema and validate() failures
+        // identically.
         throw std::invalid_argument(
             std::format("schema validation failed: {}", e.what()));
     }

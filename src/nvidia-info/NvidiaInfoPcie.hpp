@@ -30,43 +30,36 @@ namespace nvidia
 namespace info
 {
 
-// NvidiaPcie registers the 5 D-Bus interfaces that represent a single
-// PCIe slot at .../<terminusName>_pcieslot<i>: Item.PCIeSlot, Item,
-// Decorator.LocationCode, Connector.Embedded, and
-// Association.Definitions.
-//
-// Default-constructed by the vector<NvidiaPcie> inside TerminusData,
-// populated via from_json, checked by validate(), and only then
-// registered on D-Bus by publish(). The Publisher base removes every
-// interface on destruction.
+// Represents one PCIe slot at .../<terminusName>_pcieslot<i>. Lifecycle:
+// from_json -> validate() -> publish(); Publisher base unregisters on
+// destruction.
 class NvidiaPcie : public Publisher
 {
   public:
+    NvidiaPcie() = default;
+    NvidiaPcie(const NvidiaPcie&) = delete;
+    NvidiaPcie& operator=(const NvidiaPcie&) = delete;
+    NvidiaPcie(NvidiaPcie&&) = default;
+    NvidiaPcie& operator=(NvidiaPcie&&) = default;
+    ~NvidiaPcie() = default;
+
     bool isPresent() const
     {
         return present;
     }
 
-    // Throws std::invalid_argument on range or non-empty-string
-    // violations. Safe to call multiple times.
     void validate();
 
-    // Registers the 5 interfaces on objServer. Must be called after
-    // validate(). The Publisher base retains objServer for destruction.
-    // The Association.Definitions interface is initialized with an empty
-    // Associations list; call attach() after discovery to populate it.
+    // Registers the D-Bus interfaces. Associations are empty until attach().
     void publish(sdbusplus::asio::object_server& objServer,
                  const std::string& pciePath, uint64_t moduleIndex);
 
-    // Set the Association.Definitions Associations property to associate
-    // this PCIe slot with the given processor-module inventory path.
-    // Idempotent. Must be called after publish().
+    // Associate this slot with the given processor-module path. Idempotent;
+    // must be called after publish().
     void attach(const std::string& processorModulePath);
 
-    // JSON-populated fields. from_json fills these; validate() enforces
-    // the rules below. The SlotType empty-string check happens in
-    // from_json because an empty string decodes to SlotType::OEM and is
-    // indistinguishable here.
+    // SlotType empty-string is rejected by the schema; unknown strings
+    // decode to OEM via the enum's fallback.
     SlotType slotType{SlotType::OEM};   // "SlotType", OEM fallback
     std::string locationCode;           // "LocationCode", non-empty
     uint32_t generation{0};             // "Generation", 0-6
@@ -81,9 +74,7 @@ class NvidiaPcie : public Publisher
     uint32_t rootPort{0};               // "RootPort" (optional)
 
   private:
-    // Cached handle to the Association.Definitions interface registered
-    // by publish(); used by attach() to mutate Associations after the
-    // interface has been initialize()d.
+    // Cached Association.Definitions handle, mutated by attach().
     std::shared_ptr<sdbusplus::asio::dbus_interface> assocIface;
 };
 
