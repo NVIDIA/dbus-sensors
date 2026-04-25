@@ -110,76 +110,54 @@ void NvidiaPcie::validate()
     }
 }
 
-NvidiaPcie::~NvidiaPcie()
-{
-    if (server == nullptr)
-    {
-        return;
-    }
-    for (auto* iface : {&pcieIface, &itemIface, &locationIface, &embeddedIface,
-                        &assocIface})
-    {
-        if (*iface)
-        {
-            server->remove_interface(*iface);
-        }
-    }
-}
-
 void NvidiaPcie::publish(sdbusplus::asio::object_server& objServer,
                          const std::string& pciePath,
                          const std::string& processorModulePath,
                          uint64_t moduleIndex)
 {
-    server = &objServer;
-
     const std::string generationStr =
         std::format("{}{}", pcieGenPrefix, generationSuffix(generation));
     const std::string slotTypeStr =
         std::format("{}{}", pcieSlotTypePrefix, slotTypeName(slotType));
 
-    pcieIface = objServer.add_interface(
-        pciePath, "xyz.openbmc_project.Inventory.Item.PCIeSlot");
-    itemIface = objServer.add_interface(
-        pciePath, "xyz.openbmc_project.Inventory.Item");
-    locationIface = objServer.add_interface(
-        pciePath, "xyz.openbmc_project.Inventory.Decorator.LocationCode");
-    embeddedIface = objServer.add_interface(
-        pciePath, "xyz.openbmc_project.Inventory.Connector.Embedded");
-    assocIface = objServer.add_interface(
-        pciePath, "xyz.openbmc_project.Association.Definitions");
+    auto& pcie = add(
+        pciePath, "xyz.openbmc_project.Inventory.Item.PCIeSlot", objServer);
+    pcie.register_property("Generation", generationStr);
+    pcie.register_property("Lanes", lanes);
+    pcie.register_property("HotPluggable", hotPluggable);
+    pcie.register_property("SlotType", slotTypeStr);
+    pcie.register_property("ProcessorModuleIndex", moduleIndex);
+    pcie.register_property("MaxLinkSpeed", maxLinkSpeed);
+    pcie.register_property("SegmentControllerIndex", segmentControllerIndex);
+    pcie.register_property("PortType", portType);
+    pcie.register_property("PortProtocol", portProtocol);
+    pcie.register_property("RootPort", rootPort);
+    pcie.register_property("MaxLinkWidth", maxLinkWidth);
 
-    pcieIface->register_property("Generation", generationStr);
-    pcieIface->register_property("Lanes", lanes);
-    pcieIface->register_property("HotPluggable", hotPluggable);
-    pcieIface->register_property("SlotType", slotTypeStr);
-    pcieIface->register_property("ProcessorModuleIndex", moduleIndex);
-    pcieIface->register_property("MaxLinkSpeed", maxLinkSpeed);
-    pcieIface->register_property("SegmentControllerIndex",
-                                 segmentControllerIndex);
-    pcieIface->register_property("PortType", portType);
-    pcieIface->register_property("PortProtocol", portProtocol);
-    pcieIface->register_property("RootPort", rootPort);
-    pcieIface->register_property("MaxLinkWidth", maxLinkWidth);
+    auto& item =
+        add(pciePath, "xyz.openbmc_project.Inventory.Item", objServer);
+    item.register_property("PrettyName", std::string(""));
+    item.register_property("Present", true);
 
-    itemIface->register_property("PrettyName", std::string(""));
-    itemIface->register_property("Present", true);
+    auto& location =
+        add(pciePath, "xyz.openbmc_project.Inventory.Decorator.LocationCode",
+            objServer);
+    location.register_property("LocationCode", locationCode);
 
-    locationIface->register_property("LocationCode", locationCode);
+    add(pciePath, "xyz.openbmc_project.Inventory.Connector.Embedded",
+        objServer);
 
+    auto& assoc = add(
+        pciePath, "xyz.openbmc_project.Association.Definitions", objServer);
     {
         using AssocTuple = std::tuple<std::string, std::string, std::string>;
         using AssocList = std::vector<AssocTuple>;
         AssocList assocs;
         assocs.emplace_back("chassis", "pcie_slots", processorModulePath);
-        assocIface->register_property("Associations", assocs);
+        assoc.register_property("Associations", assocs);
     }
 
-    pcieIface->initialize();
-    itemIface->initialize();
-    locationIface->initialize();
-    embeddedIface->initialize();
-    assocIface->initialize();
+    initializeAll();
 }
 
 } // namespace info

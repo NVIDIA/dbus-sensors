@@ -105,7 +105,6 @@ class NvidiaInfo
     // D-Bus interface that exposes CreateInfo method
     std::shared_ptr<sdbusplus::asio::dbus_interface> serviceIface;
 
-    void createInfoFromFile(const std::string& filePath);
     void createInfoFromJsonString(int32_t processorModuleIndex,
                                   const std::string& jsonStr);
 

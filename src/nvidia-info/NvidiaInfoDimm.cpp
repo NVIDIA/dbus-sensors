@@ -89,29 +89,10 @@ void NvidiaDimm::validate()
     }
 }
 
-NvidiaDimm::~NvidiaDimm()
-{
-    if (server == nullptr)
-    {
-        return;
-    }
-    for (auto* iface :
-         {&dimmIface, &slotIface, &itemIface, &assetIface, &locationIface,
-          &locationTypeIface, &assocIface, &opStatusIface})
-    {
-        if (*iface)
-        {
-            server->remove_interface(*iface);
-        }
-    }
-}
-
 void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
                          const std::string& dimmPath,
                          const std::string& motherboardPath)
 {
-    server = &objServer;
-
     const std::string memTypeStr =
         std::string(dimmDeviceTypePrefix) + memoryTypeName(memoryType);
     const std::string formFactorStr =
@@ -121,70 +102,64 @@ void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
     const std::string memoryMediaStr =
         std::string(dimmMemoryTechPrefix) + memoryMediaTechName(memoryMedia);
 
-    dimmIface = objServer.add_interface(
-        dimmPath, "xyz.openbmc_project.Inventory.Item.Dimm");
-    slotIface = objServer.add_interface(
-        dimmPath, "xyz.openbmc_project.Inventory.Connector.Slot");
-    itemIface = objServer.add_interface(
-        dimmPath, "xyz.openbmc_project.Inventory.Item");
-    assetIface = objServer.add_interface(
-        dimmPath, "xyz.openbmc_project.Inventory.Decorator.Asset");
-    locationIface = objServer.add_interface(
-        dimmPath, "xyz.openbmc_project.Inventory.Decorator.LocationCode");
-    locationTypeIface = objServer.add_interface(
-        dimmPath, "xyz.openbmc_project.Inventory.Decorator.Location");
-    assocIface = objServer.add_interface(
-        dimmPath, "xyz.openbmc_project.Association.Definitions");
-    opStatusIface = objServer.add_interface(
-        dimmPath, "xyz.openbmc_project.State.Decorator.OperationalStatus");
+    auto& dimm =
+        add(dimmPath, "xyz.openbmc_project.Inventory.Item.Dimm", objServer);
+    dimm.register_property("MemorySizeInKB", sizeKB);
+    dimm.register_property("MemoryDataWidth", dataWidth);
+    dimm.register_property("MemoryTotalWidth", totalWidth);
+    dimm.register_property("MemoryDeviceLocator", locator);
+    dimm.register_property("MemoryType", memTypeStr);
+    dimm.register_property("MaxMemorySpeedInMhz", maxSpeed);
+    dimm.register_property("MemoryConfiguredSpeedInMhz", configSpeed);
+    dimm.register_property("FormFactor", formFactorStr);
+    dimm.register_property("ECC", eccStr);
+    dimm.register_property("MemoryMedia", memoryMediaStr);
 
-    dimmIface->register_property("MemorySizeInKB", sizeKB);
-    dimmIface->register_property("MemoryDataWidth", dataWidth);
-    dimmIface->register_property("MemoryTotalWidth", totalWidth);
-    dimmIface->register_property("MemoryDeviceLocator", locator);
-    dimmIface->register_property("MemoryType", memTypeStr);
-    dimmIface->register_property("MaxMemorySpeedInMhz", maxSpeed);
-    dimmIface->register_property("MemoryConfiguredSpeedInMhz", configSpeed);
-    dimmIface->register_property("FormFactor", formFactorStr);
-    dimmIface->register_property("ECC", eccStr);
-    dimmIface->register_property("MemoryMedia", memoryMediaStr);
+    add(dimmPath, "xyz.openbmc_project.Inventory.Connector.Slot", objServer);
 
-    itemIface->register_property("PrettyName", std::string(""));
-    itemIface->register_property("Present", true);
+    auto& item =
+        add(dimmPath, "xyz.openbmc_project.Inventory.Item", objServer);
+    item.register_property("PrettyName", std::string(""));
+    item.register_property("Present", true);
 
-    assetIface->register_property("Manufacturer", manufacturer);
-    assetIface->register_property("Model", model);
-    assetIface->register_property("PartNumber", partNumber);
-    assetIface->register_property("SerialNumber", serialNumber);
-    assetIface->register_property("SKU", sku);
+    auto& asset = add(
+        dimmPath, "xyz.openbmc_project.Inventory.Decorator.Asset", objServer);
+    asset.register_property("Manufacturer", manufacturer);
+    asset.register_property("Model", model);
+    asset.register_property("PartNumber", partNumber);
+    asset.register_property("SerialNumber", serialNumber);
+    asset.register_property("SKU", sku);
 
-    locationIface->register_property("LocationCode", locator);
+    auto& location =
+        add(dimmPath, "xyz.openbmc_project.Inventory.Decorator.LocationCode",
+            objServer);
+    location.register_property("LocationCode", locator);
 
-    std::string locationType;
+    auto& locationType = add(
+        dimmPath, "xyz.openbmc_project.Inventory.Decorator.Location", objServer);
+    std::string locationTypeStr;
     if (formFactor == FormFactor::SOCAMM)
     {
-        locationType = std::string(locationTypeSlot);
+        locationTypeStr = std::string(locationTypeSlot);
     }
-    locationTypeIface->register_property("LocationType", locationType);
+    locationType.register_property("LocationType", locationTypeStr);
 
+    auto& assoc = add(
+        dimmPath, "xyz.openbmc_project.Association.Definitions", objServer);
     {
         using AssocTuple = std::tuple<std::string, std::string, std::string>;
         using AssocList = std::vector<AssocTuple>;
         AssocList assocs;
         assocs.emplace_back("chassis", "memories", motherboardPath);
-        assocIface->register_property("Associations", assocs);
+        assoc.register_property("Associations", assocs);
     }
 
-    opStatusIface->register_property("Functional", true);
+    auto& opStatus =
+        add(dimmPath, "xyz.openbmc_project.State.Decorator.OperationalStatus",
+            objServer);
+    opStatus.register_property("Functional", true);
 
-    dimmIface->initialize();
-    slotIface->initialize();
-    itemIface->initialize();
-    assetIface->initialize();
-    locationIface->initialize();
-    locationTypeIface->initialize();
-    assocIface->initialize();
-    opStatusIface->initialize();
+    initializeAll();
 }
 
 } // namespace info

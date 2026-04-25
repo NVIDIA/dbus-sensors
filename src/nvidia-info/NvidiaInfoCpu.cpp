@@ -26,7 +26,6 @@
 #include <string_view>
 #include <system_error>
 #include <tuple>
-#include <utility>
 #include <vector>
 
 namespace nvidia
@@ -126,141 +125,108 @@ void NvidiaCpu::validate()
     idValue = parsed;
 }
 
-NvidiaCpu::~NvidiaCpu()
-{
-    if (server == nullptr)
-    {
-        return;
-    }
-    for (auto* iface :
-         {&cpuIface, &itemIface, &assetIface, &revIface, &instanceIface,
-          &skuIface, &assocIface, &opStatusIface, &chassisIface,
-          &chassisItemIface, &chassisAssetIface, &chassisRevIface,
-          &chassisAssocIface, &chassisOpStatusIface, &chassisInstanceIface})
-    {
-        if (*iface)
-        {
-            server->remove_interface(*iface);
-        }
-    }
-}
-
 void NvidiaCpu::publish(sdbusplus::asio::object_server& objServer,
                         const std::string& cpuPath,
                         const std::string& componentPath,
                         const std::string& boardPath, uint64_t cpuIndex)
 {
-    server = &objServer;
-
     using AssocTuple = std::tuple<std::string, std::string, std::string>;
     using AssocList = std::vector<AssocTuple>;
 
     const std::string cpuName = "CPU_" + std::to_string(cpuIndex);
 
     // --- cpuPath: 8 interfaces -------------------------------------------
-    cpuIface = objServer.add_interface(
-        cpuPath, "xyz.openbmc_project.Inventory.Item.Cpu");
-    itemIface =
-        objServer.add_interface(cpuPath, "xyz.openbmc_project.Inventory.Item");
-    assetIface = objServer.add_interface(
-        cpuPath, "xyz.openbmc_project.Inventory.Decorator.Asset");
-    revIface = objServer.add_interface(
-        cpuPath, "xyz.openbmc_project.Inventory.Decorator.Revision");
-    instanceIface = objServer.add_interface(
-        cpuPath, "xyz.openbmc_project.Inventory.Decorator.Instance");
-    skuIface = objServer.add_interface(
-        cpuPath, "xyz.openbmc_project.Inventory.Decorator.SKU");
-    assocIface = objServer.add_interface(
-        cpuPath, "xyz.openbmc_project.Association.Definitions");
-    opStatusIface = objServer.add_interface(
-        cpuPath, "xyz.openbmc_project.State.Decorator.OperationalStatus");
+    auto& cpu =
+        add(cpuPath, "xyz.openbmc_project.Inventory.Item.Cpu", objServer);
+    cpu.register_property("Socket", std::to_string(socketNum));
+    cpu.register_property("Family", family);
+    cpu.register_property("Id", idValue);
+    cpu.register_property("CoreCount", coreCount);
+    cpu.register_property("ThreadCount", threadCount);
+    cpu.register_property("MaxSpeedInMhz", maxSpeedInMhz);
+    cpu.register_property("ModelRevision", modelRevision);
+    cpu.register_property("ProcessorType", std::string("CPU"));
 
-    cpuIface->register_property("Socket", std::to_string(socketNum));
-    cpuIface->register_property("Family", family);
-    cpuIface->register_property("Id", idValue);
-    cpuIface->register_property("CoreCount", coreCount);
-    cpuIface->register_property("ThreadCount", threadCount);
-    cpuIface->register_property("MaxSpeedInMhz", maxSpeedInMhz);
-    cpuIface->register_property("ModelRevision", modelRevision);
-    cpuIface->register_property("ProcessorType", std::string("CPU"));
+    auto& item =
+        add(cpuPath, "xyz.openbmc_project.Inventory.Item", objServer);
+    item.register_property("PrettyName", model);
+    item.register_property("Present", true);
 
-    itemIface->register_property("PrettyName", model);
-    itemIface->register_property("Present", true);
+    auto& asset = add(
+        cpuPath, "xyz.openbmc_project.Inventory.Decorator.Asset", objServer);
+    asset.register_property("Manufacturer", manufacturer);
+    asset.register_property("Model", model);
+    asset.register_property("SerialNumber", serialNumber);
+    asset.register_property("Name", cpuName);
 
-    assetIface->register_property("Manufacturer", manufacturer);
-    assetIface->register_property("Model", model);
-    assetIface->register_property("SerialNumber", serialNumber);
-    assetIface->register_property("Name", cpuName);
+    auto& rev = add(
+        cpuPath, "xyz.openbmc_project.Inventory.Decorator.Revision", objServer);
+    rev.register_property("Version", version);
 
-    revIface->register_property("Version", version);
+    auto& instance = add(
+        cpuPath, "xyz.openbmc_project.Inventory.Decorator.Instance", objServer);
+    instance.register_property("InstanceNumber", cpuIndex);
 
-    instanceIface->register_property("InstanceNumber", cpuIndex);
+    auto& skuIf = add(
+        cpuPath, "xyz.openbmc_project.Inventory.Decorator.SKU", objServer);
+    skuIf.register_property("SKU", sku);
 
-    skuIface->register_property("SKU", sku);
-
+    auto& assoc = add(
+        cpuPath, "xyz.openbmc_project.Association.Definitions", objServer);
     {
         AssocList assocs;
         assocs.emplace_back("chassis", "all_processors", componentPath);
-        assocIface->register_property("Associations", assocs);
+        assoc.register_property("Associations", assocs);
     }
 
-    opStatusIface->register_property("Functional", true);
-
-    cpuIface->initialize();
-    itemIface->initialize();
-    assetIface->initialize();
-    revIface->initialize();
-    instanceIface->initialize();
-    skuIface->initialize();
-    assocIface->initialize();
-    opStatusIface->initialize();
+    auto& opStatus =
+        add(cpuPath, "xyz.openbmc_project.State.Decorator.OperationalStatus",
+            objServer);
+    opStatus.register_property("Functional", true);
 
     // --- componentPath: 7 merged chassis-component interfaces ------------
-    chassisIface = objServer.add_interface(
-        componentPath, "xyz.openbmc_project.Inventory.Item.Chassis");
-    chassisItemIface = objServer.add_interface(
-        componentPath, "xyz.openbmc_project.Inventory.Item");
-    chassisAssetIface = objServer.add_interface(
-        componentPath, "xyz.openbmc_project.Inventory.Decorator.Asset");
-    chassisRevIface = objServer.add_interface(
-        componentPath, "xyz.openbmc_project.Inventory.Decorator.Revision");
-    chassisAssocIface = objServer.add_interface(
-        componentPath, "xyz.openbmc_project.Association.Definitions");
-    chassisOpStatusIface = objServer.add_interface(
-        componentPath, "xyz.openbmc_project.State.Decorator.OperationalStatus");
-    chassisInstanceIface = objServer.add_interface(
-        componentPath, "xyz.openbmc_project.Inventory.Decorator.Instance");
-
-    chassisIface->register_property(
+    auto& chassis = add(
+        componentPath, "xyz.openbmc_project.Inventory.Item.Chassis", objServer);
+    chassis.register_property(
         "Type", std::string("xyz.openbmc_project.Inventory.Item.Chassis."
                             "ChassisType.Component"));
 
-    chassisItemIface->register_property("PrettyName", std::string(""));
-    chassisItemIface->register_property("Present", true);
+    auto& chassisItem =
+        add(componentPath, "xyz.openbmc_project.Inventory.Item", objServer);
+    chassisItem.register_property("PrettyName", std::string(""));
+    chassisItem.register_property("Present", true);
 
-    chassisAssetIface->register_property("Manufacturer", manufacturer);
-    chassisAssetIface->register_property("Model", model);
-    chassisAssetIface->register_property("SerialNumber", serialNumber);
+    auto& chassisAsset =
+        add(componentPath, "xyz.openbmc_project.Inventory.Decorator.Asset",
+            objServer);
+    chassisAsset.register_property("Manufacturer", manufacturer);
+    chassisAsset.register_property("Model", model);
+    chassisAsset.register_property("SerialNumber", serialNumber);
 
-    chassisRevIface->register_property("Version", version);
+    auto& chassisRev =
+        add(componentPath, "xyz.openbmc_project.Inventory.Decorator.Revision",
+            objServer);
+    chassisRev.register_property("Version", version);
 
+    auto& chassisAssoc = add(
+        componentPath, "xyz.openbmc_project.Association.Definitions", objServer);
     {
         AssocList assocs;
         assocs.emplace_back("parent_chassis", "all_chassis", boardPath);
-        chassisAssocIface->register_property("Associations", assocs);
+        chassisAssoc.register_property("Associations", assocs);
     }
 
-    chassisOpStatusIface->register_property("Functional", true);
+    auto& chassisOpStatus = add(
+        componentPath,
+        "xyz.openbmc_project.State.Decorator.OperationalStatus", objServer);
+    chassisOpStatus.register_property("Functional", true);
 
-    chassisInstanceIface->register_property("InstanceNumber", cpuIndex);
+    auto& chassisInstance =
+        add(componentPath, "xyz.openbmc_project.Inventory.Decorator.Instance",
+            objServer);
+    chassisInstance.register_property("InstanceNumber", cpuIndex);
 
-    chassisIface->initialize();
-    chassisItemIface->initialize();
-    chassisAssetIface->initialize();
-    chassisRevIface->initialize();
-    chassisAssocIface->initialize();
-    chassisOpStatusIface->initialize();
-    chassisInstanceIface->initialize();
+    initializeAll();
 }
 
 } // namespace info

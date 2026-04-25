@@ -17,11 +17,11 @@
 #pragma once
 
 #include "NvidiaInfoEnums.hpp"
+#include "NvidiaInfoPublisher.hpp"
 
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <cstdint>
-#include <memory>
 #include <string>
 
 namespace nvidia
@@ -29,34 +29,26 @@ namespace nvidia
 namespace info
 {
 
-// NvidiaPcie owns the 5 D-Bus interfaces that represent a single PCIe
-// slot at .../<terminusName>_pcieslot<i>: Item.PCIeSlot, Item,
+// NvidiaPcie registers the 5 D-Bus interfaces that represent a single
+// PCIe slot at .../<terminusName>_pcieslot<i>: Item.PCIeSlot, Item,
 // Decorator.LocationCode, Connector.Embedded, and
 // Association.Definitions.
 //
 // Default-constructed by the vector<NvidiaPcie> inside TerminusData,
 // populated via from_json, checked by validate(), and only then
-// registered on D-Bus by publish(). The destructor removes any
-// interfaces publish() created.
-class NvidiaPcie
+// registered on D-Bus by publish(). The Publisher base removes every
+// interface on destruction.
+class NvidiaPcie : public Publisher
 {
   public:
-    NvidiaPcie() = default;
-    NvidiaPcie(const NvidiaPcie&) = delete;
-    NvidiaPcie& operator=(const NvidiaPcie&) = delete;
-    NvidiaPcie(NvidiaPcie&&) = default;
-    NvidiaPcie& operator=(NvidiaPcie&&) = default;
-    ~NvidiaPcie();
-
     bool isPresent() const { return present; }
 
     // Throws std::invalid_argument on range or non-empty-string
     // violations. Safe to call multiple times.
     void validate();
 
-    // Registers the 5 interfaces on objServer. Caches objServer as a raw
-    // pointer so the destructor can remove them. Must be called after
-    // validate().
+    // Registers the 5 interfaces on objServer. Must be called after
+    // validate(). The Publisher base retains objServer for destruction.
     void publish(sdbusplus::asio::object_server& objServer,
                  const std::string& pciePath,
                  const std::string& processorModulePath,
@@ -78,18 +70,6 @@ class NvidiaPcie
     std::string portType;                // "PortType" (optional)
     std::string portProtocol;            // "PortProtocol" (optional)
     uint32_t rootPort{0};                // "RootPort" (optional)
-
-  private:
-    // Raw pointer — publish() sets it; destructor guards on nullptr.
-    // Lifetime is managed by the surrounding NvidiaInfo::objServer
-    // shared_ptr, which outlives terminusInfos (and thus this object).
-    sdbusplus::asio::object_server* server{nullptr};
-
-    std::shared_ptr<sdbusplus::asio::dbus_interface> pcieIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> itemIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> locationIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> embeddedIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> assocIface;
 };
 
 void from_json(const Json& j, NvidiaPcie& c);

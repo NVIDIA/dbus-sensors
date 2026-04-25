@@ -17,10 +17,10 @@
 #pragma once
 
 #include "NvidiaInfoEnums.hpp"
+#include "NvidiaInfoPublisher.hpp"
 
 #include <sdbusplus/asio/object_server.hpp>
 
-#include <memory>
 #include <string>
 
 namespace nvidia
@@ -28,32 +28,25 @@ namespace nvidia
 namespace info
 {
 
-// NvidiaTpm owns the 4 D-Bus interfaces that represent a single Trusted
-// Platform Module at .../chassis/motherboard/<terminusName>_tpm<i>:
-// Item.TrustedComponent, Item, Decorator.Asset, and Software.Version.
+// NvidiaTpm registers the 4 D-Bus interfaces that represent a single
+// Trusted Platform Module at
+// .../chassis/motherboard/<terminusName>_tpm<i>: Item.TrustedComponent,
+// Item, Decorator.Asset, and Software.Version.
 //
 // Default-constructed by the vector<NvidiaTpm> inside TerminusData,
 // populated via from_json, checked by validate(), and only then
-// registered on D-Bus by publish(). The destructor removes any
-// interfaces publish() created.
-class NvidiaTpm
+// registered on D-Bus by publish(). The Publisher base removes every
+// interface on destruction.
+class NvidiaTpm : public Publisher
 {
   public:
-    NvidiaTpm() = default;
-    NvidiaTpm(const NvidiaTpm&) = delete;
-    NvidiaTpm& operator=(const NvidiaTpm&) = delete;
-    NvidiaTpm(NvidiaTpm&&) = default;
-    NvidiaTpm& operator=(NvidiaTpm&&) = default;
-    ~NvidiaTpm();
-
     // Every TPM field is optional in the original NvidiaInfoTpm, so this
     // has no invariants to enforce. Kept declared so validateEach can
     // invoke it uniformly with the other sections.
     void validate();
 
-    // Registers the 4 interfaces on objServer. Caches objServer as a raw
-    // pointer so the destructor can remove them. Must be called after
-    // validate().
+    // Registers the 4 interfaces on objServer. Must be called after
+    // validate(). The Publisher base retains objServer for destruction.
     void publish(sdbusplus::asio::object_server& objServer,
                  const std::string& tpmPath);
 
@@ -63,17 +56,6 @@ class NvidiaTpm
     std::string manufacturer;     // "Manufacturer" (optional)
     std::string version;          // "Version" (optional)
     std::string majorSpecVersion; // "MajorSpecVersion" (optional)
-
-  private:
-    // Raw pointer — publish() sets it; destructor guards on nullptr.
-    // Lifetime is managed by the surrounding NvidiaInfo::objServer
-    // shared_ptr, which outlives terminusInfos (and thus this object).
-    sdbusplus::asio::object_server* server{nullptr};
-
-    std::shared_ptr<sdbusplus::asio::dbus_interface> tpmIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> itemIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> assetIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> versionIface;
 };
 
 void from_json(const Json& j, NvidiaTpm& t);

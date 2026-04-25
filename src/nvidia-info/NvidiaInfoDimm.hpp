@@ -17,11 +17,11 @@
 #pragma once
 
 #include "NvidiaInfoEnums.hpp"
+#include "NvidiaInfoPublisher.hpp"
 
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <cstdint>
-#include <memory>
 #include <string>
 
 namespace nvidia
@@ -29,33 +29,25 @@ namespace nvidia
 namespace info
 {
 
-// NvidiaDimm owns the 8 D-Bus interfaces that represent a single memory
-// module at .../dimm/ProcessorModule_M_Memory_N: Item.Dimm,
+// NvidiaDimm registers the 8 D-Bus interfaces that represent a single
+// memory module at .../dimm/ProcessorModule_M_Memory_N: Item.Dimm,
 // Connector.Slot, Item, Decorator.Asset, Decorator.LocationCode,
 // Decorator.Location, Association.Definitions, and
 // State.Decorator.OperationalStatus.
 //
 // Default-constructed by the vector<NvidiaDimm> inside TerminusData,
 // populated via from_json, checked by validate(), and only then
-// registered on D-Bus by publish(). The destructor removes any
-// interfaces publish() created.
-class NvidiaDimm
+// registered on D-Bus by publish(). The Publisher base removes every
+// interface on destruction.
+class NvidiaDimm : public Publisher
 {
   public:
-    NvidiaDimm() = default;
-    NvidiaDimm(const NvidiaDimm&) = delete;
-    NvidiaDimm& operator=(const NvidiaDimm&) = delete;
-    NvidiaDimm(NvidiaDimm&&) = default;
-    NvidiaDimm& operator=(NvidiaDimm&&) = default;
-    ~NvidiaDimm();
-
     // Throws std::invalid_argument on rejected-enum or required-string
     // violations. Safe to call multiple times.
     void validate();
 
-    // Registers the 8 interfaces on objServer. Caches objServer as a raw
-    // pointer so the destructor can remove them. Must be called after
-    // validate().
+    // Registers the 8 interfaces on objServer. Must be called after
+    // validate(). The Publisher base retains objServer for destruction.
     void publish(sdbusplus::asio::object_server& objServer,
                  const std::string& dimmPath,
                  const std::string& motherboardPath);
@@ -77,21 +69,6 @@ class NvidiaDimm
     std::string serialNumber; // "SerialNumber" (may be empty)
     std::string sku;          // "SKU" (may be empty)
     MemoryMedia memoryMedia{MemoryMedia::Unknown};   // "MemoryMedia"
-
-  private:
-    // Raw pointer — publish() sets it; destructor guards on nullptr.
-    // Lifetime is managed by the surrounding NvidiaInfo::objServer
-    // shared_ptr, which outlives terminusInfos (and thus this object).
-    sdbusplus::asio::object_server* server{nullptr};
-
-    std::shared_ptr<sdbusplus::asio::dbus_interface> dimmIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> slotIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> itemIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> assetIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> locationIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> locationTypeIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> assocIface;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> opStatusIface;
 };
 
 void from_json(const Json& j, NvidiaDimm& d);

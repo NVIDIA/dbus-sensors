@@ -203,10 +203,6 @@ NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
         objServer->add_interface(serviceObjPath, serviceInterfaceName.c_str());
 
     serviceIface->register_method(
-        "CreateInfoFromFile",
-        [this](const std::string& filePath) { createInfoFromFile(filePath); });
-
-    serviceIface->register_method(
         "CreateInfo",
         [this](int32_t processorModuleIndex, const std::string& jsonPayload) {
             createInfoFromJsonString(processorModuleIndex, jsonPayload);
@@ -518,60 +514,6 @@ void NvidiaInfo::discoverPaths(std::function<void()> callback)
     else
     {
         afterMotherboard();
-    }
-}
-
-void NvidiaInfo::createInfoFromFile(const std::string& filePath)
-{
-    // Best-effort: file-based ingestion is used both for the D-Bus
-    // CreateInfoFromFile method and for scanning the persistence directory
-    // at startup. A broken file in the directory must never fail the D-Bus
-    // call or abort startup recovery — log and skip instead.
-    lg2::info("CreateInfoFromFile called (file={F})", "F", filePath);
-
-    const std::string filename =
-        std::filesystem::path(filePath).filename().string();
-    const auto moduleIndex = moduleIndexFromPersistedFilename(filename);
-    if (!moduleIndex)
-    {
-        lg2::warning("Skipping info file {F}: filename {N} is not of the form "
-                     "ProcessorModule_<N>_Info.json",
-                     "F", filePath, "N", filename);
-        return;
-    }
-
-    std::string rawJson;
-    try
-    {
-        std::ifstream in(filePath, std::ios::binary);
-        if (!in)
-        {
-            lg2::warning("Skipping unreadable info file {F}", "F", filePath);
-            return;
-        }
-        rawJson.assign(std::istreambuf_iterator<char>(in),
-                       std::istreambuf_iterator<char>());
-    }
-    catch (const std::exception& e)
-    {
-        lg2::warning("Skipping info file {F} (read error): {E}", "F", filePath,
-                     "E", e.what());
-        return;
-    }
-
-    try
-    {
-        processAndPublish(std::format("ProcessorModule_{}", *moduleIndex),
-                          std::move(rawJson), *moduleIndex,
-                          /*persistOnSuccess=*/false, "CreateInfoFromFile");
-    }
-    catch (const std::exception& e)
-    {
-        // processAndPublish already logged the parse/validate failure and
-        // cleared any stale terminus state. Swallow so a bad file in the
-        // persistence directory doesn't fail the caller.
-        lg2::warning("Skipping info file {F}: {E}", "F", filePath, "E",
-                     e.what());
     }
 }
 

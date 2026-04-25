@@ -38,26 +38,9 @@ void NvidiaTpm::validate()
     // NvidiaInfoTpm behavior.
 }
 
-NvidiaTpm::~NvidiaTpm()
-{
-    if (server == nullptr)
-    {
-        return;
-    }
-    for (auto* iface : {&tpmIface, &itemIface, &assetIface, &versionIface})
-    {
-        if (*iface)
-        {
-            server->remove_interface(*iface);
-        }
-    }
-}
-
 void NvidiaTpm::publish(sdbusplus::asio::object_server& objServer,
                         const std::string& tpmPath)
 {
-    server = &objServer;
-
     std::string prettyName;
     std::string model;
     if (!majorSpecVersion.empty())
@@ -66,36 +49,33 @@ void NvidiaTpm::publish(sdbusplus::asio::object_server& objServer,
         model = "TPM " + majorSpecVersion;
     }
 
-    tpmIface = objServer.add_interface(
-        tpmPath, "xyz.openbmc_project.Inventory.Item.TrustedComponent");
-    itemIface =
-        objServer.add_interface(tpmPath, "xyz.openbmc_project.Inventory.Item");
-    assetIface = objServer.add_interface(
-        tpmPath, "xyz.openbmc_project.Inventory.Decorator.Asset");
-    versionIface = objServer.add_interface(
-        tpmPath, "xyz.openbmc_project.Software.Version");
-
-    tpmIface->register_property(
+    auto& tpm = add(
+        tpmPath, "xyz.openbmc_project.Inventory.Item.TrustedComponent",
+        objServer);
+    tpm.register_property(
         "TrustedComponentType",
         std::string("xyz.openbmc_project.Inventory.Item.TrustedComponent."
                     "ComponentAttachType.Discrete"));
 
-    itemIface->register_property("PrettyName", prettyName);
-    itemIface->register_property("Present", true);
+    auto& item =
+        add(tpmPath, "xyz.openbmc_project.Inventory.Item", objServer);
+    item.register_property("PrettyName", prettyName);
+    item.register_property("Present", true);
 
-    assetIface->register_property("Manufacturer", manufacturer);
-    assetIface->register_property("Model", model);
+    auto& asset = add(
+        tpmPath, "xyz.openbmc_project.Inventory.Decorator.Asset", objServer);
+    asset.register_property("Manufacturer", manufacturer);
+    asset.register_property("Model", model);
 
-    versionIface->register_property("Version", version);
-    versionIface->register_property(
+    auto& ver =
+        add(tpmPath, "xyz.openbmc_project.Software.Version", objServer);
+    ver.register_property("Version", version);
+    ver.register_property(
         "Purpose",
         std::string(
             "xyz.openbmc_project.Software.Version.VersionPurpose.Other"));
 
-    tpmIface->initialize();
-    itemIface->initialize();
-    assetIface->initialize();
-    versionIface->initialize();
+    initializeAll();
 
     lg2::info("Created TPM inventory object: {P}", "P", tpmPath);
 }
