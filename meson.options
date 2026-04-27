@@ -233,3 +233,9 @@ option(
     value: 'disabled',
     description: 'Enable debug serial port control service.',
 )
+option(
+    'fuzz',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Build libFuzzer harnesses (clang + Linux only).',
+)

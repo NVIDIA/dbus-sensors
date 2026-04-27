@@ -1,11 +1,18 @@
-nvidia_info_sources = files(
-    'NvidiaInfo.cpp',
+# Schema / derivation sources. Carved out as a separate list so the
+# libFuzzer harness in tests/ can link only the JSON parsing and
+# validation code without dragging in NvidiaInfo.cpp's asio + D-Bus
+# event loop.
+nvidia_info_schema_sources = files(
     'NvidiaInfoCpu.cpp',
     'NvidiaInfoDimm.cpp',
-    'NvidiaInfoMain.cpp',
     'NvidiaInfoPcie.cpp',
     'NvidiaInfoSchema.cpp',
     'NvidiaInfoTpm.cpp',
+)
+
+nvidia_info_sources = nvidia_info_schema_sources + files(
+    'NvidiaInfo.cpp',
+    'NvidiaInfoMain.cpp',
 )
 
 nvidia_info_include_dir = include_directories('.', is_system: true)
@@ -40,3 +47,5 @@ executable(
     install: true,
     install_dir: '/usr/libexec/dbus-sensors',
 )
+
+subdir('tests')
