@@ -12,12 +12,12 @@ nlohmann_json_dep = dependency('nlohmann_json', include_type: 'system')
 # wrap so the file list does not drift; bump both the wrap revision and
 # this list when upgrading.
 nlohmann_json_schema_validator_sources = files(
+    'src/json-patch.cpp',
     'src/json-schema-draft7.json.cpp',
     'src/json-uri.cpp',
-    'src/json-patch.cpp',
     'src/json-validator.cpp',
-    'src/string-format-check.cpp',
     'src/smtp-address-validator.cpp',
+    'src/string-format-check.cpp',
 )
 
 # Public header is `<nlohmann/json-schema.hpp>`, which lives at
