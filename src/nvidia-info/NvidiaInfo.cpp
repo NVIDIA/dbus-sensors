@@ -16,6 +16,9 @@
 
 #include "NvidiaInfo.hpp"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <phosphor-logging/lg2.hpp>
@@ -29,6 +32,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -124,6 +128,24 @@ bool persistInfoJson(int32_t processorModuleIndex, const std::string& jsonStr)
         ec.clear();
         fs::remove(tempPath, ec);
         return false;
+    }
+
+    // ofstream::flush() only reaches the kernel buffer; reopen read-only and
+    // fsync so the data is on disk before the rename. Best-effort: failures
+    // are logged but do not abort the rename.
+    if (int fd = ::open(tempPath.c_str(), O_RDONLY | O_CLOEXEC); fd < 0)
+    {
+        lg2::warning("Failed to open temp info file {F} for fsync: {E}", "F",
+                     tempPath.string(), "E", std::strerror(errno));
+    }
+    else
+    {
+        if (::fsync(fd) < 0)
+        {
+            lg2::warning("Failed to fsync temp info file {F}: {E}", "F",
+                         tempPath.string(), "E", std::strerror(errno));
+        }
+        ::close(fd);
     }
 
     fs::rename(tempPath, finalPath, ec);
@@ -575,8 +597,7 @@ void NvidiaInfo::processAndPublish(
                    "C", context, "T", terminusName);
         clearTerminusInfo(terminusName);
         throw sdbusplus::exception::SdBusError(
-            -EIO,
-            std::format("{} failed to persist", context).c_str());
+            -EIO, std::format("{} failed to persist", context).c_str());
     }
 }
 
