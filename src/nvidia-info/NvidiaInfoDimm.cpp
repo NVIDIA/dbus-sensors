@@ -41,6 +41,38 @@ static constexpr std::string_view dimmMemoryTechPrefix =
     "xyz.openbmc_project.Inventory.Item.Dimm.MemoryTech.";
 static constexpr std::string_view locationTypeSlot =
     "xyz.openbmc_project.Inventory.Decorator.Location.LocationTypes.Slot";
+static constexpr std::string_view locationTypeEmbedded =
+    "xyz.openbmc_project.Inventory.Decorator.Location.LocationTypes.Embedded";
+static constexpr std::string_view locationTypeUnknown =
+    "xyz.openbmc_project.Inventory.Decorator.Location.LocationTypes.Unknown";
+
+// Socketed/pluggable form factors map to Slot; soldered-down parts map
+// to Embedded; Unknown form factor maps to Unknown. Adding a new
+// FormFactor value will hit the default and fall back to Unknown;
+// classify it explicitly here when added.
+static std::string_view locationTypeFor(FormFactor f)
+{
+    switch (f)
+    {
+        case FormFactor::RDIMM:
+        case FormFactor::UDIMM:
+        case FormFactor::SO_DIMM:
+        case FormFactor::LRDIMM:
+        case FormFactor::Mini_RDIMM:
+        case FormFactor::Mini_UDIMM:
+        case FormFactor::SO_RDIMM_72b:
+        case FormFactor::SO_UDIMM_72b:
+        case FormFactor::SO_DIMM_16b:
+        case FormFactor::SO_DIMM_32b:
+        case FormFactor::SOCAMM:
+            return locationTypeSlot;
+        case FormFactor::Die:
+            return locationTypeEmbedded;
+        case FormFactor::Unknown:
+            return locationTypeUnknown;
+    }
+    return locationTypeUnknown;
+}
 
 void from_json(const Json& j, NvidiaDimm& d)
 {
@@ -115,12 +147,8 @@ void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
     auto& locationType =
         add(dimmPath, "xyz.openbmc_project.Inventory.Decorator.Location",
             objServer);
-    std::string locationTypeStr;
-    if (formFactor == FormFactor::SOCAMM)
-    {
-        locationTypeStr = std::string(locationTypeSlot);
-    }
-    locationType.register_property("LocationType", locationTypeStr);
+    locationType.register_property("LocationType",
+                                   std::string(locationTypeFor(formFactor)));
 
     auto& assoc =
         add(dimmPath, "xyz.openbmc_project.Association.Definitions", objServer);

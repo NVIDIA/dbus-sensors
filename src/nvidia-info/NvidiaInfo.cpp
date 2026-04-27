@@ -29,7 +29,6 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
-#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -555,15 +554,29 @@ void NvidiaInfo::processAndPublish(
     {
         lg2::error("{C}: exception publishing terminus {T}: {E}", "C", context,
                    "T", terminusName, "E", e.what());
-        return;
+        // Tear down any partial publishers from the failed update so we
+        // don't leave half-registered interfaces on D-Bus. The persisted
+        // file is intentionally left intact: it still reflects the last
+        // known-good state, and recovery on the next boot can retry.
+        clearTerminusInfo(terminusName);
+        throw sdbusplus::exception::SdBusError(
+            -EIO,
+            std::format("{} failed to publish: {}", context, e.what()).c_str());
     }
 
     if (persistOnSuccess && !persistInfoJson(moduleIndex, rawJson))
     {
-        lg2::critical("Failed to persist info JSON for terminus {T}; exiting "
-                      "to preserve round-trip guarantee",
-                      "T", terminusName);
-        std::exit(EXIT_FAILURE);
+        // Roll back the publish so [D-Bus state] still matches
+        // [on-disk state] (the previous good file, or none). Caller can
+        // retry; this avoids thrashing the entire process for a
+        // potentially transient filesystem error.
+        lg2::error("{C}: failed to persist info JSON for terminus {T}; "
+                   "rolling back publish to preserve round-trip guarantee",
+                   "C", context, "T", terminusName);
+        clearTerminusInfo(terminusName);
+        throw sdbusplus::exception::SdBusError(
+            -EIO,
+            std::format("{} failed to persist", context).c_str());
     }
 }
 
