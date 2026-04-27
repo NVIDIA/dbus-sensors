@@ -239,8 +239,7 @@ auto DomainManager::monitorSource(std::shared_ptr<Source> source,
         }
 
         auto duration = changedTime - lastChanged.value();
-        if (duration > minSourceChangedSleepDuration &&
-            duration < sourceChangedCoolOffInterval)
+        if (duration < sourceChangedCoolOffInterval)
         {
             auto sleepDuration = sourceChangedCoolOffInterval - duration;
             co_await sdbusplus::async::sleep_for(ctx, sleepDuration);

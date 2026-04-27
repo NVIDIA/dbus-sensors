@@ -92,8 +92,6 @@ class DomainManager
 
     static constexpr auto sourceChangedCoolOffInterval =
         std::chrono::milliseconds(1000);
-    static constexpr auto minSourceChangedSleepDuration =
-        std::chrono::milliseconds(10);
 
     struct Source
     {
