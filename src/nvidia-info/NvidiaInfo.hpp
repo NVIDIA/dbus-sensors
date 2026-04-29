@@ -78,11 +78,20 @@ class NvidiaInfo
     NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
                std::shared_ptr<sdbusplus::asio::connection> conn,
                std::shared_ptr<sdbusplus::asio::object_server> obj,
-               std::string invPath);
+               std::string invPath,
+               std::string persistedDir = persistedJsonDir);
 
     // Sets Refresh=true on every Control.Trigger InventoryData object
     // under /xyz/openbmc_project/control.
     void triggerInventoryRefresh();
+
+    // Public so tests can drive the publish path without going through the
+    // CreateInfo D-Bus method dispatch (which would require running an
+    // io_context concurrently). On the wire, this is exactly the body of
+    // the CreateInfo method registered in the constructor; same throwing
+    // contract.
+    void createInfoFromJsonString(int32_t processorModuleIndex,
+                                  const std::string& jsonStr);
 
   private:
     std::shared_ptr<boost::asio::io_context> ioCtx;
@@ -90,6 +99,7 @@ class NvidiaInfo
     std::shared_ptr<sdbusplus::asio::object_server> objServer;
 
     std::string inventoryPath;
+    std::string persistedDir;
     std::string motherboardPath;
     std::map<uint64_t, std::string> processorModulePaths;
     std::map<std::string, TerminusInfo> terminusInfos;
@@ -97,9 +107,6 @@ class NvidiaInfo
 
     // D-Bus interface that exposes CreateInfo method
     std::shared_ptr<sdbusplus::asio::dbus_interface> serviceIface;
-
-    void createInfoFromJsonString(int32_t processorModuleIndex,
-                                  const std::string& jsonStr);
 
     // Parse, validate, and publish rawJson. On failure clears terminus
     // state, removes the persisted file, and throws SdBusError. If

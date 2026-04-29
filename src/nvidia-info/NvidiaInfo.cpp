@@ -16,8 +16,7 @@
 
 #include "NvidiaInfo.hpp"
 
-#include <fcntl.h>
-#include <unistd.h>
+#include "NvidiaInfoPersistence.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -32,7 +31,6 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -51,152 +49,23 @@
 namespace nvidia::info
 {
 
-namespace
-{
-
-inline constexpr std::string_view persistedFilenamePrefix = "ProcessorModule_";
-inline constexpr std::string_view persistedFilenameSuffix = "_Info.json";
-
-std::filesystem::path persistedPathFor(int32_t processorModuleIndex)
-{
-    return std::filesystem::path(persistedJsonDir) /
-           std::format("{}{}{}", persistedFilenamePrefix, processorModuleIndex,
-                       persistedFilenameSuffix);
-}
-
-// Inverse of persistedPathFor(); only single-digit indices accepted, which
-// avoids leading-zero aliasing and caps modules at 0..9.
-std::optional<int32_t> moduleIndexFromPersistedFilename(
-    std::string_view filename)
-{
-    if (!filename.starts_with(persistedFilenamePrefix) ||
-        !filename.ends_with(persistedFilenameSuffix))
-    {
-        return std::nullopt;
-    }
-    const std::string_view digits =
-        filename.substr(persistedFilenamePrefix.size(),
-                        filename.size() - persistedFilenamePrefix.size() -
-                            persistedFilenameSuffix.size());
-    if (digits.size() != 1 || digits[0] < '0' || digits[0] > '9')
-    {
-        return std::nullopt;
-    }
-    return digits[0] - '0';
-}
-
-bool persistInfoJson(int32_t processorModuleIndex, const std::string& jsonStr)
-{
-    namespace fs = std::filesystem;
-
-    std::error_code ec;
-    fs::create_directories(fs::path(persistedJsonDir), ec);
-    if (ec)
-    {
-        lg2::error("Failed to create info directory {D}: {E}", "D",
-                   persistedJsonDir, "E", ec.message());
-        return false;
-    }
-
-    const fs::path finalPath = persistedPathFor(processorModuleIndex);
-    const fs::path tempPath = std::format("{}.tmp", finalPath.string());
-
-    try
-    {
-        std::ofstream out(tempPath.string(),
-                          std::ios::binary | std::ios::out | std::ios::trunc);
-        if (!out.good())
-        {
-            lg2::error("Failed to open temp info file {F}", "F",
-                       tempPath.string());
-            return false;
-        }
-        out << jsonStr;
-        out.flush();
-        if (!out.good())
-        {
-            lg2::error("Failed to write temp info file {F}", "F",
-                       tempPath.string());
-            fs::remove(tempPath, ec);
-            return false;
-        }
-    }
-    catch (const std::exception& e)
-    {
-        lg2::error("Exception while writing temp info file {F}: {E}", "F",
-                   tempPath.string(), "E", e.what());
-        ec.clear();
-        fs::remove(tempPath, ec);
-        return false;
-    }
-
-    // ofstream::flush() only reaches the kernel buffer; reopen read-only and
-    // fsync so the data is on disk before the rename. Best-effort: failures
-    // are logged but do not abort the rename.
-    if (int fd = ::open(tempPath.c_str(), O_RDONLY | O_CLOEXEC); fd < 0)
-    {
-        lg2::warning("Failed to open temp info file {F} for fsync: {E}", "F",
-                     tempPath.string(), "E", std::strerror(errno));
-    }
-    else
-    {
-        if (::fsync(fd) < 0)
-        {
-            lg2::warning("Failed to fsync temp info file {F}: {E}", "F",
-                         tempPath.string(), "E", std::strerror(errno));
-        }
-        ::close(fd);
-    }
-
-    fs::rename(tempPath, finalPath, ec);
-    if (ec)
-    {
-        lg2::error("Failed to rename {T} to {F}: {E}", "T", tempPath.string(),
-                   "F", finalPath.string(), "E", ec.message());
-        fs::remove(tempPath, ec);
-        return false;
-    }
-
-    lg2::info("Persisted info JSON to {F}", "F", finalPath.string());
-    return true;
-}
-
-void removePersistedFile(int32_t processorModuleIndex)
-{
-    namespace fs = std::filesystem;
-    const fs::path path = persistedPathFor(processorModuleIndex);
-    std::error_code ec;
-    fs::remove(path, ec);
-    if (ec)
-    {
-        lg2::warning("Failed to remove stale persisted file {F}: {E}", "F",
-                     path.string(), "E", ec.message());
-    }
-    else
-    {
-        lg2::info("Removed stale persisted file: {F}", "F", path.string());
-    }
-}
-
-} // namespace
-
 NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
                        std::shared_ptr<sdbusplus::asio::connection> conn,
                        std::shared_ptr<sdbusplus::asio::object_server> obj,
-                       std::string invPath) :
+                       std::string invPath, std::string persistedDirArg) :
     ioCtx(io), bus(std::move(conn)), objServer(std::move(obj)),
-    inventoryPath(std::move(invPath))
+    inventoryPath(std::move(invPath)), persistedDir(std::move(persistedDirArg))
 {
     lg2::info("NVIDIA Info inventory path: {I}", "I", inventoryPath);
 
     {
         namespace fs = std::filesystem;
         std::error_code ec;
-        fs::create_directories(fs::path(persistedJsonDir), ec);
+        fs::create_directories(fs::path(persistedDir), ec);
         if (ec)
         {
             lg2::error("Failed to create info directory {D}: {E}", "D",
-                       persistedJsonDir, "E", ec.message());
+                       persistedDir, "E", ec.message());
         }
     }
 
@@ -563,7 +432,7 @@ void NvidiaInfo::processAndPublish(
         lg2::critical("{C} rejected for terminus {T}: {E}", "C", context, "T",
                       terminusName, "E", e.what());
         clearTerminusInfo(terminusName);
-        removePersistedFile(moduleIndex);
+        persistence::removePersistedFile(persistedDir, moduleIndex);
         throw sdbusplus::exception::SdBusError(
             -EINVAL, std::format("{} rejected: {}", context, e.what()).c_str());
     }
@@ -586,7 +455,8 @@ void NvidiaInfo::processAndPublish(
             std::format("{} failed to publish: {}", context, e.what()).c_str());
     }
 
-    if (persistOnSuccess && !persistInfoJson(moduleIndex, rawJson))
+    if (persistOnSuccess &&
+        !persistence::persistInfoJson(persistedDir, moduleIndex, rawJson))
     {
         // Roll back the publish so [D-Bus state] still matches
         // [on-disk state] (the previous good file, or none). Caller can
@@ -681,13 +551,13 @@ void NvidiaInfo::loadPersistedInfoFiles()
     namespace fs = std::filesystem;
 
     std::error_code ec;
-    const fs::path infoDir{persistedJsonDir};
+    const fs::path infoDir{persistedDir};
     if (!fs::exists(infoDir, ec))
     {
         if (ec)
         {
             lg2::error("Info directory {D} could not be checked: {E}", "D",
-                       persistedJsonDir, "E", ec.message());
+                       persistedDir, "E", ec.message());
         }
         return;
     }
@@ -695,8 +565,8 @@ void NvidiaInfo::loadPersistedInfoFiles()
     fs::directory_iterator dirIt(infoDir, ec);
     if (ec)
     {
-        lg2::error("Failed to open info directory {D}: {E}", "D",
-                   persistedJsonDir, "E", ec.message());
+        lg2::error("Failed to open info directory {D}: {E}", "D", persistedDir,
+                   "E", ec.message());
         return;
     }
 
@@ -708,7 +578,8 @@ void NvidiaInfo::loadPersistedInfoFiles()
         }
 
         const std::string filename = entry.path().filename().string();
-        const auto moduleIndex = moduleIndexFromPersistedFilename(filename);
+        const auto moduleIndex =
+            persistence::moduleIndexFromPersistedFilename(filename);
         if (!moduleIndex)
         {
             continue;

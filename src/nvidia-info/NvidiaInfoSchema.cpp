@@ -118,8 +118,10 @@ const char* memoryTypeName(MemoryType t)
     return "Unknown";
 }
 
-// NAND -> "Other" and Intel3DXPoint -> "IntelOptane" because DBus
-// MemoryTech has no dedicated values for them.
+// Identity mapping: each schema-allowed MemoryMedia value publishes as the
+// same string on D-Bus. Unknown is the NLOHMANN_JSON_SERIALIZE_ENUM
+// fallback for inputs the schema rejects, so it should never be reached
+// on the publish path; keep it returning "Unknown" defensively.
 const char* memoryMediaTechName(MemoryMedia m)
 {
     switch (m)
@@ -127,9 +129,9 @@ const char* memoryMediaTechName(MemoryMedia m)
         case MemoryMedia::DRAM:
             return "DRAM";
         case MemoryMedia::NAND:
-            return "Other";
+            return "NAND";
         case MemoryMedia::Intel3DXPoint:
-            return "IntelOptane";
+            return "Intel3DXPoint";
         case MemoryMedia::Unknown:
             break;
     }

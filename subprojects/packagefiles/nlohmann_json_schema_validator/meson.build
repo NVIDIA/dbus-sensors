@@ -21,9 +21,9 @@ nlohmann_json_schema_validator_sources = files(
 )
 
 # Public header is `<nlohmann/json-schema.hpp>`, which lives at
-# `nlohmann/json-schema.hpp` from the source root. Marked as system so any
+# `src/nlohmann/json-schema.hpp` from the source root. Marked as system so any
 # warnings from the headers do not trip the parent project's -Werror.
-nlohmann_json_schema_validator_inc = include_directories('.', is_system: true)
+nlohmann_json_schema_validator_inc = include_directories('src', is_system: true)
 
 nlohmann_json_schema_validator_lib = static_library(
     'nlohmann_json_schema_validator',

@@ -10,8 +10,15 @@ nvidia_info_schema_sources = files(
     'NvidiaInfoTpm.cpp',
 )
 
-nvidia_info_sources = nvidia_info_schema_sources + files(
+# Library sources: schema + the asio/sd-bus glue. Linked into the daemon
+# executable and the gtest binary; excludes NvidiaInfoMain.cpp so gtest
+# can supply its own main.
+nvidia_info_lib_sources = nvidia_info_schema_sources + files(
     'NvidiaInfo.cpp',
+    'NvidiaInfoPersistence.cpp',
+)
+
+nvidia_info_sources = nvidia_info_lib_sources + files(
     'NvidiaInfoMain.cpp',
 )
 

@@ -237,5 +237,5 @@ option(
     'fuzz',
     type: 'feature',
     value: 'disabled',
-    description: 'Build libFuzzer harnesses (clang + Linux only).',
+    description: 'Build fuzz targets (clang+Linux only).',
 )

@@ -1,5 +1,58 @@
 cxx = meson.get_compiler('cpp')
 
+# ---------------------------------------------------------------------------
+# Unit tests (gtest). Always built when -Dtests=enabled. Linkage matches
+# the daemon (full nvidia_info_lib_sources) so the live D-Bus tests can
+# instantiate NvidiaInfo against a system bus; tests that need the bus
+# auto-skip via GTEST_SKIP() when sd_bus_open fails, so the same binary
+# is runnable on a host (skip live) and on a BMC (run all).
+# ---------------------------------------------------------------------------
+if get_option('tests').allowed()
+    gtest_dep = dependency('gtest', main: true, disabler: true, required: false)
+    gmock_dep = dependency('gmock', disabler: true, required: false)
+    if not gtest_dep.found() or not gmock_dep.found()
+        gtest_proj = import('cmake').subproject('googletest', required: false)
+        if gtest_proj.found()
+            gtest_dep = declare_dependency(
+                dependencies: [
+                    dependency('threads'),
+                    gtest_proj.dependency('gtest'),
+                    gtest_proj.dependency('gtest_main'),
+                ],
+            )
+            gmock_dep = gtest_proj.dependency('gmock')
+        else
+            assert(
+                not get_option('tests').allowed(),
+                'Googletest is required if tests are enabled',
+            )
+        endif
+    endif
+
+    test_nvidia_info = executable(
+        'test_nvidia_info',
+        'test_nvidia_info.cpp',
+        nvidia_info_lib_sources,
+        nvidia_info_schema_embed,
+        cpp_args: ['-DJSON_IMPLICIT_CONVERSIONS=0'],
+        implicit_include_directories: false,
+        include_directories: [nvidia_info_include_dir, sensor_include_dir],
+        dependencies: [
+            default_deps,
+            gtest_dep,
+            nlohmann_json_dep,
+            nlohmann_json_schema_validator_dep,
+        ],
+        # Ship to the rootfs so it can be invoked ad-hoc on the BMC.
+        # Lives under the daemon's libexec subtree to keep it scoped
+        # and out of $PATH.
+        install: true,
+        install_dir: '/usr/libexec/dbus-sensors/tests',
+    )
+
+    test('test_nvidia_info', test_nvidia_info)
+endif
+
 # Fuzzing requires libFuzzer + leak sanitizer.  Only clang on Linux ships a
 # usable combination today (osx clang has no leak detector).  Under any other
 # toolchain (e.g. the gcc-based Yocto build) this block is silently skipped
