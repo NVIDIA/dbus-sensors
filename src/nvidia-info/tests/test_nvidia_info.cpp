@@ -379,8 +379,15 @@ TEST(SchemaGate, ValidateTagsSectionAndIndex)
     // re-parses it. We bypass the schema (which would reject anyway) by
     // crafting a TerminusData directly so we can observe the
     // "Processor[<i>]: ..." prefix that validateEach<>() applies.
+    //
+    // cpus[0..1] need valid idStr values: NvidiaCpu::validate() rejects
+    // the default-constructed empty string, so without pre-filling the
+    // earlier slots the throw fires at index 0 and we never reach
+    // index 2.
     nvi::TerminusData td;
     td.cpus.resize(3);
+    td.cpus[0].idStr = "0x1";
+    td.cpus[1].idStr = "0x2";
     td.cpus[2].idStr = "not-hex";
 
     try
@@ -604,22 +611,24 @@ TEST(NvidiaPcie, FromJsonBindsAllFields)
 // TPM
 // ============================================================================
 
-TEST(NvidiaTpm, AllFieldsTreatedAsOptionalAtFromJson)
+TEST(NvidiaTpm, FromJsonThrowsOnMissingRequiredField)
 {
-    // Schema enforces "required"; from_json itself uses j.value() and
-    // tolerates missing fields so recovery from a stale persisted file
-    // (post-schema-validation) still produces a sensible object.
-    nvi::NvidiaTpm t;
-    nvi::from_json(Json::object(), t);
-    EXPECT_TRUE(t.manufacturer.empty());
-    EXPECT_TRUE(t.version.empty());
-    EXPECT_TRUE(t.majorSpecVersion.empty());
+    // Schema enforces "required"; from_json mirrors that with j.at()
+    // so any caller that bypasses schema validation (e.g. a future
+    // recovery path that forgets to revalidate) fails loudly instead
+    // of silently producing a half-populated object.
+    for (const char* field : {"Manufacturer", "Version", "MajorSpecVersion"})
+    {
+        Json j = validBase()["TPM"][0];
+        j.erase(field);
+        nvi::NvidiaTpm t;
+        EXPECT_THROW(nvi::from_json(j, t), Json::out_of_range)
+            << "missing " << field << " must throw";
+    }
 }
 
 TEST(NvidiaTpm, FromJsonBindsAllFields)
 {
-    // Companion to AllFieldsTreatedAsOptionalAtFromJson: the populated
-    // case proves every field round-trips when present.
     Json j = validBase()["TPM"][0];
     nvi::NvidiaTpm t;
     nvi::from_json(j, t);

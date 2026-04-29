@@ -27,9 +27,9 @@ namespace info
 
 void from_json(const Json& j, NvidiaTpm& t)
 {
-    t.manufacturer = j.value("Manufacturer", std::string());
-    t.version = j.value("Version", std::string());
-    t.majorSpecVersion = j.value("MajorSpecVersion", std::string());
+    j.at("Manufacturer").get_to(t.manufacturer);
+    j.at("Version").get_to(t.version);
+    j.at("MajorSpecVersion").get_to(t.majorSpecVersion);
 }
 
 void NvidiaTpm::validate()
@@ -40,13 +40,8 @@ void NvidiaTpm::validate()
 void NvidiaTpm::publish(sdbusplus::asio::object_server& objServer,
                         const std::string& tpmPath)
 {
-    std::string prettyName;
-    std::string model;
-    if (!majorSpecVersion.empty())
-    {
-        prettyName = "TPM " + majorSpecVersion;
-        model = "TPM " + majorSpecVersion;
-    }
+    const std::string prettyName = "TPM " + majorSpecVersion;
+    const std::string model = prettyName;
 
     auto& tpm =
         add(tpmPath, "xyz.openbmc_project.Inventory.Item.TrustedComponent",

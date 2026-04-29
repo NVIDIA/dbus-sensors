@@ -47,10 +47,11 @@ class NvidiaTpm : public Publisher
     void publish(sdbusplus::asio::object_server& objServer,
                  const std::string& tpmPath);
 
-    // All optional; PrettyName/Model are derived from majorSpecVersion.
-    std::string manufacturer;     // "Manufacturer" (optional)
-    std::string version;          // "Version" (optional)
-    std::string majorSpecVersion; // "MajorSpecVersion" (optional)
+    // All schema-required; PrettyName/Model are derived from
+    // majorSpecVersion.
+    std::string manufacturer;     // "Manufacturer"
+    std::string version;          // "Version"
+    std::string majorSpecVersion; // "MajorSpecVersion"
 };
 
 void from_json(const Json& j, NvidiaTpm& t);

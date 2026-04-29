@@ -22,10 +22,7 @@ if get_option('tests').allowed()
             )
             gmock_dep = gtest_proj.dependency('gmock')
         else
-            assert(
-                not get_option('tests').allowed(),
-                'Googletest is required if tests are enabled',
-            )
+            error('Googletest is required if tests are enabled')
         endif
     endif
 
