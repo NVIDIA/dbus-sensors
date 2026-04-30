@@ -39,6 +39,7 @@ unit_files = [
         'xyz.openbmc_project.discreteleakdetectsensor.service',
     ],
     ['write-protect', 'xyz.openbmc_project.writeprotectsensor.service'],
+    ['openocd-port-forward', 'com.nvidia.openocdportforward.service'],
     ['smbpbi', 'xyz.openbmc_project.smbpbisensor.service'],
     ['port-ctrl', 'xyz.openbmc_project.portctrl.service'],
     ['nvidia-fw-write-protect', 'com.nvidia.fwwriteprotect.service'],

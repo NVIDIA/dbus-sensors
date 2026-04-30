@@ -51,4 +51,15 @@ test(
     ),
 )
 
+test(
+    'test_openocd_port_forward_ports',
+    executable(
+        'test_openocd_port_forward_ports',
+        '../OpenOCDPortForwardPorts.cpp',
+        'test_OpenOCDPortForwardPorts.cpp',
+        dependencies: ut_deps_list,
+        implicit_include_directories: false,
+        include_directories: src_inc,
+    ),
+)
 

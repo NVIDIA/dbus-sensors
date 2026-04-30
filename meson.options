@@ -222,6 +222,12 @@ option(
     description: 'Enable GPIO port control service.',
 )
 option(
+    'openocd-port-forward',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable OpenOCD port forward control service.',
+)
+option(
     'nvidia-fw-write-protect',
     type: 'feature',
     value: 'disabled',

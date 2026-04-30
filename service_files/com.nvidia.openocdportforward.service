@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenOCD Port Forward Control
+After=dbus.service network.target
+Requires=dbus.service
+
+[Service]
+Type=dbus
+BusName=com.nvidia.openocdportforward
+ExecStart=/usr/bin/openocdportforward
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -372,3 +372,12 @@ if get_option('debug-serial-ctrl').allowed()
         install: true,
     )
 endif
+
+if get_option('openocd-port-forward').allowed()
+    executable(
+        'openocdportforward',
+        ['OpenOCDPortForwardMain.cpp', 'OpenOCDPortForwardPorts.cpp'],
+        dependencies: [default_deps, sdbusplus],
+        install: true,
+    )
+endif
