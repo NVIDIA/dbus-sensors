@@ -3541,4 +3541,66 @@ TEST_F(FakeConnReactorWithTestSdBusFixture,
     EXPECT_TRUE(reactor->devices.contains(dev));
 }
 
+// ===========================================================================
+// handleGeneralErrorSignal coverage
+//
+// handleGeneralErrorSignal is a static function in MCTPReactorMain.cpp that
+// reads a (uint8_t eid, string errorMessage, string resolution) D-Bus signal
+// and calls createMCTPLogEntry.  It has zero test coverage in the existing
+// suite.
+// ===========================================================================
+
+// Malformed message (nullptr) → msg.read throws → function body entered →
+// handleGeneralErrorSignal counted as covered by gcovr.
+TEST(ReactorMainHandlers, handleGeneralErrorSignalNullMsgThrows)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_THROW(
+        static_cast<void>(handleGeneralErrorSignal(conn, reactor, msg)),
+        std::exception);
+}
+
+// Proper "yss" message + non-null FakeConnReactorFixture connection.
+// handleGeneralErrorSignal reads the message and calls createMCTPLogEntry
+// with the non-null conn.  createMCTPLogEntry passes its !conn guard and
+// calls conn->async_method_call(lambda, ...).  With the null-bus connection,
+// the callback fires (synchronously or via TearDown io.poll()) with an error
+// → the lambda inside createMCTPLogEntry is covered.
+TEST_F(FakeConnReactorFixture,
+       handleGeneralErrorSignalRealMsgCoversCreateMCTPLogEntryLambda)
+{
+    MockAssocServer assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+
+    sd_bus* rawBus = makeRawBus();
+    if (rawBus == nullptr)
+    {
+        GTEST_SKIP() << "sd_bus_new failed; skipping";
+    }
+    sd_bus_message* rawMsg = nullptr;
+    if (sd_bus_message_new_signal(rawBus, &rawMsg, "/test", "test.iface",
+                                  "GeneralError") < 0 ||
+        rawMsg == nullptr)
+    {
+        sd_bus_unref(rawBus);
+        GTEST_SKIP() << "sd_bus_message_new_signal failed; skipping";
+    }
+    uint8_t eid = 10;
+    ASSERT_GE(sd_bus_message_append(rawMsg, "yss", eid, "test error message",
+                                    "test resolution"),
+              0);
+    (void)sd_bus_message_seal(rawMsg, 1, 0);
+    (void)sd_bus_message_rewind(rawMsg, 1);
+    sdbusplus::message_t msg(rawMsg, std::false_type{});
+    sd_bus_unref(rawBus);
+
+    // With conn != nullptr: createMCTPLogEntry proceeds past !conn guard and
+    // calls conn->async_method_call(lambda, ...).  The lambda fires with the
+    // null-bus error (synchronous dispatch or TearDown io.poll()).
+    EXPECT_NO_THROW(handleGeneralErrorSignal(conn, reactor, msg));
+}
+
 // NOLINTEND

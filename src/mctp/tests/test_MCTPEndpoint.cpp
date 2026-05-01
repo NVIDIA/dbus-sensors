@@ -12247,3 +12247,73 @@ TEST_F(FakeConnFixture, G364_onMctpEndpointChangeConnectivityDegraded)
     EXPECT_NO_THROW(ep->onMctpEndpointChange(msg));
     EXPECT_TRUE(degradedCalled);
 }
+
+// ===========================================================================
+// performHealthCheck bridge-pool nested lambda coverage
+//
+// MCTPEndpoint.cpp ~line 581 defines a nested lambda
+//   [weak, eid](const boost::system::error_code& ec) { ... }
+// inside the bridge-pool ping callback.  It is only registered when a
+// bridge-pool EID ping returns SUCCESS *and* the EID is already in
+// unresponsiveBridgePoolEids (recovery path).  All existing FakeConnFixture
+// tests drive callbacks with error (null-bus failure), so the nested lambda
+// is never entered.  This AsyncFixture test drives the bridge-pool ping with
+// success to register and then fire the nested lambda.
+// ===========================================================================
+TEST_F(AsyncFixture, performHealthCheckBridgePoolSuccessCoversNestedLambda)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-hc-bridge-nested", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9),  // staticEID
+        std::optional<uint8_t>(10), // bridgePoolStart
+        std::optional<uint8_t>(10), // bridgePoolEnd (single-EID pool)
+        std::nullopt, std::nullopt,
+        std::optional<uint8_t>(1),  // pollingInterval
+        std::vector<std::string>{"usb-hc-bridge-nested", "bridge-a"});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+
+    // Pre-mark bridge pool EID 10 as unresponsive so the success path
+    // triggers the nested async_method_call for LearnEndpoint.
+    dev->unresponsiveBridgePoolEids.insert(10);
+    dev->discoveryNeeded = false;
+
+    // performHealthCheck registers two async calls (gMockSdBusCallAsync=true):
+    //   [0] main device EndpointPing (staticEID=9)
+    //   [1] bridge pool EID 10 EndpointPing
+    EXPECT_NO_THROW(dev->performHealthCheck());
+    ASSERT_GE(gPendingAsyncCalls.size(), 2U);
+
+    // Drive [0]: main device ping → success (device responsive, no-op).
+    driveAsyncCallSuccess();
+
+    // Drive [1]: bridge pool EID 10 ping → success.
+    // unresponsiveBridgePoolEids.contains(10)==true && !discoveryNeeded →
+    // nested lambda [weak,eid] registered as a new pending call.
+    driveAsyncCallSuccess();
+    ASSERT_GE(gPendingAsyncCalls.size(), 1U);
+
+    // Drive nested LearnEndpoint lambda with success → lambda body entered
+    // → gcovr counts it as covered.
+    driveAsyncCallSuccess();
+
+    // Cancel health timer to avoid stale handlers.
+    try
+    {
+        dev->healthTimer->cancel();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+    suppressedHealthCheckEids.clear();
+}
