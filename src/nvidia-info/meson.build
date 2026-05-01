@@ -18,9 +18,7 @@ nvidia_info_lib_sources = nvidia_info_schema_sources + files(
     'NvidiaInfoPersistence.cpp',
 )
 
-nvidia_info_sources = nvidia_info_lib_sources + files(
-    'NvidiaInfoMain.cpp',
-)
+nvidia_info_sources = nvidia_info_lib_sources + files('NvidiaInfoMain.cpp')
 
 nvidia_info_include_dir = include_directories('.')
 sensor_include_dir = include_directories('../..')

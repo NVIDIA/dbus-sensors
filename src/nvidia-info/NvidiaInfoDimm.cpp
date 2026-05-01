@@ -39,14 +39,14 @@ static constexpr std::string_view dimmDeviceTypePrefix =
     "xyz.openbmc_project.Inventory.Item.Dimm.DeviceType.";
 static constexpr std::string_view dimmMemoryTechPrefix =
     "xyz.openbmc_project.Inventory.Item.Dimm.MemoryTech.";
-static constexpr std::string_view locationTypeSlot =
-    "xyz.openbmc_project.Inventory.Decorator.Location.LocationTypes.Slot";
+static constexpr std::string_view locationTypeSocket =
+    "xyz.openbmc_project.Inventory.Decorator.Location.LocationTypes.Socket";
 static constexpr std::string_view locationTypeEmbedded =
     "xyz.openbmc_project.Inventory.Decorator.Location.LocationTypes.Embedded";
 static constexpr std::string_view locationTypeUnknown =
     "xyz.openbmc_project.Inventory.Decorator.Location.LocationTypes.Unknown";
 
-// Socketed/pluggable form factors map to Slot; soldered-down parts map
+// Socketed/pluggable form factors map to Socket; soldered-down parts map
 // to Embedded; Unknown form factor maps to Unknown. Adding a new
 // FormFactor value will hit the default and fall back to Unknown;
 // classify it explicitly here when added.
@@ -65,7 +65,7 @@ static std::string_view locationTypeFor(FormFactor f)
         case FormFactor::SO_DIMM_16b:
         case FormFactor::SO_DIMM_32b:
         case FormFactor::SOCAMM:
-            return locationTypeSlot;
+            return locationTypeSocket;
         case FormFactor::Die:
             return locationTypeEmbedded;
         case FormFactor::Unknown:
