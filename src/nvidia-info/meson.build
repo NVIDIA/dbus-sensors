@@ -22,7 +22,7 @@ nvidia_info_sources = nvidia_info_lib_sources + files(
     'NvidiaInfoMain.cpp',
 )
 
-nvidia_info_include_dir = include_directories('.', is_system: true)
+nvidia_info_include_dir = include_directories('.')
 sensor_include_dir = include_directories('../..')
 
 # Embed the per-terminus JSON schema directly into the binary so runtime
