@@ -66,6 +66,8 @@ NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
         {
             lg2::error("Failed to create info directory {D}: {E}", "D",
                        persistedDir, "E", ec.message());
+            throw std::system_error(ec, "Failed to create info directory " +
+                                            persistedDir);
         }
     }
 

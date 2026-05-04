@@ -20,11 +20,13 @@
 #include "NvidiaInfoSchemaEmbed.hpp"
 
 #include <nlohmann/json-schema.hpp>
+#include <phosphor-logging/lg2.hpp>
 
 #include <cstddef>
 #include <format>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace nvidia
@@ -63,6 +65,8 @@ const char* formFactorName(FormFactor f)
         case FormFactor::Unknown:
             break;
     }
+    lg2::warning("Defaulting to Unknown for form factor: {VAL}", "VAL",
+                 std::to_underlying(f));
     return "Unknown";
 }
 
@@ -115,6 +119,8 @@ const char* memoryTypeName(MemoryType t)
         case MemoryType::Unknown:
             break;
     }
+    lg2::warning("Defaulting to Unknown for memory type: {VAL}", "VAL",
+                 std::to_underlying(t));
     return "Unknown";
 }
 
@@ -135,6 +141,8 @@ const char* memoryMediaTechName(MemoryMedia m)
         case MemoryMedia::Unknown:
             break;
     }
+    lg2::warning("Defaulting to Unknown for memory media: {VAL}", "VAL",
+                 std::to_underlying(m));
     return "Unknown";
 }
 
@@ -163,6 +171,8 @@ const char* slotTypeName(SlotType s)
         case SlotType::U2:
             return "U_2";
     }
+    lg2::warning("Defaulting to OEM for slot type: {VAL}", "VAL",
+                 std::to_underlying(s));
     return "OEM";
 }
 
