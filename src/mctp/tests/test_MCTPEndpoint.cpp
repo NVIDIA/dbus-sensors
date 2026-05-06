@@ -4482,13 +4482,15 @@ TEST_F(FakeConnFixture,
 }
 
 // ===========================================================================
-// Group 11: Bridge pool — EID already in unresponsiveBridgePoolEids
+// Group 11: Bridge pool — EID listed unresponsive (seed) still counts failures
 // ===========================================================================
 
-// When a bridge EID is already in unresponsiveBridgePoolEids, a subsequent
-// failure should NOT increment bridgePoolPingFailures (line 536 check).
+// Constructor seeds pool EIDs into unresponsiveBridgePoolEids so the first
+// successful ping can trigger LearnEndpoint. Ping failures must still increment
+// toward the threshold while failure count is below threshold, even when the
+// EID is already listed unresponsive.
 TEST_F(FakeConnFixture,
-       performHealthCheckBridgePoolAlreadyUnresponsiveSkipsCounter)
+       performHealthCheckBridgePoolSeededUnresponsiveIncrementsBelowThreshold)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-hc-bridge-unresponsive", "usb0", std::vector<uint8_t>{0x20},
@@ -4504,13 +4506,11 @@ TEST_F(FakeConnFixture,
     dev->setEndpointForTest(ep);
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
 
-    // Pre-mark EID 10 as already unresponsive.
-    dev->unresponsiveBridgePoolEids.insert(10);
     dev->bridgePoolPingFailures[10] = 0;
+    EXPECT_TRUE(dev->unresponsiveBridgePoolEids.contains(10));
 
     // performHealthCheck fires async callbacks synchronously (error from null
-    // bus). For EID 10, since unresponsiveBridgePoolEids.contains(10) == true,
-    // the counter should NOT be incremented.
+    // bus). Failure count must advance toward threshold despite seeded entry.
     EXPECT_NO_THROW(dev->performHealthCheck());
     dev->healthTimer->cancel();
     try
@@ -4520,9 +4520,7 @@ TEST_F(FakeConnFixture,
     catch (...) // NOLINT(bugprone-empty-catch)
     {}
 
-    // Counter stays at 0 because already-unresponsive path is taken.
-    EXPECT_EQ(dev->bridgePoolPingFailures[10], 0);
-    // EID stays in unresponsive set.
+    EXPECT_EQ(dev->bridgePoolPingFailures[10], 1U);
     EXPECT_TRUE(dev->unresponsiveBridgePoolEids.contains(10));
 }
 
@@ -6949,6 +6947,10 @@ TEST_F(FakeConnFixture,
         1, 9);
     dev->setEndpointForTest(ep);
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+
+    // Constructor seeds bridge-pool EIDs into unresponsiveBridgePoolEids;
+    // clear so this test exercises first-failure behavior without seed.
+    dev->unresponsiveBridgePoolEids.erase(11);
 
     // Start with 0 failures — after one async error the count goes to 1,
     // which is strictly less than pingFailureThreshold (3).
@@ -11435,6 +11437,7 @@ TEST_F(AsyncFixture, G344_bridgePoolFailureBelowThresholdIncrementsCounter)
         std::optional<uint8_t>(1));
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->bridgePoolPingFailures[10] = 0;
+    dev->unresponsiveBridgePoolEids.erase(10);
 
     dev->performHealthCheck();
     ASSERT_GE(gPendingAsyncCalls.size(), 2U);
