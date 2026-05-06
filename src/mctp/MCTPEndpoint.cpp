@@ -18,6 +18,7 @@
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
 
+#include <algorithm>
 #include <cassert>
 #include <charconv>
 #include <cstdint>
@@ -75,7 +76,26 @@ MCTPDDevice::MCTPDDevice(
     bridgePoolStartEid(bridgePoolStartEid), bridgePoolEndEid(bridgePoolEndEid),
     ignoreEids(ignoreEids), ignoreMessageTypes(ignoreMessageTypes),
     pollingInterval(pollingInterval)
-{}
+{
+    if (bridgePoolStartEid.has_value() && bridgePoolEndEid.has_value())
+    {
+        const auto poolStart = bridgePoolStartEid.value();
+        const auto poolEnd = bridgePoolEndEid.value();
+        /* Use unsigned iteration: uint8_t would wrap past 255 and loop forever
+         * when poolEnd is 255. */
+        for (unsigned i = poolStart; i <= poolEnd; ++i)
+        {
+            const auto eid = static_cast<uint8_t>(i);
+            if (ignoreEids.has_value() &&
+                std::find(ignoreEids->begin(), ignoreEids->end(), eid) !=
+                    ignoreEids->end())
+            {
+                continue;
+            }
+            unresponsiveBridgePoolEids.insert(eid);
+        }
+    }
+}
 
 void MCTPDDevice::onDiscoveryMatchRule()
 {
@@ -509,11 +529,19 @@ void MCTPDDevice::performHealthCheck()
     // For bridge devices, also check pool range (in parallel with main device)
     if (bridgePoolStartEid.has_value() && bridgePoolEndEid.has_value())
     {
-        uint8_t start = bridgePoolStartEid.value();
-        uint8_t end = bridgePoolEndEid.value();
+        const auto start = bridgePoolStartEid.value();
+        const auto end = bridgePoolEndEid.value();
         // Ping each EID in the pool
-        for (uint8_t eid = start; eid <= end; eid++)
+        for (unsigned i = start; i <= end; ++i)
         {
+            const auto eid = static_cast<uint8_t>(i);
+            if (ignoreEids.has_value() &&
+                std::find(ignoreEids->begin(), ignoreEids->end(), eid) !=
+                    ignoreEids->end())
+            {
+                continue;
+            }
+
             std::string deviceName = getNameForEid(eid).value_or("");
 
             // Reset suppression state for this EID
@@ -537,8 +565,14 @@ void MCTPDDevice::performHealthCheck()
 
                     if (ec)
                     {
-                        // Count consecutive timeouts for bridge pool EIDs
-                        if (!self->unresponsiveBridgePoolEids.contains(eid))
+                        /* Count failures toward threshold even when the EID is
+                         * already listed unresponsive (constructor seeds pool
+                         * EIDs so the first successful ping triggers
+                         * LearnEndpoint). Once at threshold, stop counting
+                         * (same as before). */
+                        if (!self->unresponsiveBridgePoolEids.contains(eid) ||
+                            self->bridgePoolPingFailures[eid] <
+                                self->pingFailureThreshold)
                         {
                             self->bridgePoolPingFailures[eid]++;
                             info(
@@ -571,34 +605,36 @@ void MCTPDDevice::performHealthCheck()
                     {
                         self->bridgePoolPingFailures[eid] = 0;
                         suppressedHealthCheckEids.erase(eid);
-                        if (self->unresponsiveBridgePoolEids.contains(eid))
+
+                        const bool wasUnresponsive =
+                            self->unresponsiveBridgePoolEids.contains(eid);
+                        if (wasUnresponsive)
                         {
                             info("Bridge pool EID {EID} recovered", "EID", eid);
                             self->unresponsiveBridgePoolEids.erase(eid);
-                            if (!self->discoveryNeeded)
-                            {
-                                self->connection->async_method_call(
-                                    [weak,
-                                     eid](const boost::system::error_code& ec) {
-                                        auto self = weak.lock();
-                                        if (!self)
-                                        {
-                                            return;
-                                        }
-                                        if (ec)
-                                        {
-                                            error(
-                                                "Failed to initiate net LearnEndpoint for EID {EID}: {ERROR}",
-                                                "EID", eid, "ERROR",
-                                                ec.message());
-                                            self->unresponsiveBridgePoolEids
-                                                .insert(eid);
-                                        }
-                                    },
-                                    mctpdBusName, mctpdNetworkPath,
-                                    mctpdNetworkInterface, "LearnEndpoint",
-                                    eid);
-                            }
+                        }
+
+                        if (!self->discoveryNeeded && wasUnresponsive)
+                        {
+                            self->connection->async_method_call(
+                                [weak,
+                                 eid](const boost::system::error_code& ec) {
+                                    auto self = weak.lock();
+                                    if (!self)
+                                    {
+                                        return;
+                                    }
+                                    if (ec)
+                                    {
+                                        error(
+                                            "Failed to initiate net LearnEndpoint for EID {EID}: {ERROR}",
+                                            "EID", eid, "ERROR", ec.message());
+                                        self->unresponsiveBridgePoolEids.insert(
+                                            eid);
+                                    }
+                                },
+                                mctpdBusName, mctpdNetworkPath,
+                                mctpdNetworkInterface, "LearnEndpoint", eid);
                         }
                     }
                 },
