@@ -3140,6 +3140,7 @@ TEST_F(FakeConnFixture, performHealthCheckFailuresReachThresholdCallsRecover)
     dev->setEndpointForTest(ep);
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->inHealthRecoveryMode = false;
+    dev->markDiscoveredMctpEid(9);
     // Set failures to threshold - 1 so the next failure triggers recover().
     dev->consecutivePingFailures =
         static_cast<uint8_t>(dev->pingFailureThreshold - 1);
@@ -3566,6 +3567,7 @@ TEST_F(FakeConnFixture, performHealthCheckNoSuppressAtThresholdMinus1Failures)
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->consecutivePingFailures =
         static_cast<uint8_t>(dev->pingFailureThreshold - 1);
+    dev->markDiscoveredMctpEid(9);
 
     suppressedHealthCheckEids.clear();
     EXPECT_NO_THROW(dev->performHealthCheck());
@@ -4132,6 +4134,7 @@ TEST_F(FakeConnFixture, recoverNoArgWithEndpointCallsRecoverWithEid)
     dev->setEndpointForTest(ep);
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->inHealthRecoveryMode = false;
+    dev->markDiscoveredMctpEid(9);
 
     EXPECT_NO_THROW(dev->recover());
     EXPECT_TRUE(dev->inHealthRecoveryMode);
@@ -4848,13 +4851,15 @@ TEST_F(FakeConnFixture, performHealthCheckSuccessResetsConsecutivePingFailures)
 TEST_F(FakeConnFixture, recoverWithEidInsertsSuppressedEid)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
-        conn, "usb-recover-eid-suppress", "usb0", std::vector<uint8_t>{0x20});
+        conn, "usb-recover-eid-suppress", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
     suppressedHealthCheckEids.clear();
+    dev->markDiscoveredMctpEid(9);
 
-    EXPECT_NO_THROW(dev->recover(uint8_t{42}));
+    EXPECT_NO_THROW(dev->recover(uint8_t{9}));
 
     // recover(eid) calls suppressedHealthCheckEids.insert(eid) first.
-    EXPECT_TRUE(suppressedHealthCheckEids.contains(42));
+    EXPECT_TRUE(suppressedHealthCheckEids.contains(9));
     suppressedHealthCheckEids.clear();
 }
 
@@ -6359,6 +6364,7 @@ TEST_F(FakeConnFixture,
     dev->setEndpointForTest(ep);
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->inHealthRecoveryMode = false;
+    dev->markDiscoveredMctpEid(9);
     dev->consecutivePingFailures =
         2; // one below threshold → next triggers recover()
 
@@ -8082,6 +8088,7 @@ TEST_F(AsyncFixture, recoverEidAsyncCallbackSuccessPath)
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-recover-g156", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(9));
+    dev->markDiscoveredMctpEid(9);
 
     EXPECT_NO_THROW(dev->recover(9));
     ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
@@ -9074,6 +9081,7 @@ TEST_F(FakeConnFixture, MCTPDDeviceRecoverWithEndpointCallsRecoverEid)
     dev->setEndpointForTest(ep);
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->inHealthRecoveryMode = false;
+    dev->markDiscoveredMctpEid(53);
 
     // recover() with endpoint: sets recovery mode, calls recover(53)
     EXPECT_NO_THROW(dev->recover());
@@ -9777,6 +9785,7 @@ TEST_F(AsyncFixture, performHealthCheckTimedOutAtThresholdLogsAndRecovers)
     ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
     driveAsyncCallAssignEndpoint(
         5, 1, "/au/com/codeconstruct/mctp1/networks/1/endpoints/5", true);
+    dev->markDiscoveredMctpEid(5);
 
     // Now endpoint is set; set failure count to threshold-1 so next failure
     // triggers the logMCTPError and recover() path.
@@ -9929,6 +9938,7 @@ TEST_F(AsyncFixture, bridgePoolPingTimedOutAtThresholdLogsError)
     // Set failures to threshold-1 so the next failure reaches threshold
     dev->bridgePoolPingFailures[11] =
         static_cast<uint8_t>(dev->pingFailureThreshold - 1);
+    dev->markDiscoveredMctpEid(11);
 
     EXPECT_NO_THROW(dev->performHealthCheck());
     // 2 pending calls: 1 for main EID 8, 1 for bridge pool EID 11
@@ -10204,6 +10214,7 @@ TEST_F(AsyncFixture, G306_pingFailureAtThresholdNonTimedOutDoesNotLogMctpError)
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->startHealthMonitoring();
     dev->inHealthRecoveryMode = false;
+    dev->markDiscoveredMctpEid(24);
     // Set failures to threshold-1 so the next failure reaches threshold
     dev->consecutivePingFailures =
         static_cast<uint8_t>(dev->pingFailureThreshold - 1);
@@ -11078,6 +11089,7 @@ TEST_F(AsyncFixture, G333_recoverWithEndpointCallsRecoverEidSuccessPath)
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/20"),
         1, 20);
     dev->setEndpointForTest(ep);
+    dev->markDiscoveredMctpEid(20);
 
     // recover() → inHealthRecoveryMode=true, stopHealthMonitoring(),
     // endpoint!=null → recover(20) → async_method_call queued.
@@ -11104,6 +11116,7 @@ TEST_F(AsyncFixture, G334_recoverEidAsyncErrorLogsError)
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/21"),
         1, 21);
     dev->setEndpointForTest(ep);
+    dev->markDiscoveredMctpEid(21);
 
     EXPECT_NO_THROW(dev->recover());
 
@@ -11265,6 +11278,7 @@ TEST_F(AsyncFixture, G339_performHealthCheckEtimeoutAtThresholdLogsError)
     dev->setEndpointForTest(ep);
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->inHealthRecoveryMode = false;
+    dev->markDiscoveredMctpEid(9);
     // Set failures to threshold-1 so the next failure reaches the threshold
     dev->consecutivePingFailures =
         static_cast<uint8_t>(dev->pingFailureThreshold - 1);
@@ -11302,6 +11316,7 @@ TEST_F(AsyncFixture, G340_performHealthCheckNonEtimeoutAtThresholdCallsRecover)
     dev->setEndpointForTest(ep);
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->inHealthRecoveryMode = false;
+    dev->markDiscoveredMctpEid(9);
     dev->consecutivePingFailures =
         static_cast<uint8_t>(dev->pingFailureThreshold - 1);
 
@@ -11503,6 +11518,7 @@ TEST_F(AsyncFixture, G346_bridgePoolFailureAtThresholdEtimeoutLogsError)
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->bridgePoolPingFailures[10] =
         static_cast<uint8_t>(dev->pingFailureThreshold - 1);
+    dev->markDiscoveredMctpEid(10);
 
     dev->performHealthCheck();
     ASSERT_GE(gPendingAsyncCalls.size(), 2U);

@@ -483,8 +483,12 @@ void MCTPDDevice::performHealthCheck()
                                 "EID", self->endpoint->eid(), "COUNT",
                                 self->consecutivePingFailures);
                             // Log the MCTP ping failure for Redfish only after
-                            // 3 consecutive timeouts
-                            if (ec == boost::system::errc::timed_out)
+                            // 3 consecutive timeouts, and only if mctpd has
+                            // published this endpoint on D-Bus
+                            // (InterfacesAdded).
+                            if (ec == boost::system::errc::timed_out &&
+                                self->discoveredMctpEids.contains(
+                                    self->endpoint->eid()))
                             {
                                 logMCTPError(
                                     self->name, self->endpoint->eid(),
@@ -588,7 +592,8 @@ void MCTPDDevice::performHealthCheck()
                                     "Bridge pool EID {EID} not responsive after {COUNT} timeouts",
                                     "EID", eid, "COUNT",
                                     self->bridgePoolPingFailures[eid]);
-                                if (ec == boost::system::errc::timed_out)
+                                if (ec == boost::system::errc::timed_out &&
+                                    self->discoveredMctpEids.contains(eid))
                                 {
                                     logMCTPError(
                                         deviceName, eid,
@@ -610,7 +615,8 @@ void MCTPDDevice::performHealthCheck()
                             self->unresponsiveBridgePoolEids.contains(eid);
                         if (wasUnresponsive)
                         {
-                            info("Bridge pool EID {EID} recovered", "EID", eid);
+                            info("Bridge pool EID {EID} accessible", "EID",
+                                 eid);
                             self->unresponsiveBridgePoolEids.erase(eid);
                         }
 
@@ -657,8 +663,30 @@ void MCTPDDevice::performHealthCheck()
         });
 }
 
+void MCTPDDevice::markDiscoveredMctpEid(uint8_t eid)
+{
+    if (!managesEid(eid))
+    {
+        return;
+    }
+    if (discoveredMctpEids.insert(eid).second)
+    {
+        info(
+            "Recorded MCTP endpoint discovery for EID {EID} on device {DEVICE}",
+            "EID", eid, "DEVICE", name);
+    }
+}
+
 void MCTPDDevice::recover(uint8_t eid)
 {
+    if (!discoveredMctpEids.contains(eid))
+    {
+        info(
+            "Skipping recover for EID {EID}: never observed on D-Bus for device {DEVICE}",
+            "EID", eid, "DEVICE", name);
+        return;
+    }
+
     // Suppress errors during the recovery attempt
     suppressedHealthCheckEids.insert(eid);
 
@@ -679,16 +707,29 @@ void MCTPDDevice::recover(uint8_t eid)
 
 void MCTPDDevice::recover()
 {
+    if (!endpoint)
+    {
+        inHealthRecoveryMode = true;
+        stopHealthMonitoring();
+        return;
+    }
+
+    const uint8_t eid = endpoint->eid();
+    if (!discoveredMctpEids.contains(eid))
+    {
+        info(
+            "Skipping recover for main endpoint EID {EID}: never observed on D-Bus for device {DEVICE}",
+            "EID", eid, "DEVICE", name);
+        return;
+    }
+
     inHealthRecoveryMode = true;
 
     // Stop health monitoring while in recovery mode to avoid wasteful pings.
     // It will restart automatically when device is successfully set up again.
     stopHealthMonitoring();
 
-    if (endpoint)
-    {
-        recover(endpoint->eid());
-    }
+    recover(eid);
 }
 
 void MCTPDDevice::setup(

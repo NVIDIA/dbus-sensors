@@ -438,6 +438,19 @@ int main()
         std::bind_front(handleGeneralErrorSignal, systemBus, reactor));
     info("GeneralError signal match registered");
 
+    constexpr const char* mctpdDBusName = "au.com.codeconstruct.MCTP1";
+    constexpr const char* mctpdNetworksSubtree =
+        "/au/com/codeconstruct/mctp1/networks/";
+    const std::string mctpdEndpointIfaceAddedSpec =
+        rules::sender(mctpdDBusName) +
+        rules::interfacesAddedAtPath(mctpdNetworksSubtree);
+
+    auto mctpdEndpointIfaceAddedMatch = sdbusplus::bus::match_t(
+        static_cast<sdbusplus::bus_t&>(*systemBus), mctpdEndpointIfaceAddedSpec,
+        [reactor](sdbusplus::message_t& msg) {
+            reactor->onMctpdEndpointInterfacesAdded(msg);
+        });
+
     systemBus->request_name("xyz.openbmc_project.MCTPReactor");
 
     boost::asio::post(io, [reactor, systemBus]() {

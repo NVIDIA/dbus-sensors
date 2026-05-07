@@ -109,4 +109,17 @@ class MCTPDeviceRepository
         }
         return std::nullopt;
     }
+
+    /** Notify devices that may manage @p eid that mctpd published that
+     * endpoint. */
+    void markDiscoveredMctpEndpointEid(uint8_t eid)
+    {
+        for (const auto& [path, device] : devices)
+        {
+            if (auto mctp = std::dynamic_pointer_cast<MCTPDDevice>(device))
+            {
+                mctp->markDiscoveredMctpEid(eid);
+            }
+        }
+    }
 };

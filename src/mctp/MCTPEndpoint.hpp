@@ -332,6 +332,13 @@ class MCTPDDevice :
         return false;
     }
 
+    /**
+     * Record that mctpd published this EID on D-Bus (ObjectManager
+     * InterfacesAdded with Endpoint1). Used to gate Recover on ping failure.
+     * Idempotent; entries are never removed.
+     */
+    void markDiscoveredMctpEid(uint8_t eid);
+
     std::optional<std::string> getNameForEid(uint8_t eid) const override
     {
         // Check main EID
@@ -426,6 +433,9 @@ class MCTPDDevice :
     static constexpr uint8_t pingFailureThreshold = 3;
     uint8_t consecutivePingFailures = 0;
     std::map<uint8_t, uint8_t> bridgePoolPingFailures;
+    /** EIDs observed via mctpd endpoint object publication (InterfacesAdded).
+     */
+    std::set<uint8_t> discoveredMctpEids;
     void performHealthCheck();
     void recover();
     void recover(uint8_t eid);

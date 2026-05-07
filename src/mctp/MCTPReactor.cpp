@@ -6,16 +6,46 @@
 
 #include <boost/system/detail/error_code.hpp>
 #include <phosphor-logging/lg2.hpp>
+#include <sdbusplus/message.hpp>
+#include <sdbusplus/message/native_types.hpp>
 
+#include <charconv>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
 
 PHOSPHOR_LOG2_USING;
+
+namespace
+{
+constexpr const char* mctpdEndpointControlIface =
+    "au.com.codeconstruct.MCTP.Endpoint1";
+
+std::optional<uint8_t> eidFromMctpdEndpointPath(const std::string& path)
+{
+    constexpr std::string_view needle = "/endpoints/";
+    const auto pos = path.find(needle);
+    if (pos == std::string::npos)
+    {
+        return std::nullopt;
+    }
+    const char* begin = path.data() + pos + needle.size();
+    const char* end = path.data() + path.size();
+    unsigned long v = 0;
+    auto [ptr, ec] = std::from_chars(begin, end, v);
+    if (ec != std::errc{} || ptr != end || v > 255)
+    {
+        return std::nullopt;
+    }
+    return static_cast<uint8_t>(v);
+}
+} // namespace
 
 void MCTPReactor::deferSetup(const std::shared_ptr<MCTPDevice>& dev)
 {
@@ -272,4 +302,28 @@ std::optional<uint8_t> MCTPReactor::getStaticEidFromInterface(
     const std::string& interface)
 {
     return devices.getStaticEidFromInterface(interface);
+}
+
+void MCTPReactor::onMctpdEndpointInterfacesAdded(sdbusplus::message_t& msg)
+{
+    try
+    {
+        auto [objPath, interfaces] =
+            msg.unpack<sdbusplus::message::object_path, SensorData>();
+        if (interfaces.find(mctpdEndpointControlIface) == interfaces.end())
+        {
+            return;
+        }
+        const auto eidOpt = eidFromMctpdEndpointPath(objPath.str);
+        if (!eidOpt)
+        {
+            return;
+        }
+        devices.markDiscoveredMctpEndpointEid(*eidOpt);
+    }
+    catch (const std::exception& e)
+    {
+        error("Failed to handle mctpd InterfacesAdded: {ERROR}", "ERROR",
+              e.what());
+    }
 }
