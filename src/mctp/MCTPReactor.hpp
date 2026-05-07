@@ -48,6 +48,9 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
     std::optional<uint8_t> getStaticEidFromInterface(
         const std::string& interface);
 
+    /** mctpd ObjectManager InterfacesAdded on an endpoint object path. */
+    void onMctpdEndpointInterfacesAdded(sdbusplus::message_t& msg);
+
   private:
     static std::optional<std::string> findSMBusInterface(int bus);
 
