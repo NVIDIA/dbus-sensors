@@ -16,13 +16,17 @@
  */
 #pragma once
 
+#include "Utils.hpp"
+
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus/match.hpp>
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 enum class LeakLevel
@@ -41,9 +45,12 @@ class DiscreteLeakDetectSensor :
         boost::asio::io_context& io, const std::string& sensorType,
         const std::string& sensorSysfsPath, const std::string& sensorName,
         const std::string& configurationPath, float pollRate, uint8_t busId,
-        uint8_t address, const std::string& driver, bool shutdownOnLeak,
-        unsigned int shutdownDelaySeconds);
+        uint8_t address, const std::string& driver);
     ~DiscreteLeakDetectSensor();
+
+    /** Resolve xyz.openbmc_project.Configuration.LeakDetectionPolicy for this
+     *  detector name (Redfish LeakDetector Id) and subscribe to updates. */
+    void startLeakPolicyDiscovery();
 
     void monitor();
 
@@ -64,7 +71,16 @@ class DiscreteLeakDetectSensor :
     std::string getLeakResourceResolutionName(LeakLevel leaklevel);
     static std::string getLeakResourceSeverityName(LeakLevel leaklevel);
     void createLeakageLogEntry();
-    bool isAggregatedLeak();
+
+    void leakPolicyScanIndex(size_t index,
+                             const std::shared_ptr<GetSubTreeType>& subtree);
+    void bindLeakPolicy(const std::string& path, const std::string& service);
+    void loadAllPolicyProperties();
+    void applyPolicyConfigMap(const SensorBaseConfigMap& map);
+    void installLeakPolicyMatch();
+    bool criticalReactionTriggersShutdown() const;
+    unsigned int effectiveShutdownDelaySeconds() const;
+    void cancelPendingShutdown();
 
     sdbusplus::asio::object_server& objServer;
     boost::asio::steady_timer waitTimer;
@@ -72,8 +88,6 @@ class DiscreteLeakDetectSensor :
     std::shared_ptr<sdbusplus::asio::connection> dbusConnection;
     LeakLevel leakLevel{LeakLevel::NORMAL};
 
-    bool shutdownOnLeak;
-    unsigned int shutdownDelaySeconds;
     void startShutdown();
     void executeShutdown();
 
@@ -84,7 +98,15 @@ class DiscreteLeakDetectSensor :
     std::shared_ptr<sdbusplus::asio::dbus_interface> stateAssociation;
 
     unsigned int uid;
-    bool didShutdownOnThisOccurrence;
     bool startedShutdownTimer;
+    uint64_t shutdownTimerGeneration_{0};
     static unsigned int lastUID;
+
+    std::unique_ptr<sdbusplus::bus::match_t> leakPolicyMatch_;
+    std::optional<std::string> leakPolicyPath_;
+    std::string leakPolicyService_;
+    std::string criticalReactionType_{"None"};
+    std::string warningReactionType_{"None"};
+    double policyReactionDelaySeconds_{0.0};
+    bool leakPolicyPropsLoaded_{false};
 };

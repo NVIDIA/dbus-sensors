@@ -23,6 +23,7 @@
 #include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message/native_types.hpp>
 #include <xyz/openbmc_project/Inventory/Item/LeakDetector/common.hpp>
 #include <xyz/openbmc_project/Logging/Entry/common.hpp>
@@ -32,13 +33,16 @@
 
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace inventoryItem =
@@ -55,20 +59,38 @@ namespace state = sdbusplus::common::xyz::openbmc_project::state;
 static constexpr bool debug = false;
 unsigned int DiscreteLeakDetectSensor::lastUID = 0;
 
+static constexpr auto leakDetectionPolicyInterface =
+    "xyz.openbmc_project.Configuration.LeakDetectionPolicy";
+
+namespace
+{
+std::string describeLeakShutdownAction(const std::string& criticalType,
+                                       double reactionDelaySeconds)
+{
+    if (criticalType == "None")
+    {
+        return std::string("no_chassis_shutdown(delay_s=") +
+               std::to_string(static_cast<int>(reactionDelaySeconds)) + ")";
+    }
+    const char* transition =
+        (criticalType == "GracefulShutdown") ? "graceful_shutdown"
+                                             : "force_off";
+    return std::string(transition) + "(delay_s=" +
+           std::to_string(static_cast<int>(reactionDelaySeconds)) + ")";
+}
+} // namespace
+
 DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
     sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     boost::asio::io_context& io, const std::string& sensorType,
     const std::string& sensorSysfsPath, const std::string& sensorName,
     const std::string& configurationPath, float pollRate, uint8_t busId,
-    uint8_t address, const std::string& driver, bool shutdownOnLeak,
-    const unsigned int shutdownDelaySeconds) :
+    uint8_t address, const std::string& driver) :
     sensorType(sensorType), sysfsPath(sensorSysfsPath), name(sensorName),
     sensorPollMs(static_cast<unsigned int>(pollRate * 1000)), busId(busId),
     address(address), driver(driver), objServer(objectServer), waitTimer(io),
-    shutdownTimer(io), dbusConnection(conn), shutdownOnLeak(shutdownOnLeak),
-    shutdownDelaySeconds(shutdownDelaySeconds),
-    didShutdownOnThisOccurrence(false), startedShutdownTimer(false)
+    shutdownTimer(io), dbusConnection(conn), startedShutdownTimer(false)
 {
     DiscreteLeakDetectSensor::lastUID++;
     uid = DiscreteLeakDetectSensor::lastUID;
@@ -161,8 +183,10 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
 
 DiscreteLeakDetectSensor::~DiscreteLeakDetectSensor()
 {
+    leakPolicyMatch_.reset();
     waitTimer.cancel();
     shutdownTimer.cancel();
+    ++shutdownTimerGeneration_;
     objServer.remove_interface(inventoryInterface);
     objServer.remove_interface(inventoryAssociation);
     objServer.remove_interface(stateInterface);
@@ -183,14 +207,8 @@ int DiscreteLeakDetectSensor::readLeakValue(const std::string& filePath)
     return value;
 }
 
-bool DiscreteLeakDetectSensor::isAggregatedLeak()
-{
-    return (name == "leakage_aggr");
-}
-
 int DiscreteLeakDetectSensor::getLeakInfo()
 {
-    std::vector<std::pair<std::string, int>> leakVec;
     auto leakVal = readLeakValue(sysfsPath + "/" + name);
     LeakLevel oldLeakLevel = leakLevel;
 
@@ -201,7 +219,6 @@ int DiscreteLeakDetectSensor::getLeakInfo()
                                      getLeakLevelStatusName(leakLevel));
         opStateInterface->set_property("State",
                                        getLeakLevelStateString(leakLevel));
-        didShutdownOnThisOccurrence = false;
     }
     else
     {
@@ -210,12 +227,6 @@ int DiscreteLeakDetectSensor::getLeakInfo()
                                      getLeakLevelStatusName(leakLevel));
         opStateInterface->set_property("State",
                                        getLeakLevelStateString(leakLevel));
-        if (shutdownOnLeak && !didShutdownOnThisOccurrence &&
-            isAggregatedLeak())
-        {
-            didShutdownOnThisOccurrence = true;
-            startShutdown();
-        }
     }
 
     if (oldLeakLevel != leakLevel)
@@ -223,6 +234,15 @@ int DiscreteLeakDetectSensor::getLeakInfo()
         std::cout << "Leak value changed from "
                   << getLeakLevelStatusName(oldLeakLevel) << " to "
                   << getLeakLevelStatusName(leakLevel) << "\n";
+        if (leakLevel == LeakLevel::NORMAL)
+        {
+            cancelPendingShutdown();
+        }
+        else if (leakLevel == LeakLevel::LEAKAGE &&
+                 criticalReactionTriggersShutdown())
+        {
+            startShutdown();
+        }
         createLeakageLogEntry();
     }
 
@@ -366,23 +386,38 @@ inline void DiscreteLeakDetectSensor::createLeakageLogEntry()
     addEventLog(dbusConnection, messageId, severity, addData);
 }
 
+void DiscreteLeakDetectSensor::cancelPendingShutdown()
+{
+    shutdownTimer.cancel();
+    ++shutdownTimerGeneration_;
+    startedShutdownTimer = false;
+}
+
 void DiscreteLeakDetectSensor::startShutdown()
 {
-    if (shutdownDelaySeconds != 0U)
+    if (!criticalReactionTriggersShutdown())
     {
-        if (startedShutdownTimer)
-        {
-            /*Timer is already pending. no need to resched */
-            return;
-        }
+        return;
+    }
 
-        std::cout << "Setting timer for " << shutdownDelaySeconds
+    shutdownTimer.cancel();
+    ++shutdownTimerGeneration_;
+    const uint64_t gen = shutdownTimerGeneration_;
+
+    const unsigned int delaySec = effectiveShutdownDelaySeconds();
+    if (delaySec != 0U)
+    {
+        std::cout << "Setting timer for " << delaySec
                   << " second(s) delay before shutdown due to " << name
                   << ".\n";
 
         startedShutdownTimer = true;
-        shutdownTimer.expires_after(std::chrono::seconds(shutdownDelaySeconds));
-        shutdownTimer.async_wait([&](const boost::system::error_code& ec) {
+        shutdownTimer.expires_after(std::chrono::seconds(delaySec));
+        shutdownTimer.async_wait([this, gen](const boost::system::error_code& ec) {
+            if (gen != shutdownTimerGeneration_)
+            {
+                return;
+            }
             startedShutdownTimer = false;
             if (ec == boost::asio::error::operation_aborted)
             {
@@ -403,27 +438,295 @@ void DiscreteLeakDetectSensor::startShutdown()
     else
     {
         startedShutdownTimer = false;
-        executeShutdown();
+        if (gen == shutdownTimerGeneration_)
+        {
+            executeShutdown();
+        }
     }
 }
 
 void DiscreteLeakDetectSensor::executeShutdown()
 {
-    std::cout << "Executing shutdown requested by " << name << ".\n";
-    std::variant<std::string> transitionChassisOff =
-        state::convertForMessage(state::Chassis::Transition::Off);
+    if (!criticalReactionTriggersShutdown())
+    {
+        std::cout << "Shutdown suppressed for " << name
+                  << " (policy does not request power off).\n";
+        return;
+    }
 
+    std::cout << "Executing shutdown requested by " << name << ".\n";
+
+    // Same as bmcweb systems.hpp GracefulShutdown: host RequestedHostTransition Off.
+    if (leakPolicyPropsLoaded_ && criticalReactionType_ == "GracefulShutdown")
+    {
+        std::variant<std::string> transitionHost(
+            "xyz.openbmc_project.State.Host.Transition.Off");
+
+        dbusConnection->async_method_call(
+            [](const boost::system::error_code& ec) {
+                if (ec)
+                {
+                    std::cerr << "Failed to execute graceful shutdown due to "
+                              << ec.message() << "\n";
+                }
+            },
+            "xyz.openbmc_project.State.Host",
+            "/xyz/openbmc_project/state/host0",
+            "org.freedesktop.DBus.Properties", "Set",
+            "xyz.openbmc_project.State.Host", "RequestedHostTransition",
+            transitionHost);
+    }
+    else
+    {
+        std::variant<std::string> transitionChassis =
+            state::convertForMessage(state::Chassis::Transition::Off);
+
+        dbusConnection->async_method_call(
+            [](const boost::system::error_code& ec) {
+                if (ec)
+                {
+                    std::cerr << "Failed to execute chassis shutdown due to "
+                              << ec.message() << "\n";
+                }
+            },
+            state::Chassis::interface, "/xyz/openbmc_project/state/chassis0",
+            "org.freedesktop.DBus.Properties", "Set", state::Chassis::interface,
+            "RequestedPowerTransition", transitionChassis);
+    }
+    std::cout << "Issued async D-Bus request for shutdown transition ("
+               << name << ").\n";
+}
+
+void DiscreteLeakDetectSensor::startLeakPolicyDiscovery()
+{
+    std::weak_ptr<DiscreteLeakDetectSensor> weak = weak_from_this();
     dbusConnection->async_method_call(
-        [](const boost::system::error_code& ec) {
+        [weak](const boost::system::error_code& ec,
+               const GetSubTreeType& subtree) {
+            auto self = weak.lock();
+            if (!self)
+            {
+                return;
+            }
             if (ec)
             {
-                std::cerr << "Failed to execute shutdown due to "
+                std::cerr << "DiscreteLeakDetectSensor " << self->name
+                          << ": mapper GetSubTree failed for LeakDetectionPolicy ("
+                          << ec.message() << ")\n";
+                return;
+            }
+            auto st = std::make_shared<GetSubTreeType>(subtree);
+            self->leakPolicyScanIndex(0, st);
+        },
+        mapper::busName, mapper::path, mapper::interface, mapper::subtree,
+        std::string(inventoryPath), 0,
+        std::vector<std::string>{leakDetectionPolicyInterface});
+}
+
+void DiscreteLeakDetectSensor::leakPolicyScanIndex(
+    size_t index, const std::shared_ptr<GetSubTreeType>& subtree)
+{
+    size_t i = index;
+    while (i < subtree->size() && ((*subtree)[i].second.empty()))
+    {
+        i++;
+    }
+    if (i >= subtree->size())
+    {
+        std::cout << "DiscreteLeakDetectSensor " << name
+                  << ": no LeakDetectionPolicy row with LeakDetectorName match\n";
+        return;
+    }
+
+    const std::string& path = (*subtree)[i].first;
+    const std::string& service = (*subtree)[i].second.front().first;
+
+    std::weak_ptr<DiscreteLeakDetectSensor> weak = weak_from_this();
+    dbusConnection->async_method_call(
+        [weak, i, subtree, path, service](
+            const boost::system::error_code& ec,
+            const BasicVariantType& leakDetectorName) {
+            auto self = weak.lock();
+            if (!self)
+            {
+                return;
+            }
+            const std::string* namePtr =
+                std::get_if<std::string>(&leakDetectorName);
+            if (!ec && namePtr != nullptr && *namePtr == self->name)
+            {
+                self->bindLeakPolicy(path, service);
+                return;
+            }
+            self->leakPolicyScanIndex(i + 1, subtree);
+        },
+        service, path, properties::interface, properties::get,
+        std::string(leakDetectionPolicyInterface), "LeakDetectorName");
+}
+
+void DiscreteLeakDetectSensor::bindLeakPolicy(const std::string& path,
+                                              const std::string& service)
+{
+    cancelPendingShutdown();
+    leakPolicyPath_ = path;
+    leakPolicyService_ = service;
+    leakPolicyPropsLoaded_ = false;
+    std::cout << "DiscreteLeakDetectSensor " << name
+              << ": bound LeakDetectionPolicy at " << path << "\n";
+    loadAllPolicyProperties();
+    installLeakPolicyMatch();
+}
+
+void DiscreteLeakDetectSensor::loadAllPolicyProperties()
+{
+    if (!leakPolicyPath_ || leakPolicyService_.empty())
+    {
+        return;
+    }
+    std::weak_ptr<DiscreteLeakDetectSensor> weak = weak_from_this();
+    dbusConnection->async_method_call(
+        [weak](const boost::system::error_code& ec,
+               const SensorBaseConfigMap& map) {
+            auto self = weak.lock();
+            if (!self)
+            {
+                return;
+            }
+            if (ec)
+            {
+                std::cerr << "DiscreteLeakDetectSensor " << self->name
+                          << ": GetAll failed for LeakDetectionPolicy at "
+                          << self->leakPolicyPath_.value_or("?") << ": "
                           << ec.message() << "\n";
                 return;
             }
+            self->applyPolicyConfigMap(map);
         },
-        state::Chassis::interface, "/xyz/openbmc_project/state/chassis0",
-        "org.freedesktop.DBus.Properties", "Set", state::Chassis::interface,
-        "RequestedPowerTransition", transitionChassisOff);
-    std::cout << "executeShutdown done\n";
+        leakPolicyService_, *leakPolicyPath_, properties::interface, "GetAll",
+        std::string(leakDetectionPolicyInterface));
+}
+
+void DiscreteLeakDetectSensor::applyPolicyConfigMap(
+    const SensorBaseConfigMap& map)
+{
+    const std::string prevCritical = criticalReactionType_;
+    const double prevDelay = policyReactionDelaySeconds_;
+
+    auto applyString = [&map](const char* key, std::string& out) {
+        auto it = map.find(key);
+        if (it == map.end())
+        {
+            return;
+        }
+        try
+        {
+            out = std::visit(VariantToStringVisitor(), it->second);
+        }
+        catch (const std::invalid_argument&)
+        {
+        }
+    };
+
+    applyString("CriticalReactionType", criticalReactionType_);
+    applyString("WarningReactionType", warningReactionType_);
+
+    auto delayIt = map.find("ReactionDelaySeconds");
+    if (delayIt != map.end())
+    {
+        try
+        {
+            policyReactionDelaySeconds_ =
+                std::visit(VariantToDoubleVisitor(), delayIt->second);
+        }
+        catch (const std::invalid_argument&)
+        {
+            policyReactionDelaySeconds_ = 0.0;
+        }
+    }
+
+    if constexpr (debug)
+    {
+        std::cout << "DiscreteLeakDetectSensor " << name
+                  << ": policy CriticalReactionType=" << criticalReactionType_
+                  << " WarningReactionType=" << warningReactionType_
+                  << " ReactionDelaySeconds=" << policyReactionDelaySeconds_
+                  << "\n";
+    }
+
+    std::cout << "DiscreteLeakDetectSensor " << name
+              << ": leak shutdown action from policy \""
+              << describeLeakShutdownAction(prevCritical, prevDelay)
+              << "\" -> \""
+              << describeLeakShutdownAction(criticalReactionType_,
+                                          policyReactionDelaySeconds_)
+              << "\" (CriticalReactionType / ReactionDelaySeconds)\n";
+
+    leakPolicyPropsLoaded_ = true;
+
+    if (leakLevel == LeakLevel::LEAKAGE && criticalReactionTriggersShutdown())
+    {
+        startShutdown();
+    }
+    else
+    {
+        cancelPendingShutdown();
+    }
+}
+
+void DiscreteLeakDetectSensor::installLeakPolicyMatch()
+{
+    leakPolicyMatch_.reset();
+    if (!leakPolicyPath_)
+    {
+        return;
+    }
+
+    std::string rule = std::string("type='signal',member='PropertiesChanged',"
+                                   "path='") +
+                       *leakPolicyPath_ +
+                       "',interface='org.freedesktop.DBus.Properties',arg0='" +
+                       leakDetectionPolicyInterface + "'";
+
+    std::weak_ptr<DiscreteLeakDetectSensor> weak = weak_from_this();
+    try
+    {
+        leakPolicyMatch_ = std::make_unique<sdbusplus::bus::match_t>(
+            static_cast<sdbusplus::bus_t&>(*dbusConnection), rule,
+            [weak](sdbusplus::message_t& /*m*/) {
+                if (auto self = weak.lock())
+                {
+                    self->loadAllPolicyProperties();
+                }
+            });
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "DiscreteLeakDetectSensor " << name
+                  << ": failed to install policy match: " << e.what() << "\n";
+    }
+}
+
+bool DiscreteLeakDetectSensor::criticalReactionTriggersShutdown() const
+{
+    return leakPolicyPropsLoaded_ && criticalReactionType_ != "None";
+}
+
+unsigned int DiscreteLeakDetectSensor::effectiveShutdownDelaySeconds() const
+{
+    if (!leakPolicyPropsLoaded_)
+    {
+        return 0U;
+    }
+    double d = policyReactionDelaySeconds_;
+    if (!std::isfinite(d) || d < 0)
+    {
+        return 0U;
+    }
+    constexpr double maxU =
+        static_cast<double>(std::numeric_limits<unsigned int>::max());
+    if (d >= maxU)
+    {
+        return std::numeric_limits<unsigned int>::max();
+    }
+    return static_cast<unsigned int>(d);
 }
