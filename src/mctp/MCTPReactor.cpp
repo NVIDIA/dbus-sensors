@@ -47,6 +47,68 @@ std::optional<uint8_t> eidFromMctpdEndpointPath(const std::string& path)
 }
 } // namespace
 
+void MCTPReactor::trackUsbSetupFailure(const std::shared_ptr<MCTPDevice>& dev)
+{
+    auto usbDevice = std::dynamic_pointer_cast<USBMCTPDDevice>(dev);
+    if (!usbDevice)
+    {
+        return;
+    }
+
+    const int recoveryThreshold = usbDevice->getRecoveryThreshold();
+    if (recoveryThreshold == 0)
+    {
+        // RecoveryThreshold=0 disables auto USB recovery for this target.
+        usbSetupFailureCounts.erase(dev);
+        return;
+    }
+
+    int& failures = usbSetupFailureCounts[dev];
+    failures++;
+    info(
+        "USB setup failure recorded for interface {USB_INTERFACE}: count {FAILURE_COUNT}/{FAILURE_THRESHOLD}",
+        "USB_INTERFACE", usbDevice->getInterface(), "FAILURE_COUNT", failures,
+        "FAILURE_THRESHOLD", recoveryThreshold);
+    if (failures < recoveryThreshold)
+    {
+        return;
+    }
+
+    info(
+        "USB setup failure threshold reached for interface {USB_INTERFACE}; triggering clear-halt recovery",
+        "USB_INTERFACE", usbDevice->getInterface());
+    failures = 0;
+    if (!autoUSBRecoveryEnabled)
+    {
+        info(
+            "USB clear-halt recovery is disabled at runtime; skipping recovery for interface {USB_INTERFACE}",
+            "USB_INTERFACE", usbDevice->getInterface());
+        return;
+    }
+
+    std::string recoveryStatus;
+    if (usbRecovery && usbRecovery->clearBulkOutHalt(usbDevice->getInterface(),
+                                                     recoveryStatus))
+    {
+        info(
+            "USB recovery succeeded for interface {USB_INTERFACE} after setup failures: {RECOVERY_STATUS}",
+            "USB_INTERFACE", usbDevice->getInterface(), "RECOVERY_STATUS",
+            recoveryStatus);
+        return;
+    }
+
+    warning(
+        "USB recovery failed for interface {USB_INTERFACE} after setup failures: {RECOVERY_STATUS}",
+        "USB_INTERFACE", usbDevice->getInterface(), "RECOVERY_STATUS",
+        recoveryStatus);
+}
+
+void MCTPReactor::clearUsbSetupFailureTracking(
+    const std::shared_ptr<MCTPDevice>& dev)
+{
+    usbSetupFailureCounts.erase(dev);
+}
+
 void MCTPReactor::untrackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep)
 {
     server.disassociate(MCTPDEndpoint::path(ep));
@@ -213,11 +275,13 @@ void MCTPReactor::setupEndpoint(const std::shared_ptr<MCTPDevice>& dev)
             }
             // Track failed setup (isRetrying / log suppression; fork addition)
             self->failureCounts[dev]++;
+            self->trackUsbSetupFailure(dev);
             return;
         }
 
         // Clear failure count on success
         self->failureCounts.erase(dev);
+        self->clearUsbSetupFailureTracking(dev);
 
         if (!ep)
         {
@@ -385,13 +449,14 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
     auto device = devices.deviceFor(path);
     if (!device)
     {
-        debug("Unrecognised inventory item: {INVENTORY_PATH}", "INVENTORY_PATH",
-              path);
+        info("Unrecognised inventory item: {INVENTORY_PATH}", "INVENTORY_PATH",
+             path);
         return;
     }
 
-    debug("MCTP device inventory removed at '{INVENTORY_PATH}'",
-          "INVENTORY_PATH", path);
+    info("MCTP device inventory removed at '{INVENTORY_PATH}'",
+         "INVENTORY_PATH", path);
+    clearUsbSetupFailureTracking(device);
 
     switch (states[device->id()])
     {
@@ -408,8 +473,8 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
             // Remove the device from the repository before notifying the device
             // itself of removal so we don't defer its setup
             devices.remove(device);
-            debug("Stopping management of MCTP device at [ {MCTP_DEVICE} ]",
-                  "MCTP_DEVICE", device->describe());
+            info("Stopping management of MCTP device at [ {MCTP_DEVICE} ]",
+                 "MCTP_DEVICE", device->describe());
             next(device, MCTPDeviceState::Removing);
             device->remove();
             break;
@@ -462,6 +527,42 @@ std::optional<uint8_t> MCTPReactor::getStaticEidFromInterface(
     return devices.getStaticEidFromInterface(interface);
 }
 
+bool MCTPReactor::forceUSBRecovery(const std::string& interface,
+                                   std::string& status)
+{
+    info("ForceUSBRecovery requested for interface {USB_INTERFACE}",
+         "USB_INTERFACE", interface);
+    if (interface.empty())
+    {
+        status = "Interface is empty";
+        warning("ForceUSBRecovery rejected: empty interface");
+        return false;
+    }
+
+    if (!usbRecovery)
+    {
+        status = "USB recovery backend unavailable";
+        warning(
+            "ForceUSBRecovery failed for interface {USB_INTERFACE}: backend unavailable",
+            "USB_INTERFACE", interface);
+        return false;
+    }
+    bool success = usbRecovery->clearBulkOutHalt(interface, status);
+    if (success)
+    {
+        info(
+            "ForceUSBRecovery succeeded for interface {USB_INTERFACE}: {STATUS}",
+            "USB_INTERFACE", interface, "STATUS", status);
+    }
+    else
+    {
+        warning(
+            "ForceUSBRecovery failed for interface {USB_INTERFACE}: {STATUS}",
+            "USB_INTERFACE", interface, "STATUS", status);
+    }
+    return success;
+}
+
 void MCTPReactor::onMctpdEndpointInterfacesAdded(sdbusplus::message_t& msg)
 {
     try
@@ -484,4 +585,17 @@ void MCTPReactor::onMctpdEndpointInterfacesAdded(sdbusplus::message_t& msg)
         error("Failed to handle mctpd InterfacesAdded: {ERROR}", "ERROR",
               e.what());
     }
+}
+
+bool MCTPReactor::setAutoUSBRecoveryEnabled(bool enabled)
+{
+    autoUSBRecoveryEnabled = enabled;
+    info("Auto USB clear-halt recovery runtime switch set to {ENABLED}",
+         "ENABLED", autoUSBRecoveryEnabled);
+    return autoUSBRecoveryEnabled;
+}
+
+bool MCTPReactor::isAutoUSBRecoveryEnabled() const
+{
+    return autoUSBRecoveryEnabled;
 }

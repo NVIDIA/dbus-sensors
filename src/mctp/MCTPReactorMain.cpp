@@ -32,6 +32,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <tuple>
 #include <vector>
 
 extern std::set<uint8_t> suppressedHealthCheckEids;
@@ -189,16 +190,42 @@ static void removeInventory(const std::shared_ptr<MCTPReactor>& reactor,
                             sdbusplus::message_t& msg)
 {
     auto [path, removed] =
-        msg.unpack<sdbusplus::object_path, std::set<std::string>>();
+        msg.unpack<sdbusplus::message::object_path, std::set<std::string>>();
+    std::string removedInterfaces;
+    bool first = true;
+    for (const auto& iface : removed)
+    {
+        if (!first)
+        {
+            removedInterfaces.append(", ");
+        }
+        removedInterfaces.append(iface);
+        first = false;
+    }
+
+    info(
+        "InterfacesRemoved received for inventory path '{INVENTORY_PATH}' with interfaces [{REMOVED_INTERFACES}]",
+        "INVENTORY_PATH", path, "REMOVED_INTERFACES", removedInterfaces);
     try
     {
-        if (I2CMCTPDDevice::match(removed) || I3CMCTPDDevice::match(removed) ||
+        bool mctpConfigRemoved =
+            I2CMCTPDDevice::match(removed) || I3CMCTPDDevice::match(removed) ||
             USBMCTPDDevice::match(removed) || SPIMCTPDDevice::match(removed) ||
             XROTMCTPDDevice::match(removed) ||
             PCIeMCTPDDevice::match(removed) ||
-            USBGadgetMCTPDevice::match(removed))
+            USBGadgetMCTPDevice::match(removed);
+        if (mctpConfigRemoved)
         {
+            info(
+                "Unmanaging MCTP device for removed inventory path '{INVENTORY_PATH}'",
+                "INVENTORY_PATH", path);
             reactor->unmanageMCTPDevice(path.str);
+        }
+        else
+        {
+            info(
+                "InterfacesRemoved for '{INVENTORY_PATH}' does not include an MCTP config interface; skipping unmanage",
+                "INVENTORY_PATH", path);
         }
     }
     catch (const std::logic_error& e)
@@ -366,6 +393,13 @@ static void handleGeneralErrorSignal(
                        error.errorMessage, error.resolution);
 }
 
+constexpr const char* mctpReactorDebugPath =
+    "/xyz/openbmc_project/mctp_reactor/debug";
+constexpr const char* mctpReactorDebugInterface =
+    "xyz.openbmc_project.MCTPReactor.Debug";
+constexpr const char* forceUSBRecoveryMethod = "ForceUSBRecovery";
+constexpr const char* autoUSBRecoveryEnabledProperty = "AutoUSBRecoveryEnabled";
+
 int main()
 {
     constexpr std::chrono::seconds period(5);
@@ -374,6 +408,58 @@ int main()
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     DBusAssociationServer associationServer(systemBus);
     auto reactor = std::make_shared<MCTPReactor>(associationServer);
+    sdbusplus::asio::object_server debugObjectServer(systemBus);
+    debugObjectServer.add_manager(mctpReactorDebugPath);
+    auto debugInterface = debugObjectServer.add_interface(
+        mctpReactorDebugPath, mctpReactorDebugInterface);
+    debugInterface->register_property(
+        autoUSBRecoveryEnabledProperty, reactor->isAutoUSBRecoveryEnabled(),
+        [reactor](const bool& request, bool& propertyValue) {
+            propertyValue = reactor->setAutoUSBRecoveryEnabled(request);
+            info(
+                "D-Bus set {PROPERTY_NAME}={PROPERTY_VALUE} on debug interface",
+                "PROPERTY_NAME", autoUSBRecoveryEnabledProperty,
+                "PROPERTY_VALUE", propertyValue);
+            return 1;
+        },
+        [reactor](bool& propertyValue) {
+            bool current = reactor->isAutoUSBRecoveryEnabled();
+            if (current != propertyValue)
+            {
+                info(
+                    "D-Bus get synced {PROPERTY_NAME} from {OLD_VALUE} to {NEW_VALUE}",
+                    "PROPERTY_NAME", autoUSBRecoveryEnabledProperty,
+                    "OLD_VALUE", propertyValue, "NEW_VALUE", current);
+            }
+            return current;
+        });
+    debugInterface->register_method(
+        forceUSBRecoveryMethod,
+        [reactor](
+            const std::string& interface) -> std::tuple<bool, std::string> {
+            info(
+                "Received D-Bus ForceUSBRecovery request for interface {USB_INTERFACE}",
+                "USB_INTERFACE", interface);
+            std::string status;
+            bool success = reactor->forceUSBRecovery(interface, status);
+            if (success)
+            {
+                info(
+                    "ForceUSBRecovery succeeded for interface {USB_INTERFACE}: {RECOVERY_STATUS}",
+                    "USB_INTERFACE", interface, "RECOVERY_STATUS", status);
+            }
+            else
+            {
+                warning(
+                    "ForceUSBRecovery failed for interface {USB_INTERFACE}: {RECOVERY_STATUS}",
+                    "USB_INTERFACE", interface, "RECOVERY_STATUS", status);
+            }
+            info(
+                "D-Bus ForceUSBRecovery response for interface {USB_INTERFACE}: success={SUCCESS}",
+                "USB_INTERFACE", interface, "SUCCESS", success);
+            return std::make_tuple(success, status);
+        });
+    debugInterface->initialize();
     boost::asio::steady_timer clock(io);
 
     std::function<void(const boost::system::error_code&)> alarm =

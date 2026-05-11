@@ -1,6 +1,7 @@
 if not get_option('mctp').allowed()
     subdir_done()
 endif
+libusb_dep = dependency('libusb-1.0')
 
 executable(
     'mctpreactor',
@@ -8,8 +9,9 @@ executable(
     'MCTPReactor.cpp',
     'MCTPEndpoint.cpp',
     'MCTPEndpointUtils.cpp',
+    'USBRecovery.cpp',
     'MCTPCustomDevices.cpp',
-    dependencies: [default_deps, utils_dep],
+    dependencies: [default_deps, utils_dep, libusb_dep],
     install: true,
     install_dir: '/usr/libexec/dbus-sensors',
 )

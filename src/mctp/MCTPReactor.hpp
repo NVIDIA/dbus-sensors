@@ -2,6 +2,7 @@
 
 #include "MCTPDeviceRepository.hpp"
 #include "MCTPEndpoint.hpp"
+#include "USBRecovery.hpp"
 #include "Utils.hpp"
 
 #include <cstdint>
@@ -10,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct AssociationServer
@@ -84,7 +86,11 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
     MCTPReactor() = delete;
     MCTPReactor(const MCTPReactor&) = delete;
     MCTPReactor(MCTPReactor&&) = delete;
-    explicit MCTPReactor(AssociationServer& server) : server(server) {}
+    explicit MCTPReactor(AssociationServer& server,
+                         std::unique_ptr<USBRecovery> usbRecovery =
+                             std::make_unique<LibusbUSBRecovery>()) :
+        server(server), usbRecovery(std::move(usbRecovery))
+    {}
     ~MCTPReactor() = default;
     MCTPReactor& operator=(const MCTPReactor&) = delete;
     MCTPReactor& operator=(MCTPReactor&&) = delete;
@@ -99,6 +105,9 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
     std::optional<std::string> getDeviceName(uint8_t eid);
     std::optional<uint8_t> getStaticEidFromInterface(
         const std::string& interface);
+    bool forceUSBRecovery(const std::string& interface, std::string& status);
+    bool setAutoUSBRecoveryEnabled(bool enabled);
+    bool isAutoUSBRecoveryEnabled() const;
 
     /** mctpd ObjectManager InterfacesAdded on an endpoint object path. */
     void onMctpdEndpointInterfacesAdded(sdbusplus::message_t& msg);
@@ -112,11 +121,16 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
 
     // Map to track failure counts for each device
     std::map<std::shared_ptr<MCTPDevice>, int> failureCounts;
+    std::map<std::shared_ptr<MCTPDevice>, int> usbSetupFailureCounts;
 
     void deferSetup(const std::shared_ptr<MCTPDevice>& dev);
+    void trackUsbSetupFailure(const std::shared_ptr<MCTPDevice>& dev);
+    void clearUsbSetupFailureTracking(const std::shared_ptr<MCTPDevice>& dev);
     void setupEndpoint(const std::shared_ptr<MCTPDevice>& dev);
     void trackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep);
     void untrackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep);
     void next(const std::shared_ptr<MCTPDevice>& dev, MCTPDeviceState next);
     void terminate(const std::shared_ptr<MCTPDevice>& dev);
+    bool autoUSBRecoveryEnabled = false;
+    std::unique_ptr<USBRecovery> usbRecovery;
 };

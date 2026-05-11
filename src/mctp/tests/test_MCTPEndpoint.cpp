@@ -35,6 +35,26 @@ class TestUSBMCTPDDevice : public USBMCTPDDevice
 {
   public:
     using USBMCTPDDevice::USBMCTPDDevice;
+
+    // Compatibility overload for existing tests that were authored before
+    // USBMCTPDDevice gained the explicit recoveryThreshold parameter.
+    TestUSBMCTPDDevice(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const std::string& name, const std::string& interface,
+        const std::vector<uint8_t>& physaddr,
+        std::optional<uint8_t> staticEID = std::nullopt,
+        std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
+        std::optional<uint8_t> bridgePoolEndEid = std::nullopt,
+        const std::optional<std::vector<uint8_t>>& ignoreEids = std::nullopt,
+        const std::optional<std::vector<uint8_t>>& ignoreMessageTypes =
+            std::nullopt,
+        std::optional<uint8_t> pollingInterval = std::nullopt,
+        const std::vector<std::string>& deviceNames = {}) :
+        USBMCTPDDevice(connection, name, interface, physaddr, staticEID,
+                       bridgePoolStartEid, bridgePoolEndEid, ignoreEids,
+                       ignoreMessageTypes, 0, pollingInterval, deviceNames)
+    {}
+
     void setEndpointForTest(const std::shared_ptr<MCTPDEndpoint>& ep)
     {
         endpoint = ep;
