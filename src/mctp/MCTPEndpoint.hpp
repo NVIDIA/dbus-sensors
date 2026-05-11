@@ -539,16 +539,40 @@ class USBMCTPDDevice : public MCTPDDevice
         const std::optional<std::vector<uint8_t>>& ignoreEids = std::nullopt,
         const std::optional<std::vector<uint8_t>>& ignoreMessageTypes =
             std::nullopt,
+        uint8_t recoveryThreshold = 0,
         std::optional<uint8_t> pollingInterval = std::nullopt,
         const std::vector<std::string>& deviceNames = {}) :
         MCTPDDevice(connection, name, interface, physaddr, staticEID,
                     bridgePoolStartEid, bridgePoolEndEid, ignoreEids,
-                    ignoreMessageTypes, pollingInterval, deviceNames)
+                    ignoreMessageTypes, pollingInterval, deviceNames),
+        recoveryThreshold(recoveryThreshold)
+    {}
+    // Backward-compatible overload for call sites that still provide
+    // pollingInterval as the 10th positional argument.
+    USBMCTPDDevice(
+        const std::shared_ptr<sdbusplus::asio::connection>& connection,
+        const std::string& name, const std::string& interface,
+        const std::vector<uint8_t>& physaddr, std::optional<uint8_t> staticEID,
+        std::optional<uint8_t> bridgePoolStartEid,
+        std::optional<uint8_t> bridgePoolEndEid,
+        const std::optional<std::vector<uint8_t>>& ignoreEids,
+        const std::optional<std::vector<uint8_t>>& ignoreMessageTypes,
+        std::optional<uint8_t> pollingInterval,
+        const std::vector<std::string>& deviceNames = {}) :
+        USBMCTPDDevice(connection, name, interface, physaddr, staticEID,
+                       bridgePoolStartEid, bridgePoolEndEid, ignoreEids,
+                       ignoreMessageTypes, 0, pollingInterval, deviceNames)
     {}
     ~USBMCTPDDevice() override = default;
 
+    uint8_t getRecoveryThreshold() const
+    {
+        return recoveryThreshold;
+    }
+
   private:
     static constexpr const char* configType = "MCTPUSBTarget";
+    const uint8_t recoveryThreshold;
 };
 
 class SPIMCTPDDevice : public MCTPDDevice

@@ -20,6 +20,7 @@ if not gtest_dep.found() or not gmock_dep.found()
 endif
 
 ut_deps_list = [gtest_dep]
+libusb_dep = dependency('libusb-1.0')
 
 ut_deps_list += default_deps
 
@@ -75,11 +76,42 @@ test(
         'test_MCTPReactor',
         'test_MCTPReactor.cpp',
         '../MCTPReactor.cpp',
+        '../USBRecovery.cpp',
         '../MCTPEndpoint.cpp',
         '../MCTPEndpointUtils.cpp',
         'phosphor_logging_drain.cpp',
         cpp_args: boost_asio_test_backend_args,
-        dependencies: [gmock_dep, ut_deps_list, utils_dep],
+        dependencies: [gmock_dep, ut_deps_list, utils_dep, libusb_dep],
+        implicit_include_directories: false,
+        include_directories: '..',
+    ),
+)
+
+# Intercept libusb descriptor fetches so findBulkOutEndpoint can be driven
+# through all branches with crafted descriptors (no real USB device needed).
+usb_recovery_wrap_link_args = [
+    '-Wl,--wrap,libusb_get_active_config_descriptor',
+    '-Wl,--wrap,libusb_get_config_descriptor',
+    '-Wl,--wrap,libusb_free_config_descriptor',
+    '-Wl,--wrap,libusb_wrap_sys_device',
+    '-Wl,--wrap,libusb_get_device',
+    '-Wl,--wrap,libusb_kernel_driver_active',
+    '-Wl,--wrap,libusb_detach_kernel_driver',
+    '-Wl,--wrap,libusb_attach_kernel_driver',
+    '-Wl,--wrap,libusb_claim_interface',
+    '-Wl,--wrap,libusb_release_interface',
+    '-Wl,--wrap,libusb_clear_halt',
+]
+
+test(
+    'USBRecovery',
+    executable(
+        'test_USBRecovery',
+        'test_USBRecovery.cpp',
+        'phosphor_logging_drain.cpp',
+        cpp_args: boost_asio_test_backend_args,
+        link_args: usb_recovery_wrap_link_args,
+        dependencies: [gmock_dep, ut_deps_list, utils_dep, libusb_dep],
         implicit_include_directories: false,
         include_directories: '..',
     ),
@@ -158,6 +190,7 @@ test(
         'test_MCTPReactorMain',
         'test_MCTPReactorMain.cpp',
         '../MCTPReactor.cpp',
+        '../USBRecovery.cpp',
         '../MCTPEndpoint.cpp',
         '../MCTPEndpointUtils.cpp',
         '../MCTPCustomDevices.cpp',
@@ -168,7 +201,7 @@ test(
             '-fno-access-control',
         ],
         link_args: custom_devices_wrap_link_args,
-        dependencies: [gmock_dep, ut_deps_list, utils_dep],
+        dependencies: [gmock_dep, ut_deps_list, utils_dep, libusb_dep],
         implicit_include_directories: false,
         include_directories: '..',
     ),

@@ -1,5 +1,6 @@
 #include "MCTPEndpoint.hpp"
 #include "MCTPReactor.hpp"
+#include "USBRecovery.hpp"
 #include "Utils.hpp"
 
 #include <boost/asio/io_context.hpp>
@@ -60,6 +61,15 @@ class MockAssociationServer : public AssociationServer
     MOCK_METHOD(void, disassociate, (const std::string& path), (override));
 };
 
+class MockUSBRecovery : public USBRecovery
+{
+  public:
+    ~MockUSBRecovery() override = default;
+
+    MOCK_METHOD(bool, clearBulkOutHalt,
+                (const std::string& interface, std::string& status),
+                (override));
+};
 class TestReactorMCTPDDevice : public MCTPDDevice
 {
   public:
@@ -119,6 +129,46 @@ class TestReactorMCTPDDevice : public MCTPDDevice
                 this->shared_from_this()));
         }
     }
+};
+
+class TestUSBMCTPDDevice : public USBMCTPDDevice
+{
+  public:
+    TestUSBMCTPDDevice(const std::string& interface = "usbtest0",
+                       uint8_t recoveryThreshold = 5) :
+        USBMCTPDDevice(nullptr, "usb-reactor-test", interface,
+                       std::vector<uint8_t>{}, std::nullopt, std::nullopt,
+                       std::nullopt, std::nullopt, std::nullopt,
+                       recoveryThreshold, std::nullopt, {"usb-reactor-test"})
+    {}
+
+    void setup(std::function<void(const std::error_code& ec,
+                                  const std::shared_ptr<MCTPEndpoint>& ep)>&&
+                   added) override
+    {
+        if (setupHandler)
+        {
+            setupHandler(std::move(added));
+            return;
+        }
+        added({}, nullptr);
+    }
+
+    void remove() override
+    {
+        removeCalls++;
+    }
+
+    std::string describe() const override
+    {
+        return "test-usb-mctpd-device";
+    }
+
+    int removeCalls = 0;
+    std::function<void(
+        std::function<void(const std::error_code&,
+                           const std::shared_ptr<MCTPEndpoint>&)>&&)>
+        setupHandler;
 };
 
 class MCTPReactorFixture : public testing::Test
@@ -530,6 +580,171 @@ TEST(MCTPReactor, requestSetupCallbackAfterReactorDestroyedIsSafeNoop)
     {
         GTEST_SKIP() << "DBus unavailable in this environment: " << ex.what();
     }
+}
+
+TEST(MCTPReactor, usbRecoveryNotTriggeredBeforeFiveConsecutiveFailures)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-fail4");
+
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt(testing::_, testing::_))
+        .Times(0);
+    EXPECT_CALL(assoc, associate(testing::_, testing::_)).Times(0);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+
+    reactor->manageMCTPDevice("/test/usb-fail4", device); // failure 1
+    reactor->tick();                                      // failure 2
+    reactor->tick();                                      // failure 3
+    reactor->tick();                                      // failure 4
+
+    reactor->unmanageMCTPDevice("/test/usb-fail4");
+}
+
+TEST(MCTPReactor, usbRecoveryTriggeredAtFifthConsecutiveFailure)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
+    reactor->setAutoUSBRecoveryEnabled(true);
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-fail5");
+
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt("usb-fail5", testing::_))
+        .WillOnce(testing::DoAll(testing::SetArgReferee<1>("cleared"),
+                                 testing::Return(true)));
+    EXPECT_CALL(assoc, associate(testing::_, testing::_)).Times(0);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+
+    reactor->manageMCTPDevice("/test/usb-fail5", device); // failure 1
+    reactor->tick();                                      // failure 2
+    reactor->tick();                                      // failure 3
+    reactor->tick();                                      // failure 4
+    reactor->tick(); // failure 5 -> recovery
+
+    reactor->unmanageMCTPDevice("/test/usb-fail5");
+}
+
+TEST(MCTPReactor, usbFailureStreakResetsAfterSuccessfulSetup)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
+    reactor->setAutoUSBRecoveryEnabled(true);
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-reset");
+
+    int attempt = 0;
+    device->setupHandler = [&attempt, &device](auto&& added) {
+        attempt++;
+        // fail x4, succeed once (reset streak), then fail x5.
+        if (attempt <= 4 || (attempt >= 6 && attempt <= 10))
+        {
+            std::forward<decltype(added)>(
+                added)(std::make_error_code(std::errc::timed_out), nullptr);
+            return;
+        }
+        auto ep = std::make_shared<MockMCTPEndpoint>();
+        EXPECT_CALL(*ep, subscribe(testing::_, testing::_, testing::_))
+            .Times(1);
+        EXPECT_CALL(*ep, describe())
+            .WillRepeatedly(testing::Return("usb-reset-endpoint"));
+        EXPECT_CALL(*ep, device()).WillRepeatedly(testing::Return(device));
+        EXPECT_CALL(*ep, network()).WillRepeatedly(testing::Return(1));
+        EXPECT_CALL(*ep, eid()).WillRepeatedly(testing::Return(8));
+        std::forward<decltype(added)>(added)(std::error_code{}, ep);
+    };
+
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt("usb-reset", testing::_))
+        .Times(1)
+        .WillOnce(testing::DoAll(testing::SetArgReferee<1>("cleared"),
+                                 testing::Return(true)));
+    EXPECT_CALL(assoc, associate(testing::_, testing::_)).Times(1);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+
+    reactor->manageMCTPDevice("/test/usb-reset", device); // failure 1
+    reactor->tick();                                      // failure 2
+    reactor->tick();                                      // failure 3
+    reactor->tick();                                      // failure 4
+    reactor->tick();                                      // success -> reset
+
+    reactor->manageMCTPDevice("/test/usb-reset",
+                              device); // failure 1 (new streak)
+    reactor->tick();                   // failure 2
+    reactor->tick();                   // failure 3
+    reactor->tick();                   // failure 4
+    reactor->tick();                   // failure 5 -> recovery
+
+    reactor->unmanageMCTPDevice("/test/usb-reset");
+}
+
+TEST(MCTPReactor, nonUsbFailuresDoNotTriggerUsbRecovery)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
+    auto device = std::make_shared<MockMCTPDevice>();
+
+    EXPECT_CALL(*device, describe())
+        .WillRepeatedly(testing::Return("mock non-usb device"));
+    EXPECT_CALL(*device, setup(testing::_))
+        .WillRepeatedly(testing::InvokeArgument<0>(
+            std::make_error_code(std::errc::timed_out), nullptr));
+    EXPECT_CALL(*device, remove()).Times(1);
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt(testing::_, testing::_))
+        .Times(0);
+
+    reactor->manageMCTPDevice("/test/non-usb-fail", device);
+    reactor->tick();
+    reactor->tick();
+    reactor->tick();
+    reactor->tick();
+    reactor->tick();
+
+    reactor->unmanageMCTPDevice("/test/non-usb-fail");
+}
+
+TEST(MCTPReactor, unmanageClearsUsbFailureStreak)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-unmanage-reset");
+
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt(testing::_, testing::_))
+        .Times(0);
+
+    reactor->manageMCTPDevice("/test/usb-unmanage-reset", device); // failure 1
+    reactor->tick();                                               // failure 2
+    reactor->tick();                                               // failure 3
+    reactor->tick();                                               // failure 4
+
+    reactor->unmanageMCTPDevice("/test/usb-unmanage-reset");
+
+    reactor->manageMCTPDevice("/test/usb-unmanage-reset", device); // reset to 1
+    reactor->tick();                                               // 2
+    reactor->tick();                                               // 3
+    reactor->tick();                                               // 4
+    reactor->unmanageMCTPDevice("/test/usb-unmanage-reset");
 }
 
 TEST_F(MCTPReactorFixture, setupFailureMarksBroadcastAsRetrying)

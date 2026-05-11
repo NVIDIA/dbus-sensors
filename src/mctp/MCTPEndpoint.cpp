@@ -101,6 +101,14 @@ MCTPDDevice::MCTPDDevice(
 
 void MCTPDDevice::onDiscoveryMatchRule()
 {
+    if (!connection)
+    {
+        warning(
+            "Skipping DiscoveryNotify setup for interface {INTERFACE}: connection unavailable",
+            "INTERFACE", this->interface);
+        return;
+    }
+
     std::string interfacePath =
         std::string(mctpdControlPath) + "/interfaces/" + this->interface;
     const auto matchRule =
@@ -1452,6 +1460,7 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
     auto mIgnoreEids = iface.find("IgnoreEIDs");
     auto mIgnoreMessageTypes = iface.find("IgnoreMessageTypes");
+    auto mRecoveryThreshold = iface.find("RecoveryThreshold");
     if (mType == iface.end())
     {
         throw std::invalid_argument(
@@ -1672,6 +1681,35 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
         }
     }
 
+    uint8_t recoveryThreshold = 0;
+    if (mRecoveryThreshold != iface.end())
+    {
+        auto sRecoveryThreshold =
+            std::visit(VariantToStringVisitor(), mRecoveryThreshold->second);
+        unsigned int parsedRecoveryThreshold = 0;
+        auto [rptr, rec] = std::from_chars(
+            sRecoveryThreshold.data(),
+            sRecoveryThreshold.data() + sRecoveryThreshold.size(),
+            parsedRecoveryThreshold);
+        if (rec != std::errc{} ||
+            rptr != sRecoveryThreshold.data() + sRecoveryThreshold.size() ||
+            parsedRecoveryThreshold > 10)
+        {
+            throw std::invalid_argument("Bad RecoveryThreshold value");
+        }
+        recoveryThreshold = static_cast<uint8_t>(parsedRecoveryThreshold);
+        info(
+            "Configured RecoveryThreshold={RECOVERY_THRESHOLD} for USB device {USB_DEVICE}",
+            "RECOVERY_THRESHOLD", static_cast<unsigned int>(recoveryThreshold),
+            "USB_DEVICE", interface);
+    }
+    else
+    {
+        info(
+            "RecoveryThreshold not provided for USB device {USB_DEVICE}; defaulting to 0 (auto recovery disabled)",
+            "USB_DEVICE", interface);
+    }
+
     auto pollingInterval = getPollingInterval(iface);
 
     try
@@ -1681,19 +1719,19 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
             return std::make_shared<USBMCTPDDevice>(
                 connection, name, interface, address, staticEID.value(),
                 bridgePoolStartEid.value(), bridgePoolEndEid, ignoreEids,
-                ignoreMessageTypes, pollingInterval, names);
+                ignoreMessageTypes, recoveryThreshold, pollingInterval, names);
         }
         if (staticEID.has_value())
         {
             return std::make_shared<USBMCTPDDevice>(
                 connection, name, interface, address, staticEID.value(),
                 std::nullopt, bridgePoolEndEid, std::nullopt,
-                ignoreMessageTypes, pollingInterval, names);
+                ignoreMessageTypes, recoveryThreshold, pollingInterval, names);
         }
         return std::make_shared<USBMCTPDDevice>(
             connection, name, interface, address, std::nullopt, std::nullopt,
-            bridgePoolEndEid, std::nullopt, ignoreMessageTypes, pollingInterval,
-            names);
+            bridgePoolEndEid, std::nullopt, ignoreMessageTypes,
+            recoveryThreshold, pollingInterval, names);
     }
     catch (const MCTPException& ex)
     {
