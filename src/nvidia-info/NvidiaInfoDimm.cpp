@@ -20,6 +20,7 @@
 
 #include <phosphor-logging/lg2.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -101,7 +102,7 @@ void NvidiaDimm::validate()
 }
 
 void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
-                         const std::string& dimmPath)
+                         const std::string& dimmPath, std::size_t slotIndex)
 {
     const std::string memTypeStr =
         std::string(dimmDeviceTypePrefix) + memoryTypeName(memoryType);
@@ -142,7 +143,13 @@ void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
     auto& location =
         add(dimmPath, "xyz.openbmc_project.Inventory.Decorator.LocationCode",
             objServer);
-    location.register_property("LocationCode", locator);
+    // SOCAMM modules use a slot-relative label (SOCAMM_0…SOCAMM_7) per the
+    // vr-nvl-hmc Redfish mockup. The raw MemoryDeviceLocator from SatMC SMBIOS
+    // data is an LP5x_N string (DRAM technology), not the socket label.
+    const std::string locationCode = (formFactor == FormFactor::SOCAMM)
+                                         ? "SOCAMM_" + std::to_string(slotIndex)
+                                         : locator;
+    location.register_property("LocationCode", locationCode);
 
     auto& locationType =
         add(dimmPath, "xyz.openbmc_project.Inventory.Decorator.Location",
