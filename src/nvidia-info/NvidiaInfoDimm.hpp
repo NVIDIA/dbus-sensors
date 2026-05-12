@@ -21,6 +21,7 @@
 
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -46,8 +47,10 @@ class NvidiaDimm : public Publisher
     void validate();
 
     // Registers the D-Bus interfaces. Associations are empty until attach().
+    // slotIndex is the 0-based position within the ProcessorModule (0–7) and
+    // is used to derive LocationCode for socketed form factors (e.g. SOCAMM_0).
     void publish(sdbusplus::asio::object_server& objServer,
-                 const std::string& dimmPath);
+                 const std::string& dimmPath, std::size_t slotIndex);
 
     // Associate this DIMM with the given motherboard path. Idempotent;
     // must be called after publish().
