@@ -32,6 +32,8 @@ static constexpr const char* service = "xyz.openbmc_project.WriteProtectSensor";
 static constexpr const char* softwareWriteProtectObjPath =
     "/xyz/openbmc_project/software/";
 static constexpr const char* storefile = "/var/lib/write_protected";
+static constexpr const char* writeProtectParentChassisId =
+    WRITEPROTECT_PARENT_CHASSIS_ID;
 
 namespace properties
 {
@@ -94,7 +96,7 @@ class WriteProtect : public std::enable_shared_from_this<WriteProtect>
     bool objEmpty();
 
     // Setup write protect interface
-    void setupWriteProtectIf(const std::string& parentChassisId);
+    void setupWriteProtectIf();
 
   private:
     struct ObjIfaces
@@ -110,8 +112,7 @@ class WriteProtect : public std::enable_shared_from_this<WriteProtect>
     bool setWriteProtect(const bool& value);
 
     // Create write protect interface
-    void createWriteProtectIf(const std::string& parentChassisId,
-                              const boost::system::error_code& e);
+    void createWriteProtectIf(const boost::system::error_code& e);
 
     void addLine(const std::string& lineLabel, bool value);
 

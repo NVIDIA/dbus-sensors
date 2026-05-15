@@ -18,6 +18,7 @@
 #include "WriteProtectSensor.hpp"
 
 #include <gpiod.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/vtable.hpp>
 
 #include <chrono>
@@ -25,9 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <iostream>
 #include <memory>
-#include <ostream>
 #include <string>
 #include <utility>
 
@@ -111,9 +110,8 @@ bool WriteProtect::setWriteProtect(const bool& value)
         }
         catch (std::exception& e)
         {
-            std::cerr << "Failed gpio line write "
-                      << std::string(config.gpioLine)
-                      << " error is: " << e.what() << std::endl;
+            lg2::error("Failed gpio line write {GPIO_LINE}: {ERROR}",
+                       "GPIO_LINE", config.gpioLine, "ERROR", e.what());
             continue;
         }
         config.writeprotected = value;
@@ -146,18 +144,17 @@ bool WriteProtect::readWriteProtect()
     return globalWriteProtected;
 }
 
-void WriteProtect::createWriteProtectIf(const std::string& parentChassisId,
-                                        const boost::system::error_code& e)
+void WriteProtect::createWriteProtectIf(const boost::system::error_code& e)
 {
     if (e)
     {
-        std::cerr << "Failed to create Write Protect dbus interface"
-                  << " error is: " << e.what() << std::endl;
+        lg2::error("Failed to create Write Protect dbus interface: {ERROR}",
+                   "ERROR", e.message());
         return;
     }
 
     settingsIfPtr = objectServerPtr->add_interface(
-        std::string(softwareWriteProtectObjPath) + parentChassisId,
+        std::string(softwareWriteProtectObjPath) + writeProtectParentChassisId,
         write_protect::interfaces::settingsIf);
 
     settingsIfPtr->register_property_rw<bool>(
@@ -174,12 +171,12 @@ void WriteProtect::createWriteProtectIf(const std::string& parentChassisId,
         write_protect::properties::propertyWriteProtected,
         std::filesystem::exists(writeProtectFile));
 }
-void WriteProtect::setupWriteProtectIf(const std::string& parentChassisId)
+void WriteProtect::setupWriteProtectIf()
 {
     timer.cancel();
     timer.expires_after(std::chrono::seconds(
         /*delay to setup interface*/ 3));
-    timer.async_wait(std::bind_front(&WriteProtect::createWriteProtectIf, this,
-                                     parentChassisId));
+    timer.async_wait(
+        std::bind_front(&WriteProtect::createWriteProtectIf, this));
 }
 } // namespace write_protect

@@ -335,6 +335,11 @@ if get_option('write-protect').enabled()
         'writeprotectsensor',
         'WriteProtectSensor.cpp',
         'WriteProtectSensorMain.cpp',
+        cpp_args: [
+            '-DWRITEPROTECT_PARENT_CHASSIS_ID="' + get_option(
+                'writeprotect-parent-chassis-id',
+            ) + '"',
+        ],
         dependencies: [sdbusplus, gpiodcxx, uring, phosphor_logging_dep],
         implicit_include_directories: false,
         include_directories: '../include',
