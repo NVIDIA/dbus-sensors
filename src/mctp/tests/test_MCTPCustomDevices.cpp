@@ -268,6 +268,18 @@ TEST_F(USBGadgetDeviceTest, eidReturnsConstructedValue)
     EXPECT_EQ(device->eid(), 99);
 }
 
+TEST_F(USBGadgetDeviceTest, getNameForEidReturnsConfiguredNameOrGadgetName)
+{
+    auto namedDevice = std::make_shared<USBGadgetMCTPDevice>(
+        conn, "mctpusb0", 10, "usb-friendly-name");
+    EXPECT_EQ(namedDevice->getNameForEid(10).value_or(""), "usb-friendly-name");
+    EXPECT_FALSE(namedDevice->getNameForEid(11).has_value());
+
+    auto unnamedDevice =
+        std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb1", 20);
+    EXPECT_EQ(unnamedDevice->getNameForEid(20).value_or(""), "mctpusb1");
+}
+
 TEST_F(USBGadgetDeviceTest, setupWhenAlreadySetupReturnsError)
 {
     auto device = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);

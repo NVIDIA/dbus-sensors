@@ -219,6 +219,27 @@ TEST(MCTPDeviceRepository, getStaticEidFromInterfaceReturnsValueForKnownDevice)
     EXPECT_FALSE(repo.getStaticEidFromInterface("usb1").has_value());
 }
 
+TEST(MCTPDeviceRepository, markDiscoveredMctpEndpointEidHandlesMixedDevices)
+{
+    MCTPDeviceRepository repo;
+    EXPECT_NO_THROW(repo.markDiscoveredMctpEndpointEid(44));
+
+    auto plain = std::make_shared<MockMCTPDevice>();
+    auto mctp = std::make_shared<USBMCTPDDevice>(
+        nullptr, "usb-main", "usb0", std::vector<uint8_t>{}, uint8_t{44},
+        uint8_t{45}, uint8_t{46}, std::nullopt, std::nullopt, std::nullopt,
+        std::vector<std::string>{"usb-main", "bridge-a", "bridge-b"});
+
+    repo.add("/inv/plain", plain);
+    repo.add("/inv/usb0", mctp);
+
+    EXPECT_NO_THROW(repo.markDiscoveredMctpEndpointEid(44));
+    EXPECT_NO_THROW(repo.markDiscoveredMctpEndpointEid(45));
+    EXPECT_NO_THROW(repo.markDiscoveredMctpEndpointEid(99));
+    EXPECT_EQ(repo.getNameForEid(44).value_or(""), "usb-main");
+    EXPECT_EQ(repo.getNameForEid(45).value_or(""), "bridge-a");
+}
+
 TEST(MCTPDeviceRepository, getNameForEidSkipsNonMctpdDevices)
 {
     MCTPDeviceRepository repo;

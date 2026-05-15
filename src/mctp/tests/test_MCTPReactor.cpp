@@ -2,8 +2,11 @@
 #include "MCTPReactor.hpp"
 #include "Utils.hpp"
 
+#include <systemd/sd-bus.h>
+
 #include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/connection.hpp>
+#include <sdbusplus/message.hpp>
 
 #include <cstdint>
 #include <exception>
@@ -13,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -59,6 +63,57 @@ class MockAssociationServer : public AssociationServer
                 (override));
     MOCK_METHOD(void, disassociate, (const std::string& path), (override));
 };
+
+namespace
+{
+constexpr const char* kMctpdEndpointControlIface =
+    "au.com.codeconstruct.MCTP.Endpoint1";
+
+sd_bus_message* buildReactorInterfacesAddedMessage(
+    const std::string& objectPath, const std::string& interfaceName,
+    bool includeInterface)
+{
+    sd_bus* bus = nullptr;
+    if (sd_bus_new(&bus) < 0 || bus == nullptr)
+    {
+        return nullptr;
+    }
+
+    (void)sd_bus_set_address(bus, "unix:abstract=dbus-sensors-test-fake");
+    (void)sd_bus_start(bus);
+
+    sd_bus_message* msg = nullptr;
+    const int newSignalRc = sd_bus_message_new_signal(
+        bus, &msg, "/au/com/codeconstruct/mctp1",
+        "org.freedesktop.DBus.ObjectManager", "InterfacesAdded");
+    if (newSignalRc < 0 || msg == nullptr)
+    {
+        sd_bus_unref(bus);
+        return nullptr;
+    }
+
+    const char* path = objectPath.c_str();
+    (void)sd_bus_message_append_basic(msg, 'o', path);
+
+    (void)sd_bus_message_open_container(msg, 'a', "{sa{sv}}");
+    if (includeInterface)
+    {
+        (void)sd_bus_message_open_container(msg, 'e', "sa{sv}");
+        const char* iface = interfaceName.c_str();
+        (void)sd_bus_message_append_basic(msg, 's', iface);
+        (void)sd_bus_message_open_container(msg, 'a', "{sv}");
+        (void)sd_bus_message_close_container(msg);
+        (void)sd_bus_message_close_container(msg);
+    }
+    (void)sd_bus_message_close_container(msg);
+
+    (void)sd_bus_message_seal(msg, 1, 0);
+    (void)sd_bus_message_rewind(msg, 1);
+
+    sd_bus_unref(bus);
+    return msg;
+}
+} // namespace
 
 class TestReactorMCTPDDevice : public MCTPDDevice
 {
@@ -464,6 +519,54 @@ TEST(MCTPReactor, getStaticEidFromInterfaceReturnsNulloptWhenNotTracked)
     MockAssociationServer assoc{};
     auto reactor = std::make_shared<MCTPReactor>(assoc);
     EXPECT_FALSE(reactor->getStaticEidFromInterface("usb0").has_value());
+}
+
+TEST(MCTPReactor, onMctpdEndpointInterfacesAddedHandlesEndpointSignal)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    sd_bus_message* rawMsg = buildReactorInterfacesAddedMessage(
+        "/au/com/codeconstruct/mctp1/networks/1/endpoints/44",
+        kMctpdEndpointControlIface, true);
+    if (rawMsg == nullptr)
+    {
+        GTEST_SKIP() << "sd_bus_message_new_signal requires an initialized bus";
+    }
+
+    sdbusplus::message_t msg(rawMsg, std::false_type{});
+    EXPECT_NO_THROW(reactor->onMctpdEndpointInterfacesAdded(msg));
+}
+
+TEST(MCTPReactor, onMctpdEndpointInterfacesAddedIgnoresBadEndpointPath)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    sd_bus_message* rawMsg = buildReactorInterfacesAddedMessage(
+        "/au/com/codeconstruct/mctp1/networks/1/endpoints/not-a-number",
+        kMctpdEndpointControlIface, true);
+    if (rawMsg == nullptr)
+    {
+        GTEST_SKIP() << "sd_bus_message_new_signal requires an initialized bus";
+    }
+
+    sdbusplus::message_t msg(rawMsg, std::false_type{});
+    EXPECT_NO_THROW(reactor->onMctpdEndpointInterfacesAdded(msg));
+}
+
+TEST(MCTPReactor, onMctpdEndpointInterfacesAddedIgnoresMissingControlInterface)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    sd_bus_message* rawMsg = buildReactorInterfacesAddedMessage(
+        "/au/com/codeconstruct/mctp1/networks/1/endpoints/44",
+        kMctpdEndpointControlIface, false);
+    if (rawMsg == nullptr)
+    {
+        GTEST_SKIP() << "sd_bus_message_new_signal requires an initialized bus";
+    }
+
+    sdbusplus::message_t msg(rawMsg, std::false_type{});
+    EXPECT_NO_THROW(reactor->onMctpdEndpointInterfacesAdded(msg));
 }
 
 TEST(MCTPReactor, requestSetupCallbackTriggersReactorSetupPathForMctpdDevice)
