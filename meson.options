@@ -180,6 +180,12 @@ option(
     description: 'Enable Write Protect.',
 )
 option(
+    'writeprotect-parent-chassis-id',
+    type: 'string',
+    value: 'Chassis_0',
+    description: 'writeprotectsensor Software.Settings parent chassis id.',
+)
+option(
     'shmem',
     type: 'feature',
     value: 'enabled',

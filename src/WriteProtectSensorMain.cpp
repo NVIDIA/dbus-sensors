@@ -188,7 +188,7 @@ void addSoftwareObject(
 {
     if (writeprotector->objEmpty())
     {
-        writeprotector->setupWriteProtectIf(config.parentChassisId);
+        writeprotector->setupWriteProtectIf();
     }
     if (writeprotector->hasObj(config.name))
     {
