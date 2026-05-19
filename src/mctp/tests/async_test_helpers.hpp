@@ -11,6 +11,7 @@
 
 #include <sdbusplus/sdbus.hpp>
 
+#include <cerrno>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -28,6 +29,7 @@ struct PendingAsync
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 extern int gFakeSdBusFd;
 extern bool gMockSdBusCallSuccess;
+extern int gSdBusCallCount;
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 // TestSdBusInterface: overrides sd_bus methods used by
@@ -117,6 +119,7 @@ class TestSdBusInterface : public sdbusplus::SdBusImpl
                     sd_bus_error* /*ret_error*/,
                     sd_bus_message** reply) override
     {
+        ++gSdBusCallCount;
         if (gMockSdBusCallSuccess)
         {
             if (reply != nullptr)
@@ -180,6 +183,11 @@ void driveAsyncCallAssignEndpoint(uint8_t eid, int32_t network,
 
 // driveAsyncCallError: fire with a D-Bus method error reply (sets ec != 0).
 void driveAsyncCallError();
+
+// driveAsyncCallUnknownInterface: fire with an UnknownInterface D-Bus method
+// error reply. Use when a Properties.GetAll probe should model an explicitly
+// absent interface.
+void driveAsyncCallUnknownInterface();
 
 // driveAsyncCallErrorTimedOut: fire the oldest pending async call with an
 // ETIMEDOUT error reply. Exercises the timed_out branch in performHealthCheck

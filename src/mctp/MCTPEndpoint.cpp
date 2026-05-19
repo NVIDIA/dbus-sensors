@@ -5,6 +5,8 @@
 #include "VariantVisitors.hpp"
 
 #include <bits/fs_dir.h>
+#include <systemd/sd-bus-protocol.h>
+#include <systemd/sd-bus.h>
 
 #include <boost/asio/error.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -194,30 +196,72 @@ void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& /*unused*/)
         });
 }
 
-static bool hasBridgeInterface(
-    const std::shared_ptr<sdbusplus::asio::connection>& connection,
-    const std::string& endpointPath)
+static bool isBridgeInterfaceAbsent(sdbusplus::message_t& msg)
 {
+    if (!msg)
+    {
+        return false;
+    }
+
+    const sd_bus_error* dbusError = msg.get_error();
+    if (dbusError == nullptr || dbusError->name == nullptr)
+    {
+        return false;
+    }
+
+    std::string_view errorName = dbusError->name;
+    return errorName == SD_BUS_ERROR_UNKNOWN_INTERFACE ||
+           errorName == SD_BUS_ERROR_INVALID_ARGS;
+}
+
+static void hasBridgeInterface(
+    const std::shared_ptr<sdbusplus::asio::connection>& connection,
+    const std::string& endpointPath,
+    std::function<void(std::optional<bool>)>&& callback)
+{
+    // Use Properties.GetAll to check if the bridge interface exists.
+    // TODO: Use ObjectMapper here to avoid expense on GetAll.
+    auto bridgeCallback =
+        std::make_shared<std::function<void(std::optional<bool>)>>(
+            std::move(callback));
     try
     {
-        // Use Properties.GetAll to check if the bridge interface exists
-        // TODO: Use ObjectMapper here to avoid expense on GetAll
-        auto method = connection->new_method_call(
-            mctpdBusName, endpointPath.c_str(),
-            "org.freedesktop.DBus.Properties", "GetAll");
-        method.append(std::string(mctpdBridgeInterface));
+        connection->async_method_call(
+            [endpointPath, bridgeCallback](const boost::system::error_code& ec,
+                                           sdbusplus::message_t& msg) {
+                if (ec)
+                {
+                    if (isBridgeInterfaceAbsent(msg))
+                    {
+                        info("{BRIDGE_INTERFACE} not found on {ENDPOINT_PATH}",
+                             "BRIDGE_INTERFACE", mctpdBridgeInterface,
+                             "ENDPOINT_PATH", endpointPath);
+                        (*bridgeCallback)(false);
+                        return;
+                    }
 
-        auto reply = connection->call(method);
-        info("{BRIDGE_INTERFACE} exists on {ENDPOINT_PATH}", "BRIDGE_INTERFACE",
-             mctpdBridgeInterface, "ENDPOINT_PATH", endpointPath);
-        return true;
+                    error(
+                        "Failed to query {BRIDGE_INTERFACE} on {ENDPOINT_PATH}: {ERROR}",
+                        "BRIDGE_INTERFACE", mctpdBridgeInterface,
+                        "ENDPOINT_PATH", endpointPath, "ERROR", ec.message());
+                    (*bridgeCallback)(std::nullopt);
+                    return;
+                }
+
+                info("{BRIDGE_INTERFACE} exists on {ENDPOINT_PATH}",
+                     "BRIDGE_INTERFACE", mctpdBridgeInterface, "ENDPOINT_PATH",
+                     endpointPath);
+                (*bridgeCallback)(true);
+            },
+            mctpdBusName, endpointPath, "org.freedesktop.DBus.Properties",
+            "GetAll", std::string(mctpdBridgeInterface));
     }
     catch (const std::exception& e)
     {
-        error("{BRIDGE_INTERFACE} not found on {ENDPOINT_PATH}: {ERROR}",
+        error("Failed to query {BRIDGE_INTERFACE} on {ENDPOINT_PATH}: {ERROR}",
               "BRIDGE_INTERFACE", mctpdBridgeInterface, "ENDPOINT_PATH",
               endpointPath, "ERROR", e.what());
-        return false;
+        (*bridgeCallback)(std::nullopt);
     }
 }
 
@@ -239,106 +283,140 @@ void MCTPDDevice::performDiscovery()
      *        no need to do re-discovery. MCTPD will send fake connectivity
      *        signal.
      */
-    auto path = std::string(mctpdControlPath) + "/interfaces/" +
-                this->interface;
-    std::string dbusMethod = "LearnEndpoint";
-    uint8_t eid = 0;
-
-    if (this->endpoint)
-    {
-        eid = this->endpoint->eid();
-        std::string endpointPath = mctpdEndpointPath + std::to_string(eid);
-        info(
-            "Discovery Notify received for {INTERFACE} of already discovered endpoint",
-            "INTERFACE", this->interface);
-        dbusMethod = hasBridgeInterface(connection, endpointPath)
-                         ? "GetRoutingTable"
-                         : "LearnEndpoint";
-    }
-
-    auto callback = [weakSelf = weak_from_this(),
-                     dbusMethod](const boost::system::error_code& ec,
-                                 sdbusplus::message_t& msg) {
+    auto requestSetup = [weakSelf = weak_from_this()]() {
         auto self = weakSelf.lock();
         if (!self)
         {
             return;
         }
 
-        if (ec)
-        {
-            error("Failed calling {METHOD} for {INTERFACE}: {ERROR}", "METHOD",
-                  dbusMethod, "INTERFACE", self->interface, "ERROR",
-                  ec.message());
-        }
-        else
-        {
-            info("Successfully called {METHOD} for {INTERFACE}.", "METHOD",
-                 dbusMethod, "INTERFACE", self->interface);
-
-            if (dbusMethod == "LearnEndpoint")
-            {
-                auto [eid, network, objpath, allocated] =
-                    msg.unpack<uint8_t, int32_t, std::string, bool>();
-                info(
-                    "LearnEndpoint returned eid: {EID}, network: {NETWORK}, objpath: {OBJPATH}, allocated: {ALLOCATED}",
-                    "EID", eid, "NETWORK", network, "OBJPATH", objpath,
-                    "ALLOCATED", allocated);
-                if (eid == 0 && !allocated && objpath.empty())
-                {
-                    // Post reset, endpoint was removed.
-                    if (self->requestSetupCallback)
-                    {
-                        info("Requesting reactor to do setup for {INTERFACE}",
-                             "INTERFACE", self->interface);
-                        self->requestSetupCallback(self);
-                    }
-                }
-            }
-        }
-    };
-
-    if (dbusMethod == "GetRoutingTable")
-    {
-        info("Calling GetRoutingTable for {INTERFACE} with EID {EID}",
-             "INTERFACE", this->interface, "EID", eid);
-        this->connection->async_method_call(callback, mctpdBusName, path,
-                                            mctpdControlInterface, dbusMethod,
-                                            eid);
-    }
-    else
-    {
-        if (!this->requestSetupCallback)
+        if (!self->requestSetupCallback)
         {
             warning("Failed to notify MCTPReactor to do setup for {INTERFACE}",
-                    "INTERFACE", this->interface);
+                    "INTERFACE", self->interface);
             return;
         }
 
-        if (!this->endpoint)
-        {
-            info(
-                "Discovery Notify received for {INTERFACE} of undiscovered endpoint",
-                "INTERFACE", this->interface);
-            info("Requesting reactor to do setup for {INTERFACE}", "INTERFACE",
-                 this->interface);
-            this->requestSetupCallback(shared_from_this());
-        }
-        else
-        {
-            info(
-                "Discovery Notify received for {INTERFACE} of already discovered endpoint",
-                "INTERFACE", this->interface);
-            info("Calling LearnEndpoint for {INTERFACE} with EID {EID}",
-                 "INTERFACE", this->interface, "EID", eid);
-            auto path = std::string(mctpdControlPath) + "/interfaces/" +
-                        this->interface;
-            dbusMethod = "LearnEndpoint";
-            this->connection->async_method_call(
-                callback, mctpdBusName, path, mctpdControlInterface, dbusMethod,
-                this->physaddr);
-        }
+        info("Requesting reactor to do setup for {INTERFACE}", "INTERFACE",
+             self->interface);
+        self->requestSetupCallback(self);
+    };
+
+    if (!this->endpoint)
+    {
+        info(
+            "Discovery Notify received for {INTERFACE} of undiscovered endpoint",
+            "INTERFACE", this->interface);
+        requestSetup();
+        return;
     }
+
+    auto path = std::string(mctpdControlPath) + "/interfaces/" +
+                this->interface;
+    auto continueDiscovery = [weakSelf = weak_from_this(), path, requestSetup](
+                                 const std::string& dbusMethod, uint8_t eid) {
+        auto self = weakSelf.lock();
+        if (!self)
+        {
+            return;
+        }
+
+        auto callback = [weakSelf, requestSetup,
+                         dbusMethod](const boost::system::error_code& ec,
+                                     sdbusplus::message_t& msg) {
+            auto self = weakSelf.lock();
+            if (!self)
+            {
+                return;
+            }
+
+            if (ec)
+            {
+                error("Failed calling {METHOD} for {INTERFACE}: {ERROR}",
+                      "METHOD", dbusMethod, "INTERFACE", self->interface,
+                      "ERROR", ec.message());
+            }
+            else
+            {
+                info("Successfully called {METHOD} for {INTERFACE}.", "METHOD",
+                     dbusMethod, "INTERFACE", self->interface);
+
+                if (dbusMethod == "LearnEndpoint")
+                {
+                    auto [eid, network, objpath, allocated] =
+                        msg.unpack<uint8_t, int32_t, std::string, bool>();
+                    info(
+                        "LearnEndpoint returned eid: {EID}, network: {NETWORK}, objpath: {OBJPATH}, allocated: {ALLOCATED}",
+                        "EID", eid, "NETWORK", network, "OBJPATH", objpath,
+                        "ALLOCATED", allocated);
+                    if (eid == 0 && !allocated && objpath.empty())
+                    {
+                        // Post reset, endpoint was removed.
+                        requestSetup();
+                    }
+                }
+            }
+        };
+
+        if (dbusMethod == "GetRoutingTable")
+        {
+            info("Calling GetRoutingTable for {INTERFACE} with EID {EID}",
+                 "INTERFACE", self->interface, "EID", eid);
+            self->connection->async_method_call(
+                callback, mctpdBusName, path, mctpdControlInterface, dbusMethod,
+                eid);
+            return;
+        }
+
+        if (!self->requestSetupCallback)
+        {
+            warning("Failed to notify MCTPReactor to do setup for {INTERFACE}",
+                    "INTERFACE", self->interface);
+            return;
+        }
+
+        info(
+            "Discovery Notify received for {INTERFACE} of already discovered endpoint",
+            "INTERFACE", self->interface);
+        info("Calling LearnEndpoint for {INTERFACE} with EID {EID}",
+             "INTERFACE", self->interface, "EID", eid);
+        self->connection->async_method_call(callback, mctpdBusName, path,
+                                            mctpdControlInterface, dbusMethod,
+                                            self->physaddr);
+    };
+
+    const uint8_t eid = this->endpoint->eid();
+    std::string endpointPath = mctpdEndpointPath + std::to_string(eid);
+    info(
+        "Discovery Notify received for {INTERFACE} of already discovered endpoint",
+        "INTERFACE", this->interface);
+    hasBridgeInterface(
+        connection, endpointPath,
+        [weakSelf = weak_from_this(), continueDiscovery, requestSetup,
+         eid](std::optional<bool> bridge) {
+            if (!bridge)
+            {
+                return;
+            }
+
+            auto self = weakSelf.lock();
+            if (!self)
+            {
+                return;
+            }
+
+            if (!self->endpoint)
+            {
+                info(
+                    "Discovery Notify received for {INTERFACE} of undiscovered endpoint",
+                    "INTERFACE", self->interface);
+                requestSetup();
+                return;
+            }
+
+            continueDiscovery(*bridge ? "GetRoutingTable" : "LearnEndpoint",
+                              eid);
+        });
 }
 
 void MCTPDDevice::onEndpointInterfacesRemoved(
