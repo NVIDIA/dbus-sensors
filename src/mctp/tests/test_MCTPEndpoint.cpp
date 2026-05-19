@@ -2627,10 +2627,9 @@ TEST_F(FakeConnFixture, onDiscoveryMatchRuleCreatesMatchAndLambdaFires)
     }
 }
 
-// 4. performDiscovery() with endpoint set — exercises hasBridgeInterface()
-//    (connection->new_method_call throws → caught → returns false →
-//    LearnEndpoint). async_method_call fires the performDiscovery callback
-//    synchronously with error.
+// 4. performDiscovery() with endpoint set — exercises the bridge probe error
+//    path. Transient probe errors abort discovery instead of falling back to
+//    LearnEndpoint.
 TEST_F(FakeConnFixture, performDiscoveryWithEndpointCoversHasBridgeInterface)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
@@ -5614,10 +5613,9 @@ TEST_F(FakeConnFixture,
 
     dev->setRequestSetupCallback([](const std::shared_ptr<MCTPDDevice>&) {});
 
-    // performDiscovery: endpoint is set → hasBridgeInterface returns false
-    // (connection->new_method_call throws) → dbusMethod = "LearnEndpoint"
-    // → else branch: endpoint present → async_method_call LearnEndpoint fires
-    // callback with error.
+    // performDiscovery: endpoint is set and the fake connection cannot query
+    // the bridge interface. The transient probe error is logged and discovery
+    // is aborted.
     EXPECT_NO_THROW(dev->performDiscovery());
 }
 
@@ -8048,6 +8046,7 @@ class AsyncFixture : public FakeConnFixture
             io, sdbusplus::bus_t(nullptr, &gTestSdBusInterface));
         gMockSdBusCallSuccess = true;
         gMockSdBusCallAsync = true;
+        gSdBusCallCount = 0;
     }
 
     void TearDown() override
@@ -8056,6 +8055,7 @@ class AsyncFixture : public FakeConnFixture
         gMockSdBusCallAsync = false;
         gMockSdBusCallSuccess = false;
         gPendingAsyncCalls.clear();
+        gSdBusCallCount = 0;
         FakeConnFixture::TearDown();
     }
 };
@@ -9383,11 +9383,9 @@ TEST_F(FakeConnFixture, MCTPDDeviceRecoverWithEndpointCallsRecoverEid)
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/53"),
         1, 53);
     dev->setEndpointForTest(ep);
-    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->inHealthRecoveryMode = false;
     dev->markDiscoveredMctpEid(53);
 
-    // recover() with endpoint: sets recovery mode, calls recover(53)
     EXPECT_NO_THROW(dev->recover());
     EXPECT_TRUE(dev->inHealthRecoveryMode);
     EXPECT_TRUE(suppressedHealthCheckEids.contains(53));
@@ -9400,13 +9398,14 @@ TEST_F(FakeConnFixture, MCTPDDeviceRecoverWithEndpointCallsRecoverEid)
 // true → "Ignoring" log → early return without re-setting timer.
 // ===========================================================================
 
-TEST_F(FakeConnFixture, onDiscoveryNotifyWithEndpointAndAlreadyNeededIsNoop)
+TEST(MCTPDDevice, G205_onDiscoveryNotifyWithEndpointAndAlreadyNeededIsNoop)
 {
+    boost::asio::io_context io;
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
-        conn, "usb-disc-already-g205", "usb0", std::vector<uint8_t>{0x20},
+        nullptr, "usb-disc-already-g205", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(54));
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, conn,
+        dev, nullptr,
         sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/54"),
         1, 54);
@@ -9426,13 +9425,14 @@ TEST_F(FakeConnFixture, onDiscoveryNotifyWithEndpointAndAlreadyNeededIsNoop)
 // was false → sets discoveryNeeded=true, cancels + arms 5s timer.
 // ===========================================================================
 
-TEST_F(FakeConnFixture, onDiscoveryNotifyWithEndpointFirstCallSetsFlag)
+TEST(MCTPDDevice, G206_onDiscoveryNotifyWithEndpointFirstCallSetsFlag)
 {
+    boost::asio::io_context io;
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
-        conn, "usb-disc-first-g206", "usb0", std::vector<uint8_t>{0x20},
+        nullptr, "usb-disc-first-g206", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(55));
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, conn,
+        dev, nullptr,
         sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/55"),
         1, 55);
@@ -9459,14 +9459,14 @@ TEST_F(FakeConnFixture, onDiscoveryNotifyWithEndpointFirstCallSetsFlag)
 // Source: MCTPEndpoint.cpp line ~370: pollingInterval.value()==0 → return.
 // ===========================================================================
 
-TEST_F(FakeConnFixture, startHealthMonitoringIntervalZeroReturnsEarly)
+TEST(MCTPDDevice, G207_startHealthMonitoringIntervalZeroReturnsEarly)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
-        conn, "usb-hm-zero-g207", "usb0", std::vector<uint8_t>{0x20},
+        nullptr, "usb-hm-zero-g207", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(56), std::nullopt, std::nullopt, std::nullopt,
         std::nullopt, std::optional<uint8_t>(0)); // pollingInterval=0
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, conn,
+        dev, nullptr,
         sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/56"),
         1, 56);
@@ -9483,10 +9483,10 @@ TEST_F(FakeConnFixture, startHealthMonitoringIntervalZeroReturnsEarly)
 // Source: MCTPEndpoint.cpp line ~371: \!staticEID.has_value() → return.
 // ===========================================================================
 
-TEST_F(FakeConnFixture, startHealthMonitoringNoStaticEidReturnsEarly)
+TEST(MCTPDDevice, G208_startHealthMonitoringNoStaticEidReturnsEarly)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
-        conn, "usb-hm-noseid-g208", "usb0", std::vector<uint8_t>{0x20},
+        nullptr, "usb-hm-noseid-g208", "usb0", std::vector<uint8_t>{0x20},
         std::nullopt, // no staticEID
         std::nullopt, std::nullopt, std::nullopt, std::nullopt,
         std::optional<uint8_t>(1));
@@ -9503,16 +9503,16 @@ TEST_F(FakeConnFixture, startHealthMonitoringNoStaticEidReturnsEarly)
 // → warning + return.
 // ===========================================================================
 
-TEST_F(FakeConnFixture, startHealthMonitoringEidMismatchReturnsEarly)
+TEST(MCTPDDevice, G209_startHealthMonitoringEidMismatchReturnsEarly)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
-        conn, "usb-hm-mismatch-g209", "usb0", std::vector<uint8_t>{0x20},
+        nullptr, "usb-hm-mismatch-g209", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(57), // staticEID=57
         std::nullopt, std::nullopt, std::nullopt, std::nullopt,
         std::optional<uint8_t>(1));
     // Endpoint has EID=99, which differs from staticEID=57
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, conn,
+        dev, nullptr,
         sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/99"),
         1, 99); // EID=99 ≠ staticEID=57
@@ -9575,10 +9575,11 @@ TEST(SuiteG212, stopHealthMonitoringNullTimerIsNoop)
 // Source: MCTPEndpoint.cpp line ~403-408: if (healthTimer) → cancel().
 // ===========================================================================
 
-TEST_F(FakeConnFixture, stopHealthMonitoringWithTimerCancelsItG213)
+TEST(MCTPDDevice, G213_stopHealthMonitoringWithTimerCancelsIt)
 {
+    boost::asio::io_context io;
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
-        conn, "usb-stophm-timer-g213", "usb0", std::vector<uint8_t>{0x20},
+        nullptr, "usb-stophm-timer-g213", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(60), std::nullopt, std::nullopt, std::nullopt,
         std::nullopt, std::optional<uint8_t>(1));
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
@@ -9663,13 +9664,13 @@ TEST(SuiteG217, MCTPDDeviceDescribeEmptyPhysAddr)
 // endpoint->eid()
 // ===========================================================================
 
-TEST_F(FakeConnFixture, getEidWithEndpointReturnsEndpointEid)
+TEST(MCTPDDevice, G218_getEidWithEndpointReturnsEndpointEid)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
-        conn, "usb-geteid-ep-g218", "usb0", std::vector<uint8_t>{0x20},
+        nullptr, "usb-geteid-ep-g218", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(63)); // staticEID=63
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, conn,
+        dev, nullptr,
         sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/64"),
         1, 64); // endpoint EID=64
@@ -9901,12 +9902,12 @@ TEST(SuiteG231, USBFromIgnoreMessageTypesNonNumericSkippedDeviceCreated)
 // Source: MCTPEndpoint.cpp line ~882-886: format with network + EID + device.
 // ===========================================================================
 
-TEST_F(FakeConnFixture, MCTPDEndpointDescribeFormatsNetworkAndEid)
+TEST(MCTPDEndpoint, G232_describeFormatsNetworkAndEid)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
-        conn, "usb-ep-desc-g232", "usb0", std::vector<uint8_t>{0xAB});
+        nullptr, "usb-ep-desc-g232", "usb0", std::vector<uint8_t>{0xAB});
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, conn,
+        dev, nullptr,
         sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/5/endpoints/71"),
         5, 71);
@@ -9920,12 +9921,12 @@ TEST_F(FakeConnFixture, MCTPDEndpointDescribeFormatsNetworkAndEid)
 // Source: MCTPEndpoint.cpp line ~874-879: if (notifyRemoved) is false → noop.
 // ===========================================================================
 
-TEST_F(FakeConnFixture, MCTPDEndpointRemovedWithoutCallbackNocrash)
+TEST(MCTPDEndpoint, G233_removedWithoutCallbackNocrash)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
-        conn, "usb-ep-rem-nocb-g233", "usb0", std::vector<uint8_t>{0x20});
+        nullptr, "usb-ep-rem-nocb-g233", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, conn,
+        dev, nullptr,
         sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/72"),
         1, 72);
@@ -10982,7 +10983,7 @@ TEST_F(AsyncFixture, recoveryTimeoutClearsModeAfterRecoverDbusFailure)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -11021,7 +11022,7 @@ TEST_F(AsyncFixture, recoveryTimeoutClearsModeWhenRecoverSucceedsNoAvailable)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -11059,7 +11060,7 @@ TEST_F(AsyncFixture, DR04_recoveryModeClearsAfterRecoverDbusFailureRegression)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -11108,7 +11109,7 @@ TEST_F(AsyncFixture, recoverDoesNotArmTimeoutWithoutPollingInterval)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -11132,7 +11133,7 @@ TEST_F(AsyncFixture, recoverDoesNotArmTimeoutWithPollingIntervalZero)
         std::nullopt, std::optional<uint8_t>(0));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -11156,7 +11157,7 @@ TEST_F(AsyncFixture, endpointEstablishedCancelsRecoveryTimeout)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -11192,7 +11193,7 @@ TEST_F(AsyncFixture, endpointRemovedKeepsRecoveryModeForSetupFallback)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -11243,7 +11244,7 @@ TEST_F(AsyncFixture,
         std::vector<uint8_t>{0x20}, std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -12284,7 +12285,7 @@ TEST_F(AsyncFixture,
 }
 
 // ===========================================================================
-// G350–G354: performDiscovery() — branches when this->endpoint is set
+// G350–G355: performDiscovery() — branches when this->endpoint is set
 //
 // Source: MCTPEndpoint.cpp lines 218-312
 //
@@ -12294,11 +12295,9 @@ TEST_F(AsyncFixture,
 // ===========================================================================
 
 // G350: performDiscovery with endpoint set, requestSetupCallback null.
-// Source: MCTPEndpoint.cpp lines 218 TRUE, 282 TRUE (no callback → warn+return)
-// hasBridgeInterface throws (null bus) → returns false →
-// dbusMethod="LearnEndpoint" `if (!requestSetupCallback)` TRUE → warning +
-// return (no async call).
-TEST_F(FakeConnFixture, G350_performDiscoveryEndpointSetNoCallbackReturnsEarly)
+// Bridge-interface detection is async. A transient bridge probe failure aborts
+// rediscovery instead of treating the endpoint as direct.
+TEST_F(AsyncFixture, G350_performDiscoveryEndpointSetNoCallbackReturnsEarly)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-g350", "usb0", std::vector<uint8_t>{0x20},
@@ -12311,21 +12310,45 @@ TEST_F(FakeConnFixture, G350_performDiscoveryEndpointSetNoCallbackReturnsEarly)
     dev->setEndpointForTest(ep);
     // requestSetupCallback not set (null)
 
-    // performDiscovery: endpoint set → line 218 TRUE → hasBridgeInterface
-    // throws (null conn) → returns false → dbusMethod="LearnEndpoint"
-    // → else block → !requestSetupCallback TRUE → warning + return.
     EXPECT_NO_THROW(dev->performDiscovery());
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    EXPECT_NO_THROW(driveAsyncCallError());
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
 }
 
-// G351: performDiscovery with endpoint set + callback, hasBridgeInterface
-// returns false → LearnEndpoint async call, callback fires with error.
-// Source: MCTPEndpoint.cpp line 289 FALSE, 298-310, callback line 239 TRUE.
-// Uses AsyncFixture with gMockSdBusCallSuccess=false for hasBridgeInterface.
+TEST_F(AsyncFixture, G350b_performDiscoveryBridgeProbeErrorWithCallbackAborts)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-g350-callback", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+
+    bool callbackFired = false;
+    dev->requestSetupCallback =
+        [&callbackFired](const std::shared_ptr<MCTPDDevice>& device) {
+            (void)device;
+            callbackFired = true;
+        };
+
+    EXPECT_NO_THROW(dev->performDiscovery());
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    EXPECT_NO_THROW(driveAsyncCallError());
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+    EXPECT_FALSE(callbackFired);
+}
+
+// G351: performDiscovery with endpoint set + callback, bridge probe reports an
+// absent bridge interface, so LearnEndpoint is queued and its async callback
+// handles an error.
 TEST_F(AsyncFixture, G351_performDiscoveryEndpointSetCallbackLearnEndpointError)
 {
-    // Temporarily disable success mock so hasBridgeInterface sync-call fails.
-    gMockSdBusCallSuccess = false;
-
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-g351", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(9));
@@ -12338,23 +12361,23 @@ TEST_F(AsyncFixture, G351_performDiscoveryEndpointSetCallbackLearnEndpointError)
 
     bool callbackFired = false;
     dev->requestSetupCallback =
-        [&callbackFired](const std::shared_ptr<MCTPDDevice>&) {
+        [&callbackFired](const std::shared_ptr<MCTPDDevice>& device) {
+            (void)device;
             callbackFired = true;
         };
 
-    // performDiscovery → endpoint set (line 218 TRUE) → hasBridgeInterface
-    // sync call fails (gMockSdBusCallSuccess=false) → returns false →
-    // dbusMethod="LearnEndpoint" → requestSetupCallback set →
-    // endpoint set → line 298-310: async LearnEndpoint call queued.
     EXPECT_NO_THROW(dev->performDiscovery());
-    ASSERT_FALSE(gPendingAsyncCalls.empty());
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
 
-    // Drive the callback with an error reply → callback line 239 TRUE.
+    // Drive explicit missing bridge interface. This should queue LearnEndpoint.
+    driveAsyncCallUnknownInterface();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    // Drive LearnEndpoint with an error reply.
     driveAsyncCallError();
 
-    EXPECT_FALSE(callbackFired);  // requestSetupCallback not called on error
+    EXPECT_FALSE(callbackFired); // requestSetupCallback not called on error
     gPendingAsyncCalls.clear();
-    gMockSdBusCallSuccess = true; // restore for teardown
 }
 
 // G352: performDiscovery callback success — LearnEndpoint returns
@@ -12363,8 +12386,6 @@ TEST_F(AsyncFixture, G351_performDiscoveryEndpointSetCallbackLearnEndpointError)
 TEST_F(AsyncFixture,
        G352_performDiscoveryLearnEndpointSuccessEidZeroCallsSetupCallback)
 {
-    gMockSdBusCallSuccess = false; // hasBridgeInterface fails → LearnEndpoint
-
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-g352", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(9));
@@ -12377,12 +12398,16 @@ TEST_F(AsyncFixture,
 
     bool callbackFired = false;
     dev->requestSetupCallback =
-        [&callbackFired](const std::shared_ptr<MCTPDDevice>&) {
+        [&callbackFired](const std::shared_ptr<MCTPDDevice>& device) {
+            (void)device;
             callbackFired = true;
         };
 
     dev->performDiscovery();
-    ASSERT_FALSE(gPendingAsyncCalls.empty());
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallUnknownInterface();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
 
     // Drive with eid=0, network=1, objpath="", allocated=false →
     // callback: ec=0, dbusMethod=="LearnEndpoint" → unpack → eid==0 &&
@@ -12391,7 +12416,6 @@ TEST_F(AsyncFixture,
 
     EXPECT_TRUE(callbackFired);
     gPendingAsyncCalls.clear();
-    gMockSdBusCallSuccess = true;
 }
 
 // G353: performDiscovery callback success — LearnEndpoint returns valid
@@ -12400,8 +12424,6 @@ TEST_F(AsyncFixture,
 TEST_F(AsyncFixture,
        G353_performDiscoveryLearnEndpointSuccessNonZeroEidNoCallback)
 {
-    gMockSdBusCallSuccess = false; // hasBridgeInterface fails → LearnEndpoint
-
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-g353", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(9));
@@ -12414,12 +12436,16 @@ TEST_F(AsyncFixture,
 
     bool callbackFired = false;
     dev->requestSetupCallback =
-        [&callbackFired](const std::shared_ptr<MCTPDDevice>&) {
+        [&callbackFired](const std::shared_ptr<MCTPDDevice>& device) {
+            (void)device;
             callbackFired = true;
         };
 
     dev->performDiscovery();
-    ASSERT_FALSE(gPendingAsyncCalls.empty());
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallUnknownInterface();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
 
     // Drive with non-zero eid (9), allocated=true →
     // eid==0 condition is FALSE → requestSetupCallback NOT called.
@@ -12430,15 +12456,12 @@ TEST_F(AsyncFixture,
 
     EXPECT_FALSE(callbackFired);
     gPendingAsyncCalls.clear();
-    gMockSdBusCallSuccess = true;
 }
 
-// G354: performDiscovery callback — device destroyed before callback fires.
-// Source: MCTPEndpoint.cpp callback line 234 TRUE (if (!self) return).
+// G354: performDiscovery callback — device destroyed before bridge probe
+// callback fires. The async continuation should become a no-op.
 TEST_F(AsyncFixture, G354_performDiscoveryDeviceDestroyedBeforeCallbackIsNoop)
 {
-    gMockSdBusCallSuccess = false; // hasBridgeInterface fails → LearnEndpoint
-
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-g354", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(9));
@@ -12448,10 +12471,12 @@ TEST_F(AsyncFixture, G354_performDiscoveryDeviceDestroyedBeforeCallbackIsNoop)
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
-    dev->requestSetupCallback = [](const std::shared_ptr<MCTPDDevice>&) {};
+    dev->requestSetupCallback = [](const std::shared_ptr<MCTPDDevice>& device) {
+        (void)device;
+    };
 
     dev->performDiscovery();
-    ASSERT_FALSE(gPendingAsyncCalls.empty());
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
 
     // Destroy device — weak_ptr in callback expires.
     ep.reset();
@@ -12459,19 +12484,15 @@ TEST_F(AsyncFixture, G354_performDiscoveryDeviceDestroyedBeforeCallbackIsNoop)
 
     // Drive: weak.lock() returns null → if (!self) return (no crash).
     EXPECT_NO_THROW(driveAsyncCallError());
-    gPendingAsyncCalls.clear();
-    gMockSdBusCallSuccess = true;
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
 }
 
-// G355: performDiscovery with endpoint set → hasBridgeInterface returns true
-// (gMockSdBusCallSuccess=true) → dbusMethod="GetRoutingTable" → line 272 TRUE.
-// Callback fires with success: ec=0, dbusMethod!="LearnEndpoint" → no unpack.
-// Source: MCTPEndpoint.cpp lines 272 TRUE, callback 239 FALSE, 250 FALSE.
+// G355: performDiscovery with endpoint set → bridge probe succeeds, so
+// GetRoutingTable is queued and its callback does not unpack LearnEndpoint
+// data.
 TEST_F(AsyncFixture,
        G355_performDiscoveryEndpointSetBridgeInterfaceFoundUsesGetRoutingTable)
 {
-    // gMockSdBusCallSuccess=true (default in AsyncFixture): hasBridgeInterface
-    // sync call succeeds → returns true → dbusMethod="GetRoutingTable".
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-g355", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(9));
@@ -12482,15 +12503,90 @@ TEST_F(AsyncFixture,
         1, 9);
     dev->setEndpointForTest(ep);
 
-    // performDiscovery → endpoint set → hasBridgeInterface returns true →
-    // dbusMethod="GetRoutingTable" → line 272 TRUE → async GetRoutingTable.
     EXPECT_NO_THROW(dev->performDiscovery());
-    ASSERT_FALSE(gPendingAsyncCalls.empty());
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
 
-    // Drive with success reply — callback: ec=0, dbusMethod!="LearnEndpoint"
+    // Drive the bridge probe success. This should queue GetRoutingTable.
+    EXPECT_NO_THROW(driveAsyncCallSuccess());
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    // Drive GetRoutingTable with success reply: dbusMethod!="LearnEndpoint"
     // → no unpack → done.
     EXPECT_NO_THROW(driveAsyncCallSuccess());
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture,
+       DR03_performDiscoveryDoesNotUseSynchronousBridgeProbeRegression)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-dr03", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+
+    bool callbackFired = false;
+    dev->requestSetupCallback =
+        [&callbackFired](const std::shared_ptr<MCTPDDevice>& device) {
+            (void)device;
+            callbackFired = true;
+        };
+
+    gSdBusCallCount = 0;
     gPendingAsyncCalls.clear();
+
+    std::cout << "DR-03 repro: configured already-discovered endpoint EID 9\n";
+    std::cout << "DR-03 repro: calling performDiscovery()\n";
+
+    EXPECT_NO_THROW(dev->performDiscovery());
+
+    std::cout << "DR-03 repro: after performDiscovery, sync sd_bus_call count="
+              << gSdBusCallCount
+              << ", pending async calls=" << gPendingAsyncCalls.size() << "\n";
+
+    if (gSdBusCallCount != 0)
+    {
+        std::cout << "DR-03 reproduced: synchronous bridge probe ran before "
+                     "performDiscovery returned\n";
+        EXPECT_EQ(gSdBusCallCount, 0)
+            << "DR-03 reproduced: performDiscovery used a synchronous bridge "
+               "Properties.GetAll probe inside the asio callback path.";
+        return;
+    }
+
+    EXPECT_EQ(gSdBusCallCount, 0)
+        << "DR-03 reproduced: performDiscovery used a synchronous bridge "
+           "Properties.GetAll probe inside the asio callback path.";
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U)
+        << "DR-03 fixed behavior should leave the async bridge probe queued "
+           "without blocking the reactor.";
+
+    std::cout << "DR-03 repro: async bridge probe is queued before routing "
+                 "table discovery\n";
+
+    EXPECT_NO_THROW(driveAsyncCallSuccess());
+
+    std::cout << "DR-03 repro: bridge probe callback completed, pending async "
+                 "calls="
+              << gPendingAsyncCalls.size() << "\n";
+
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U)
+        << "DR-03 fixed behavior should queue GetRoutingTable only after the "
+           "async bridge probe succeeds.";
+
+    EXPECT_NO_THROW(driveAsyncCallSuccess());
+
+    std::cout << "DR-03 repro: GetRoutingTable callback completed, pending "
+                 "async calls="
+              << gPendingAsyncCalls.size()
+              << ", requestSetupCallback fired=" << callbackFired << "\n";
+
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+    EXPECT_FALSE(callbackFired);
 }
 
 // ===========================================================================

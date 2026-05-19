@@ -62,6 +62,9 @@ bool gMockSdBusDefault =
 bool gMockSdBusCallSuccess =
     false; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
+int gSdBusCallCount =
+    0; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
 // When gMockSdBusRequestName=true, __wrap_sd_bus_request_name returns
 // -ENOTSUP to simulate a name-claim failure (causes request_name() to throw).
 bool gMockSdBusRequestName =
@@ -111,6 +114,7 @@ int __wrap_sd_bus_call(sd_bus* /*bus*/, sd_bus_message* /*message*/,
                        uint64_t /*usec*/, sd_bus_error* /*error*/,
                        sd_bus_message** reply)
 {
+    ++gSdBusCallCount;
     if (gMockSdBusCallSuccess)
     {
         if (reply != nullptr)
@@ -606,6 +610,23 @@ void driveAsyncCallError()
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     (void)sd_bus_message_new_method_errorf(
         p.request, &reply, "org.freedesktop.DBus.Error.Failed", "Mock failure");
+    (void)sd_bus_message_seal(reply, static_cast<uint64_t>(++gAsyncReplySerial),
+                              0);
+    (void)p.callback(reply, p.userdata, nullptr);
+    sd_bus_message_unref(reply);
+    sd_bus_message_unref(p.request);
+}
+
+void driveAsyncCallUnknownInterface()
+{
+    assert(!gPendingAsyncCalls.empty());
+    PendingAsync p = gPendingAsyncCalls.front();
+    gPendingAsyncCalls.erase(gPendingAsyncCalls.begin());
+    sd_bus_message* reply = nullptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    (void)sd_bus_message_new_method_errorf(
+        p.request, &reply, SD_BUS_ERROR_UNKNOWN_INTERFACE,
+        "Mock missing interface");
     (void)sd_bus_message_seal(reply, static_cast<uint64_t>(++gAsyncReplySerial),
                               0);
     (void)p.callback(reply, p.userdata, nullptr);
