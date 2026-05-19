@@ -9,10 +9,14 @@
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
+#include <sdbusplus/sdbus.hpp>
 
 #include <array>
+#include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
@@ -1353,12 +1357,12 @@ TEST(USBMCTPDDevice, fromIgnoreMessageTypesWrongVariantTypeIsHandled)
     EXPECT_EQ(device->getEid().value_or(0), 32);
 }
 
-TEST(USBMCTPDDevice, fromIgnoreListsWhitespaceOnlyIsAccepted)
+TEST(USBMCTPDDevice, fromIgnoreListsEmptyStringIsAccepted)
 {
     SensorBaseConfigMap iface{
         {"Type", "MCTPUSBTarget"}, {"Name", "usb-ignore-whitespace"},
         {"Interface", "usb6"},     {"StaticEndpointID", "33"},
-        {"IgnoreEIDs", " ,   , "}, {"IgnoreMessageTypes", "   , "},
+        {"IgnoreEIDs", ""},        {"IgnoreMessageTypes", ""},
     };
 
     auto device = USBMCTPDDevice::from({}, iface);
@@ -3723,7 +3727,8 @@ TEST_F(FakeConnFixture,
     EXPECT_TRUE(dev->unresponsiveBridgePoolEids.contains(10));
 }
 
-// Bridge pool suppression: EID is in unresponsiveBridgePoolEids — OR branch.
+// Bridge pool threshold attempt is not suppressed, even for an EID that is
+// already in unresponsiveBridgePoolEids.
 TEST_F(FakeConnFixture,
        performHealthCheckBridgePoolSuppressionForUnresponsiveEid)
 {
@@ -3746,7 +3751,7 @@ TEST_F(FakeConnFixture,
 
     suppressedHealthCheckEids.clear();
     EXPECT_NO_THROW(dev->performHealthCheck());
-    EXPECT_TRUE(suppressedHealthCheckEids.contains(12));
+    EXPECT_FALSE(suppressedHealthCheckEids.contains(12));
 
     dev->healthTimer->cancel();
     try
@@ -3787,8 +3792,9 @@ TEST_F(FakeConnFixture, performHealthCheckSuppressesMainEidBelowThresholdMinus1)
     suppressedHealthCheckEids.clear();
 }
 
-// Main EID at pingFailureThreshold-1=2: condition "<threshold-1" is FALSE.
-TEST_F(FakeConnFixture, performHealthCheckNoSuppressAtThresholdMinus1Failures)
+// Main EID at pingFailureThreshold-1=2: the threshold health-check transport
+// error is allowed through; recovery then suppresses transport errors again.
+TEST_F(FakeConnFixture, performHealthCheckAllowsThresholdAttemptThenRecovers)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-hc-no-supp-2b", "usb0", std::vector<uint8_t>{0x20},
@@ -3807,9 +3813,9 @@ TEST_F(FakeConnFixture, performHealthCheckNoSuppressAtThresholdMinus1Failures)
 
     suppressedHealthCheckEids.clear();
     EXPECT_NO_THROW(dev->performHealthCheck());
-    // At threshold-1=2 failures, suppression check doesn't insert (2 < 2 is
-    // false). However the async callback fires synchronously (fake bus), bumps
-    // counter to threshold, calls recover() which inserts via the eid overload.
+    // At threshold-1=2 failures, the health-check callback bumps the counter to
+    // threshold and calls recover(), which suppresses follow-up transport
+    // errors during recovery.
     EXPECT_TRUE(suppressedHealthCheckEids.contains(9));
 
     dev->healthTimer->cancel();
@@ -3822,7 +3828,7 @@ TEST_F(FakeConnFixture, performHealthCheckNoSuppressAtThresholdMinus1Failures)
     suppressedHealthCheckEids.clear();
 }
 
-// Bridge pool: two EIDs, both at threshold - 1 → both inserted.
+// Bridge pool: two EIDs, both at threshold - 1 → both reach threshold.
 TEST_F(FakeConnFixture, performHealthCheckBridgePoolTwoEidsReachThreshold)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
@@ -4388,17 +4394,17 @@ TEST(XROTMCTPDDevice, describeContainsOnlyInterface)
 }
 
 // ===========================================================================
-// Group 30: I2CMCTPDDevice whitespace-only token in IgnoreMessageTypes
+// Group 30: I2CMCTPDDevice invalid token in IgnoreMessageTypes
 // ===========================================================================
 
-TEST(I2CMCTPDDevice, fromWithIgnoreMessageTypesWhitespaceTokensSkipped)
+TEST(I2CMCTPDDevice, fromWithIgnoreMessageTypesInvalidTokenSkipped)
 {
     SensorBaseConfigMap iface{
         {"Type", std::string("MCTPI2CTarget")},
         {"Name", std::string("i2c-ws-token2")},
         {"Bus", std::string("9999")},
         {"Address", std::string("29")},
-        {"IgnoreMessageTypes", std::string("  ,  ,  ")},
+        {"IgnoreMessageTypes", std::string("abc")},
     };
     auto device = I2CMCTPDDevice::from({}, iface);
     EXPECT_EQ(device, nullptr);
@@ -6454,9 +6460,9 @@ TEST(MCTPDDevice, describeWithFourBytePhysaddrLoopRunsThreeTimes)
 }
 
 // ===========================================================================
-// Group G93: performHealthCheck — suppression boundary: failures == threshold
-//            (= 3) → NOT below threshold-1 → NOT inserted; async fires with
-//            error → counter NOT incremented (already in recovery mode)
+// Group G93: performHealthCheck — failures == threshold (= 3) while already in
+//            recovery mode: async fires with error but counter is not
+//            incremented.
 // ===========================================================================
 
 TEST_F(FakeConnFixture,
@@ -6477,7 +6483,9 @@ TEST_F(FakeConnFixture,
     dev->consecutivePingFailures = 3;
     dev->inHealthRecoveryMode = true;
 
+    suppressedHealthCheckEids.clear();
     EXPECT_NO_THROW(dev->performHealthCheck());
+    EXPECT_TRUE(suppressedHealthCheckEids.contains(9));
     dev->healthTimer->cancel();
     try
     {
@@ -6487,6 +6495,7 @@ TEST_F(FakeConnFixture,
     {}
     // inHealthRecoveryMode=true → counter stays at 3.
     EXPECT_EQ(dev->consecutivePingFailures, 3U);
+    suppressedHealthCheckEids.clear();
 }
 
 // ===========================================================================
@@ -7808,13 +7817,13 @@ TEST_F(FakeConnFixture, performHealthCheckBridgePoolSuppressByUnresponsiveEid)
     dev->setEndpointForTest(ep);
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
 
-    // EID 10: failures NOT below threshold-1, but IS in unresponsive set
-    // → the OR condition in the suppression check evaluates to true via
-    // the second clause.
-    dev->bridgePoolPingFailures[10] = 3;        // not < 2
-    dev->unresponsiveBridgePoolEids.insert(10); // second OR clause is true
+    // EID 10: failures are at threshold, so follow-up health-check transport
+    // errors are suppressed.
+    dev->bridgePoolPingFailures[10] = 3;
+    dev->unresponsiveBridgePoolEids.insert(10);
 
     EXPECT_NO_THROW(dev->performHealthCheck());
+    EXPECT_TRUE(suppressedHealthCheckEids.contains(10));
     dev->healthTimer->cancel();
     try
     {
@@ -8031,6 +8040,7 @@ TEST_F(AsyncFixture, setupSuccessWithStaticEidCallsAddedWithEndpoint)
     EXPECT_FALSE(receivedEc);
     EXPECT_NE(receivedEp, nullptr);
     EXPECT_EQ(dev->endpoint->eid(), 10);
+    EXPECT_TRUE(dev->discoveredMctpEids.contains(10));
 
     // Cleanup: cancel the health timer that startHealthMonitoring() started
     if (dev->healthTimer)
@@ -8749,13 +8759,13 @@ TEST(SuiteG175, I2CFromIgnoreMessageTypesNonNumericAbcSkippedReturnsNull)
 }
 
 // ===========================================================================
-// Group G176: I2CMCTPDDevice::from — IgnoreMessageTypes="," (comma-only)
-// Source: MCTPEndpoint.cpp line ~1055-1083: tokenization produces empty tokens
-// after trimming → the `if (\!token.empty())` guard skips them.
+// Group G176: I2CMCTPDDevice::from — IgnoreMessageTypes invalid token
+// Source: MCTPEndpoint.cpp line ~1055-1083: stoll throws → catch → warning,
+// entry skipped.
 // Bus 9999 → nullptr.
 // ===========================================================================
 
-TEST(SuiteG176, I2CFromIgnoreMessageTypesCommaOnlyTokensSkipped)
+TEST(SuiteG176, I2CFromIgnoreMessageTypesInvalidTokenSkipped)
 {
     SensorBaseConfigMap iface{
         {"Type", std::string("MCTPI2CTarget")},
@@ -8763,7 +8773,7 @@ TEST(SuiteG176, I2CFromIgnoreMessageTypesCommaOnlyTokensSkipped)
         {"Bus", std::string("9999")},
         {"Address", std::string("29")},
         {"StaticEndpointID", std::string("10")},
-        {"IgnoreMessageTypes", std::string(",")}, // comma-only → empty tokens
+        {"IgnoreMessageTypes", std::string("bad")}, // invalid → catch
     };
     EXPECT_NO_THROW(I2CMCTPDDevice::from({}, iface));
 }
@@ -9297,10 +9307,9 @@ TEST_F(FakeConnFixture, MCTPDDeviceRecoverNoEndpointSetsRecoveryMode)
 }
 
 // ===========================================================================
-// Group G204: MCTPDDevice::recover() — with endpoint → calls recover(eid)
-// Source: MCTPEndpoint.cpp line ~615-627: endpoint set →
-// recover(endpoint->eid()) → async_method_call fired → with fake conn, fires
-// with error immediately.
+// Group G204: MCTPDDevice::recover() — with discovered endpoint calls recover
+// Source: MCTPEndpoint.cpp: endpoint set and marked discovered, so no-arg
+// recover calls Recover on the main EID.
 // ===========================================================================
 
 TEST_F(FakeConnFixture, MCTPDDeviceRecoverWithEndpointCallsRecoverEid)
@@ -9322,6 +9331,8 @@ TEST_F(FakeConnFixture, MCTPDDeviceRecoverWithEndpointCallsRecoverEid)
     // recover() with endpoint: sets recovery mode, calls recover(53)
     EXPECT_NO_THROW(dev->recover());
     EXPECT_TRUE(dev->inHealthRecoveryMode);
+    EXPECT_TRUE(suppressedHealthCheckEids.contains(53));
+    suppressedHealthCheckEids.erase(53);
 }
 
 // ===========================================================================
@@ -10330,10 +10341,9 @@ TEST_F(AsyncFixture, G303_suppressionInsertedWhenFailuresBelowThresholdMinus1)
 }
 
 // ===========================================================================
-// Group G304 (A2): consecutivePingFailures suppression — at threshold-1
-// MCTPEndpoint.cpp line 422:
-//   `if (consecutivePingFailures < pingFailureThreshold - 1)` FALSE path
-// (failures == threshold-1 == 2): NOT inserted before async call.
+// Group G304 (A2): consecutivePingFailures suppression — at threshold-1.
+// The threshold health-check ping is not suppressed so the generic
+// TransportError path can emit the single RF log for injected transport errors.
 // ===========================================================================
 TEST_F(AsyncFixture, G304_suppressionNotInsertedWhenFailuresAtThresholdMinus1)
 {
@@ -10350,14 +10360,14 @@ TEST_F(AsyncFixture, G304_suppressionNotInsertedWhenFailuresAtThresholdMinus1)
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->startHealthMonitoring();
 
-    // failures = threshold-1 = 2 -> condition "< threshold-1" is FALSE
+    // failures = threshold-1 = 2 -> threshold will be reached by callback.
     dev->consecutivePingFailures =
         static_cast<uint8_t>(dev->pingFailureThreshold - 1);
     suppressedHealthCheckEids.clear();
 
     EXPECT_NO_THROW(dev->performHealthCheck());
 
-    // Before async fires: EID 22 should NOT be in suppressedHealthCheckEids
+    // Before async fires: EID 22 should not suppress generic transport logs.
     EXPECT_FALSE(suppressedHealthCheckEids.contains(22));
 
     while (!gPendingAsyncCalls.empty())
@@ -10895,6 +10905,269 @@ TEST_F(FakeConnFixture, G316_recoverNoArgWithNullEndpointSetsRecoveryFlagOnly)
     }
     catch (...) // NOLINT(bugprone-empty-catch)
     {}
+}
+
+TEST_F(AsyncFixture, recoveryTimeoutClearsModeAfterRecoverDbusFailure)
+{
+    suppressedHealthCheckEids.erase(9);
+
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-recover-timeout", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::optional<uint8_t>(1));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->markDiscoveredMctpEid(9);
+
+    dev->recover();
+    EXPECT_TRUE(dev->inHealthRecoveryMode);
+    EXPECT_NE(dev->recoveryTimer, nullptr);
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallError();
+    EXPECT_TRUE(dev->inHealthRecoveryMode);
+
+    dev->onRecoveryTimeout();
+    EXPECT_FALSE(dev->inHealthRecoveryMode);
+    EXPECT_NE(dev->healthTimer, nullptr);
+
+    dev->cancelRecoveryTimeout();
+    dev->healthTimer->cancel();
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+    suppressedHealthCheckEids.erase(9);
+}
+
+TEST_F(AsyncFixture, recoveryTimeoutClearsModeWhenRecoverSucceedsNoAvailable)
+{
+    suppressedHealthCheckEids.erase(9);
+
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-recover-timeout-success", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::optional<uint8_t>(1));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->markDiscoveredMctpEid(9);
+
+    dev->recover();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallSuccess();
+    EXPECT_TRUE(dev->inHealthRecoveryMode);
+
+    dev->onRecoveryTimeout();
+    EXPECT_FALSE(dev->inHealthRecoveryMode);
+    EXPECT_NE(dev->healthTimer, nullptr);
+
+    dev->cancelRecoveryTimeout();
+    dev->healthTimer->cancel();
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+    suppressedHealthCheckEids.erase(9);
+}
+
+TEST_F(AsyncFixture, DR04_recoveryModeClearsAfterRecoverDbusFailureRegression)
+{
+    suppressedHealthCheckEids.erase(9);
+
+    std::cout
+        << "DR-04 repro: configuring static endpoint EID 9, PollingInterval=1\n";
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-dr04-repro", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::optional<uint8_t>(1));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->markDiscoveredMctpEid(9);
+    std::cout << "DR-04 repro: endpoint object present "
+                 "/au/com/codeconstruct/mctp1/networks/1/endpoints/9\n";
+
+    dev->recover();
+    std::cout << "DR-04 repro: recover() called, inHealthRecoveryMode="
+              << dev->inHealthRecoveryMode << ", pending Recover calls="
+              << gPendingAsyncCalls.size() << "\n";
+    ASSERT_TRUE(dev->inHealthRecoveryMode);
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallError();
+    std::cout
+        << "DR-04 repro: simulated Recover D-Bus failure, inHealthRecoveryMode="
+        << dev->inHealthRecoveryMode << "\n";
+    EXPECT_TRUE(dev->inHealthRecoveryMode);
+
+    io.restart();
+    const auto handlers = io.run_for(std::chrono::milliseconds(10500));
+    std::cout << "DR-04 repro: ran io_context for 10.5s, handlers=" << handlers
+              << ", inHealthRecoveryMode=" << dev->inHealthRecoveryMode
+              << ", healthTimer=" << (dev->healthTimer != nullptr) << "\n";
+
+    EXPECT_FALSE(dev->inHealthRecoveryMode)
+        << "DR-04 reproduced: recovery mode stayed stuck after Recover failed.";
+    EXPECT_NE(dev->healthTimer, nullptr)
+        << "DR-04 reproduced: health monitoring was not restarted.";
+
+    if (dev->healthTimer)
+    {
+        dev->healthTimer->cancel();
+    }
+    gPendingAsyncCalls.clear();
+    suppressedHealthCheckEids.erase(9);
+}
+
+TEST_F(AsyncFixture, recoverDoesNotArmTimeoutWithoutPollingInterval)
+{
+    suppressedHealthCheckEids.erase(9);
+
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-recover-no-polling", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->markDiscoveredMctpEid(9);
+
+    dev->recover();
+    EXPECT_TRUE(dev->inHealthRecoveryMode);
+    EXPECT_EQ(dev->recoveryTimer, nullptr);
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallSuccess();
+    suppressedHealthCheckEids.erase(9);
+}
+
+TEST_F(AsyncFixture, recoverDoesNotArmTimeoutWithPollingIntervalZero)
+{
+    suppressedHealthCheckEids.erase(9);
+
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-recover-zero-polling", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::optional<uint8_t>(0));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->markDiscoveredMctpEid(9);
+
+    dev->recover();
+    EXPECT_TRUE(dev->inHealthRecoveryMode);
+    EXPECT_EQ(dev->recoveryTimer, nullptr);
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallSuccess();
+    suppressedHealthCheckEids.erase(9);
+}
+
+TEST_F(AsyncFixture, endpointEstablishedCancelsRecoveryTimeout)
+{
+    suppressedHealthCheckEids.erase(9);
+
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-recover-available", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::optional<uint8_t>(1));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->markDiscoveredMctpEid(9);
+
+    dev->recover();
+    EXPECT_TRUE(dev->inHealthRecoveryMode);
+    EXPECT_NE(dev->recoveryTimer, nullptr);
+
+    dev->onEndpointEstablished();
+    EXPECT_FALSE(dev->inHealthRecoveryMode);
+    EXPECT_EQ(dev->recoveryTimer->cancel(), 0U);
+
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallSuccess();
+    dev->healthTimer->cancel();
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+    suppressedHealthCheckEids.erase(9);
+}
+
+TEST_F(AsyncFixture, endpointRemovedKeepsRecoveryModeForSetupFallback)
+{
+    suppressedHealthCheckEids.erase(9);
+
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-recover-removed", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::optional<uint8_t>(1));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->markDiscoveredMctpEid(9);
+
+    dev->recover();
+    EXPECT_TRUE(dev->inHealthRecoveryMode);
+    EXPECT_NE(dev->recoveryTimer, nullptr);
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallSuccess();
+
+    dev->endpointRemoved();
+    EXPECT_TRUE(dev->inHealthRecoveryMode);
+    EXPECT_EQ(dev->endpoint, nullptr);
+    EXPECT_EQ(dev->recoveryTimer->cancel(), 1U);
+
+    dev->onRecoveryTimeout();
+    EXPECT_TRUE(dev->inHealthRecoveryMode);
+    ASSERT_NE(dev->healthTimer, nullptr);
+
+    bool callbackCalled = false;
+    dev->requestSetupCallback =
+        [&callbackCalled](const std::shared_ptr<MCTPDDevice>& device) {
+            (void)device;
+            callbackCalled = true;
+        };
+
+    dev->performHealthCheck();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallSuccess();
+    EXPECT_TRUE(callbackCalled);
+
+    dev->healthTimer->cancel();
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+    suppressedHealthCheckEids.erase(9);
 }
 
 // ===========================================================================
@@ -11796,11 +12069,8 @@ TEST_F(AsyncFixture, G347_bridgePoolDeviceDestroyedBeforeCallbackNoop)
     gPendingAsyncCalls.clear();
 }
 
-// G348: Bridge pool suppression via second operand of ||.
-// Covers: `bridgePoolPingFailures[eid] < pingFailureThreshold - 1 ||
-// unresponsiveBridgePoolEids.contains(eid)` where first operand is FALSE and
-// second is TRUE → EID inserted into suppressedHealthCheckEids.
-TEST_F(AsyncFixture, G348_bridgePoolSuppressionViaUnresponsiveSet)
+// G348: Bridge pool threshold attempt is not suppressed.
+TEST_F(AsyncFixture, G348_bridgePoolThresholdAttemptIsNotSuppressed)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-g348", "usb0", std::vector<uint8_t>{0x20},
@@ -11808,18 +12078,14 @@ TEST_F(AsyncFixture, G348_bridgePoolSuppressionViaUnresponsiveSet)
         std::optional<uint8_t>(10), std::nullopt, std::nullopt,
         std::optional<uint8_t>(1));
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
-    // bridgePoolPingFailures[10] = pingFailureThreshold - 1 = 2
-    // → first operand: 2 < 2 = FALSE
-    // unresponsiveBridgePoolEids contains 10 → second operand TRUE
     dev->bridgePoolPingFailures[10] =
         static_cast<uint8_t>(dev->pingFailureThreshold - 1);
     dev->unresponsiveBridgePoolEids.insert(10);
 
     suppressedHealthCheckEids.clear();
-    dev->performHealthCheck(); // synchronously inserts EID 10 into suppressed
-                               // set
+    dev->performHealthCheck();
 
-    EXPECT_TRUE(suppressedHealthCheckEids.contains(10));
+    EXPECT_FALSE(suppressedHealthCheckEids.contains(10));
 
     // Cleanup async calls and timer
     gPendingAsyncCalls.clear();

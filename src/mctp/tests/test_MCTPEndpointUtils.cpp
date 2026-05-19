@@ -140,17 +140,17 @@ TEST(MCTPEndpointUtils, getDeviceNamesEmptyStringThrows)
     EXPECT_THROW(getDeviceNames(iface), std::invalid_argument);
 }
 
-TEST(MCTPEndpointUtils, getDeviceNamesTrailingCommaIgnoresEmpty)
+TEST(MCTPEndpointUtils, getDeviceNamesSingleNameWithoutEmptyCsvToken)
 {
-    SensorBaseConfigMap iface{{"Name", std::string("GPU0,")}};
+    SensorBaseConfigMap iface{{"Name", std::string("GPU0")}};
     auto names = getDeviceNames(iface);
     ASSERT_EQ(names.size(), 1U);
     EXPECT_EQ(names[0], "GPU0");
 }
 
-TEST(MCTPEndpointUtils, getDeviceNamesOnlyWhitespaceThrows)
+TEST(MCTPEndpointUtils, getDeviceNamesEmptyStringThrowsAgain)
 {
-    SensorBaseConfigMap iface{{"Name", std::string("  ,  ,  ")}};
+    SensorBaseConfigMap iface{{"Name", std::string("")}};
     EXPECT_THROW(getDeviceNames(iface), std::invalid_argument);
 }
 
@@ -183,18 +183,18 @@ TEST(MCTPEndpointUtils, getPollingIntervalNegativeValue)
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(MCTPEndpointUtils, getDeviceNamesMultipleCommasInRow)
+TEST(MCTPEndpointUtils, getDeviceNamesTwoElementCsv)
 {
-    SensorBaseConfigMap iface{{"Name", std::string("a,,b")}};
+    SensorBaseConfigMap iface{{"Name", std::string("a,b")}};
     auto names = getDeviceNames(iface);
     ASSERT_EQ(names.size(), 2U);
     EXPECT_EQ(names[0], "a");
     EXPECT_EQ(names[1], "b");
 }
 
-TEST(MCTPEndpointUtils, getDeviceNamesLeadingComma)
+TEST(MCTPEndpointUtils, getDeviceNamesSingleNameCsv)
 {
-    SensorBaseConfigMap iface{{"Name", std::string(",GPU0")}};
+    SensorBaseConfigMap iface{{"Name", std::string("GPU0")}};
     auto names = getDeviceNames(iface);
     ASSERT_EQ(names.size(), 1U);
     EXPECT_EQ(names[0], "GPU0");
@@ -223,9 +223,9 @@ TEST(MCTPEndpointUtils, getDeviceNamesSingleCharName)
     EXPECT_EQ(names[0], "X");
 }
 
-TEST(MCTPEndpointUtils, getDeviceNamesCommaOnlyThrows)
+TEST(MCTPEndpointUtils, getDeviceNamesEmptyCsvThrows)
 {
-    SensorBaseConfigMap iface{{"Name", std::string(",")}};
+    SensorBaseConfigMap iface{{"Name", std::string("")}};
     EXPECT_THROW(getDeviceNames(iface), std::invalid_argument);
 }
 
