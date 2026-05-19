@@ -12,6 +12,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -9354,6 +9355,137 @@ TEST_F(AsyncFixture, MCTPDDeviceRemoveCallbackRunsAfterEndpointRemoveError)
 
     driveAsyncCallError();
     EXPECT_TRUE(callbackCalled);
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture, MCTPDDeviceRemoveClearsPendingDiscoveryNotifyState)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-remove-clears-discovery", "usb0",
+        std::vector<uint8_t>{0x20});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/53"),
+        1, 53);
+    dev->setEndpointForTest(ep);
+    dev->discoveryCheckTimer = std::make_unique<boost::asio::steady_timer>(io);
+
+    auto msg = sdbusplus::message_t(nullptr);
+    dev->onDiscoveryNotify(msg);
+
+    ASSERT_TRUE(dev->discoveryNeeded);
+
+    bool callbackCalled = false;
+    dev->remove([&callbackCalled]() { callbackCalled = true; });
+
+    EXPECT_FALSE(callbackCalled);
+    EXPECT_FALSE(dev->discoveryNeeded);
+    EXPECT_EQ(dev->discoveryCheckTimer->cancel(), 0U);
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    EXPECT_NO_THROW(io.poll());
+    EXPECT_FALSE(callbackCalled);
+
+    driveAsyncCallSuccess();
+    EXPECT_TRUE(callbackCalled);
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture, DR02_removeCancelsPendingDiscoveryNotifyCleanupRegression)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-dr02-repro", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->discoveryCheckTimer = std::make_unique<boost::asio::steady_timer>(io);
+
+    std::cout << "DR-02 repro: configured endpoint EID 9 with discovery "
+                 "debounce timer\n";
+
+    auto msg = sdbusplus::message_t(nullptr);
+    dev->onDiscoveryNotify(msg);
+
+    std::cout << "DR-02 repro: after DiscoveryNotify, discoveryNeeded="
+              << dev->discoveryNeeded << ", pending endpoint Remove calls="
+              << gPendingAsyncCalls.size() << "\n";
+
+    ASSERT_TRUE(dev->discoveryNeeded);
+
+    bool callbackCalled = false;
+    std::cout << "DR-02 repro: removing device before debounce timer fires\n";
+    dev->remove([&callbackCalled]() { callbackCalled = true; });
+
+    const std::size_t cancelableTimers =
+        dev->discoveryCheckTimer ? dev->discoveryCheckTimer->cancel() : 0U;
+
+    std::cout << "DR-02 repro: after remove, callback called=" << callbackCalled
+              << ", discoveryNeeded=" << dev->discoveryNeeded
+              << ", manually cancelable timers=" << cancelableTimers
+              << ", pending endpoint Remove calls=" << gPendingAsyncCalls.size()
+              << "\n";
+
+    if (dev->discoveryNeeded || cancelableTimers != 0U)
+    {
+        std::cout << "DR-02 reproduced: remove left pending DiscoveryNotify "
+                     "cleanup state armed\n";
+        EXPECT_FALSE(dev->discoveryNeeded)
+            << "DR-02 reproduced: discoveryNeeded stayed set after remove.";
+        EXPECT_EQ(cancelableTimers, 0U)
+            << "DR-02 reproduced: DiscoveryNotify timer was still pending "
+               "after remove.";
+        return;
+    }
+
+    EXPECT_FALSE(dev->discoveryNeeded);
+    EXPECT_EQ(cancelableTimers, 0U);
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    io.restart();
+    const auto handlers = io.poll();
+    std::cout << "DR-02 repro: polled canceled discovery timer handlers="
+              << handlers << ", callback called=" << callbackCalled << "\n";
+    EXPECT_FALSE(callbackCalled);
+
+    driveAsyncCallSuccess();
+    std::cout << "DR-02 repro: endpoint Remove completed, callback called="
+              << callbackCalled << ", pending endpoint Remove calls="
+              << gPendingAsyncCalls.size() << "\n";
+
+    EXPECT_TRUE(callbackCalled);
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture, MCTPDDeviceDestructorCancelsDiscoveryNotifyTimer)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-destructor-cancels-discovery", "usb0",
+        std::vector<uint8_t>{0x20});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/54"),
+        1, 54);
+    dev->setEndpointForTest(ep);
+    dev->discoveryCheckTimer = std::make_unique<boost::asio::steady_timer>(io);
+
+    auto msg = sdbusplus::message_t(nullptr);
+    dev->onDiscoveryNotify(msg);
+
+    ASSERT_TRUE(dev->discoveryNeeded);
+
+    std::weak_ptr<TestUSBMCTPDDevice> weakDev = dev;
+    dev->setEndpointForTest(std::shared_ptr<MCTPDEndpoint>{});
+    ep.reset();
+    dev.reset();
+
+    EXPECT_TRUE(weakDev.expired());
+    EXPECT_NO_THROW(io.poll());
     EXPECT_TRUE(gPendingAsyncCalls.empty());
 }
 

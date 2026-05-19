@@ -306,7 +306,7 @@ class MCTPDDevice :
                 const std::vector<std::string>& deviceNames = {});
     MCTPDDevice(const MCTPDDevice& other) = delete;
     MCTPDDevice(MCTPDDevice&& other) = delete;
-    ~MCTPDDevice() override = default;
+    ~MCTPDDevice() override;
 
     void setup(std::function<void(const std::error_code& ec,
                                   const std::shared_ptr<MCTPEndpoint>& ep)>&&
@@ -439,6 +439,7 @@ class MCTPDDevice :
     std::unique_ptr<sdbusplus::bus::match_t> discoveryNotifyMatch;
     bool discoveryNeeded = false;
     std::unique_ptr<boost::asio::steady_timer> discoveryCheckTimer;
+    void cleanupDiscoveryNotify();
     void performDiscovery();
 
     // Health monitoring members
