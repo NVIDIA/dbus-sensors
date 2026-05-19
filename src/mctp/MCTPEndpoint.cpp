@@ -101,6 +101,28 @@ MCTPDDevice::MCTPDDevice(
     }
 }
 
+MCTPDDevice::~MCTPDDevice()
+{
+    cleanupDiscoveryNotify();
+}
+
+void MCTPDDevice::cleanupDiscoveryNotify()
+{
+    discoveryNeeded = false;
+    if (discoveryCheckTimer)
+    {
+        try
+        {
+            discoveryCheckTimer->cancel();
+        }
+        catch (const std::exception& e)
+        {
+            debug("Failed to cancel DiscoveryNotify timer: {ERROR}", "ERROR",
+                  e.what());
+        }
+    }
+}
+
 void MCTPDDevice::onDiscoveryMatchRule()
 {
     if (!connection)
@@ -960,6 +982,8 @@ void MCTPDDevice::remove()
 
 void MCTPDDevice::remove(std::function<void()>&& removed)
 {
+    cleanupDiscoveryNotify();
+
     if (endpoint)
     {
         debug("Removing endpoint @ [ {MCTP_ENDPOINT} ]", "MCTP_ENDPOINT",
