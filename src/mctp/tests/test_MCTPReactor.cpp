@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -65,6 +66,149 @@ class MockAssociationServer : public AssociationServer
                  const std::vector<Association>& associations),
                 (override));
     MOCK_METHOD(void, disassociate, (const std::string& path), (override));
+};
+
+class DR05ReproEndpoint : public MCTPEndpoint
+{
+  public:
+    explicit DR05ReproEndpoint(std::shared_ptr<MCTPDevice> owner) :
+        owner(std::move(owner))
+    {}
+
+    int network() const override
+    {
+        return 1;
+    }
+
+    uint8_t eid() const override
+    {
+        return 9;
+    }
+
+    void subscribe(Event&& /*degraded*/, Event&& /*available*/,
+                   Event&& /*removed*/) override
+    {}
+
+    void remove() override {}
+
+    std::string describe() const override
+    {
+        return "dr05 repro endpoint";
+    }
+
+    std::shared_ptr<MCTPDevice> device() const override
+    {
+        return owner;
+    }
+
+  private:
+    std::shared_ptr<MCTPDevice> owner;
+};
+
+class DR05ReproMCTPDevice :
+    public MCTPDevice,
+    public std::enable_shared_from_this<DR05ReproMCTPDevice>
+{
+  public:
+    explicit DR05ReproMCTPDevice(std::string description) :
+        description(std::move(description))
+    {}
+
+    void setup(std::function<void(const std::error_code& ec,
+                                  const std::shared_ptr<MCTPEndpoint>& ep)>&&
+                   added) override
+    {
+        setupCalls++;
+        if (oldRemovePending != nullptr && *oldRemovePending)
+        {
+            setupWhileOldRemovePending = true;
+            std::move(
+                added)(std::make_error_code(std::errc::device_or_resource_busy),
+                       nullptr);
+            return;
+        }
+        std::move(
+            added)({}, std::make_shared<DR05ReproEndpoint>(shared_from_this()));
+    }
+
+    void remove() override
+    {
+        removeCalls++;
+        removePending = true;
+    }
+
+    void remove(std::function<void()>&& removed) override
+    {
+        remove();
+        removeComplete = std::move(removed);
+    }
+
+    std::string describe() const override
+    {
+        return description;
+    }
+
+    std::size_t id() const override
+    {
+        return 0;
+    }
+
+    void completeRemove()
+    {
+        removePending = false;
+        auto removed = std::exchange(removeComplete, {});
+        if (removed)
+        {
+            removed();
+        }
+    }
+
+    int setupCalls = 0;
+    int removeCalls = 0;
+    bool removePending = false;
+    bool setupWhileOldRemovePending = false;
+    const bool* oldRemovePending = nullptr;
+
+  private:
+    std::string description;
+    std::function<void()> removeComplete;
+};
+
+class CountingMCTPEndpoint : public MCTPEndpoint
+{
+  public:
+    explicit CountingMCTPEndpoint(std::shared_ptr<MCTPDevice> owner) :
+        owner(std::move(owner))
+    {}
+
+    int network() const override
+    {
+        return 1;
+    }
+
+    uint8_t eid() const override
+    {
+        return 9;
+    }
+
+    void subscribe(Event&& /*degraded*/, Event&& /*available*/,
+                   Event&& /*removed*/) override
+    {}
+
+    void remove() override {}
+
+    std::string describe() const override
+    {
+        return "counting endpoint";
+    }
+
+    std::shared_ptr<MCTPDevice> device() const override
+    {
+        return owner;
+    }
+
+  private:
+    std::shared_ptr<MCTPDevice> owner;
 };
 
 namespace
@@ -180,6 +324,16 @@ class TestReactorMCTPDDevice : public MCTPDDevice
         removeCalls++;
     }
 
+    void remove(std::function<void()>&& removed) override
+    {
+        auto removedCallback = std::move(removed);
+        remove();
+        if (removedCallback)
+        {
+            removedCallback();
+        }
+    }
+
     std::string describe() const override
     {
         return "test-reactor-mctpd-device";
@@ -239,6 +393,67 @@ class TestUSBMCTPDDevice : public USBMCTPDDevice
         std::function<void(const std::error_code&,
                            const std::shared_ptr<MCTPEndpoint>&)>&&)>
         setupHandler;
+};
+
+class CountingMCTPDevice :
+    public MCTPDevice,
+    public std::enable_shared_from_this<CountingMCTPDevice>
+{
+  public:
+    explicit CountingMCTPDevice(std::string description) :
+        description(std::move(description))
+    {}
+
+    void setup(std::function<void(const std::error_code& ec,
+                                  const std::shared_ptr<MCTPEndpoint>& ep)>&&
+                   added) override
+    {
+        setupCalls++;
+        std::move(added)(
+            {}, std::make_shared<CountingMCTPEndpoint>(shared_from_this()));
+    }
+
+    void remove() override
+    {
+        removeCalls++;
+    }
+
+    void remove(std::function<void()>&& removed) override
+    {
+        remove();
+        removeComplete = std::move(removed);
+        if (completeRemoveImmediately)
+        {
+            completeRemove();
+        }
+    }
+
+    std::string describe() const override
+    {
+        return description;
+    }
+
+    std::size_t id() const override
+    {
+        return 0;
+    }
+
+    void completeRemove()
+    {
+        auto removed = std::exchange(removeComplete, {});
+        if (removed)
+        {
+            removed();
+        }
+    }
+
+    int setupCalls = 0;
+    int removeCalls = 0;
+    bool completeRemoveImmediately = false;
+
+  private:
+    std::string description;
+    std::function<void()> removeComplete;
 };
 
 class MCTPReactorFixture : public testing::Test
@@ -448,11 +663,10 @@ TEST_F(MCTPReactorFixture, removedCallbackForForeignDeviceDoesNotDeferSetup)
     const std::shared_ptr<MockMCTPDevice> managedDevice = this->device;
     int epDeviceCall = 0;
     EXPECT_CALL(*endpoint, device())
-        .WillRepeatedly(
-            testing::Invoke([managedDevice, foreignDevice, &epDeviceCall] {
-                ++epDeviceCall;
-                return (epDeviceCall <= 3) ? managedDevice : foreignDevice;
-            }));
+        .WillRepeatedly([managedDevice, foreignDevice, &epDeviceCall] {
+            ++epDeviceCall;
+            return (epDeviceCall <= 3) ? managedDevice : foreignDevice;
+        });
     EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_))
         .WillOnce(testing::SaveArg<2>(&removeHandler));
 
@@ -583,20 +797,19 @@ TEST(MCTPReactor, replaceConfiguration)
     // device: removed used 2x (switch+next). Second track: 3+ replacement.
     int epDevCalls = 0;
     EXPECT_CALL(*endpoint, device())
-        .WillRepeatedly(
-            testing::Invoke([&epDevCalls, initial,
-                             replacement]() -> std::shared_ptr<MCTPDevice> {
-                ++epDevCalls;
-                if (epDevCalls <= 3)
-                {
-                    return initial;
-                }
-                if (epDevCalls <= 5)
-                {
-                    return initial;
-                }
-                return replacement;
-            }));
+        .WillRepeatedly([&epDevCalls, initial,
+                         replacement]() -> std::shared_ptr<MCTPDevice> {
+            ++epDevCalls;
+            if (epDevCalls <= 3)
+            {
+                return initial;
+            }
+            if (epDevCalls <= 5)
+            {
+                return initial;
+            }
+            return replacement;
+        });
 
     reactor->manageMCTPDevice("/test", initial);
     reactor->manageMCTPDevice("/test", replacement);
@@ -807,32 +1020,36 @@ TEST(MCTPReactor, usbFailureStreakResetsAfterSuccessfulSetup)
     auto device = std::make_shared<TestUSBMCTPDDevice>("usb-reset");
 
     int attempt = 0;
-    device->setupHandler = [&attempt, &device](auto&& added) {
-        attempt++;
-        // fail x4, succeed once (reset streak), then fail x5.
-        if (attempt <= 4 || (attempt >= 6 && attempt <= 10))
-        {
-            std::forward<decltype(added)>(
-                added)(std::make_error_code(std::errc::timed_out), nullptr);
-            return;
-        }
-        auto ep = std::make_shared<MockMCTPEndpoint>();
-        EXPECT_CALL(*ep, subscribe(testing::_, testing::_, testing::_))
-            .Times(1);
-        EXPECT_CALL(*ep, describe())
-            .WillRepeatedly(testing::Return("usb-reset-endpoint"));
-        EXPECT_CALL(*ep, device()).WillRepeatedly(testing::Return(device));
-        EXPECT_CALL(*ep, network()).WillRepeatedly(testing::Return(1));
-        EXPECT_CALL(*ep, eid()).WillRepeatedly(testing::Return(8));
-        std::forward<decltype(added)>(added)(std::error_code{}, ep);
-    };
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> removeHandler;
+    std::shared_ptr<MockMCTPEndpoint> trackedEp;
+    device->setupHandler =
+        [&attempt, &device, &removeHandler, &trackedEp](auto&& added) {
+            attempt++;
+            // fail x4, succeed once (reset streak), then fail x5.
+            if (attempt <= 4 || (attempt >= 6 && attempt <= 10))
+            {
+                std::forward<decltype(added)>(
+                    added)(std::make_error_code(std::errc::timed_out), nullptr);
+                return;
+            }
+            auto ep = std::make_shared<MockMCTPEndpoint>();
+            trackedEp = ep;
+            EXPECT_CALL(*ep, subscribe(testing::_, testing::_, testing::_))
+                .WillOnce(testing::SaveArg<2>(&removeHandler));
+            EXPECT_CALL(*ep, describe())
+                .WillRepeatedly(testing::Return("usb-reset-endpoint"));
+            EXPECT_CALL(*ep, device()).WillRepeatedly(testing::Return(device));
+            EXPECT_CALL(*ep, network()).WillRepeatedly(testing::Return(1));
+            EXPECT_CALL(*ep, eid()).WillRepeatedly(testing::Return(8));
+            std::forward<decltype(added)>(added)(std::error_code{}, ep);
+        };
 
     EXPECT_CALL(*recoveryPtr, clearBulkOutHalt("usb-reset", testing::_))
         .Times(1)
         .WillOnce(testing::DoAll(testing::SetArgReferee<1>("cleared"),
                                  testing::Return(true)));
     EXPECT_CALL(assoc, associate(testing::_, testing::_)).Times(1);
-    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(1);
 
     reactor->manageMCTPDevice("/test/usb-reset", device); // failure 1
     reactor->tick();                                      // failure 2
@@ -840,12 +1057,15 @@ TEST(MCTPReactor, usbFailureStreakResetsAfterSuccessfulSetup)
     reactor->tick();                                      // failure 4
     reactor->tick();                                      // success -> reset
 
-    reactor->manageMCTPDevice("/test/usb-reset",
-                              device); // failure 1 (new streak)
-    reactor->tick();                   // failure 2
-    reactor->tick();                   // failure 3
-    reactor->tick();                   // failure 4
-    reactor->tick();                   // failure 5 -> recovery
+    ASSERT_TRUE(static_cast<bool>(removeHandler));
+    ASSERT_TRUE(static_cast<bool>(trackedEp));
+    removeHandler(trackedEp);
+
+    reactor->tick(); // failure 1 (new streak)
+    reactor->tick(); // failure 2
+    reactor->tick(); // failure 3
+    reactor->tick(); // failure 4
+    reactor->tick(); // failure 5 -> recovery
 
     reactor->unmanageMCTPDevice("/test/usb-reset");
 }
@@ -2103,6 +2323,7 @@ TEST(MCTPReactor, replaceConfigurationUnmanagedBeforeTick)
     });
 
     auto initial = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*initial, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*initial, describe())
         .WillRepeatedly(testing::Return("initial-replace-early"));
     EXPECT_CALL(*initial, setup(testing::_))
@@ -2112,21 +2333,151 @@ TEST(MCTPReactor, replaceConfigurationUnmanagedBeforeTick)
     EXPECT_CALL(*endpoint, device()).WillRepeatedly(testing::Return(initial));
 
     auto replacement = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*replacement, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*replacement, describe())
         .WillRepeatedly(testing::Return("replacement-replace-early"));
-    // Replacement gets setupEndpoint called immediately during the recursive
-    // manage; setup returns success with null endpoint → state stays Assigning.
+    // Replacement setup runs after the old endpoint remove completion is
+    // observed on tick. setup returns success with null endpoint, so state
+    // stays Assigning.
     EXPECT_CALL(*replacement, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), nullptr));
     // unmanage from Assigning → Quarantine (no replacement->remove).
 
     reactor->manageMCTPDevice("/test/replace-early", initial);
     reactor->manageMCTPDevice("/test/replace-early", replacement);
+    reactor->tick();
     reactor->unmanageMCTPDevice("/test/replace-early");
 
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(replacement.get()));
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(endpoint.get()));
+}
+
+TEST(MCTPReactor, replaceConfigurationWaitsForRemoveCompletionBeforeRetry)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto initial = std::make_shared<CountingMCTPDevice>("dr05-initial");
+    auto replacement = std::make_shared<CountingMCTPDevice>("dr05-replacement");
+
+    reactor->manageMCTPDevice("/test/dr05", initial);
+    EXPECT_EQ(initial->setupCalls, 1);
+
+    reactor->manageMCTPDevice("/test/dr05", replacement);
+    EXPECT_EQ(initial->removeCalls, 1);
+    EXPECT_EQ(replacement->setupCalls, 0);
+
+    reactor->tick();
+    EXPECT_EQ(replacement->setupCalls, 0);
+
+    initial->completeRemove();
+    EXPECT_EQ(replacement->setupCalls, 0);
+
+    reactor->tick();
+    EXPECT_EQ(replacement->setupCalls, 1);
+
+    reactor->unmanageMCTPDevice("/test/dr05");
+    EXPECT_EQ(replacement->removeCalls, 1);
+}
+
+TEST(MCTPReactor, DR05_replacementSetupWaitsForOldRemoveCompletionRegression)
+{
+    testing::NiceMock<MockAssociationServer> assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto initial = std::make_shared<DR05ReproMCTPDevice>("dr05-initial");
+    auto replacement =
+        std::make_shared<DR05ReproMCTPDevice>("dr05-replacement");
+    replacement->oldRemovePending = &initial->removePending;
+
+    std::cout << "DR-05 repro: managing initial endpoint config\n";
+    reactor->manageMCTPDevice("/test/dr05-repro", initial);
+    std::cout << "DR-05 repro: initial setup calls=" << initial->setupCalls
+              << ", initial remove pending=" << initial->removePending << "\n";
+
+    ASSERT_EQ(initial->setupCalls, 1);
+
+    std::cout << "DR-05 repro: replacing config while old endpoint exists\n";
+    reactor->manageMCTPDevice("/test/dr05-repro", replacement);
+    std::cout << "DR-05 repro: after replacement manage, old remove calls="
+              << initial->removeCalls
+              << ", old remove pending=" << initial->removePending
+              << ", replacement setup calls=" << replacement->setupCalls
+              << ", setup while old remove pending="
+              << replacement->setupWhileOldRemovePending << "\n";
+
+    EXPECT_EQ(initial->removeCalls, 1);
+    EXPECT_TRUE(initial->removePending);
+    if (replacement->setupWhileOldRemovePending)
+    {
+        std::cout << "DR-05 reproduced: replacement setup ran before old "
+                     "endpoint remove completed\n";
+        EXPECT_FALSE(replacement->setupWhileOldRemovePending)
+            << "DR-05 reproduced: setup raced old async remove and hit the "
+               "device_or_resource_busy window.";
+        return;
+    }
+
+    EXPECT_EQ(replacement->setupCalls, 0)
+        << "Replacement setup must not run until old endpoint Remove completes.";
+
+    reactor->tick();
+    std::cout << "DR-05 repro: after tick with remove still pending, "
+                 "replacement setup calls="
+              << replacement->setupCalls << "\n";
+    EXPECT_EQ(replacement->setupCalls, 0);
+
+    initial->completeRemove();
+    std::cout << "DR-05 repro: old remove completed, replacement setup calls="
+              << replacement->setupCalls << "\n";
+    EXPECT_EQ(replacement->setupCalls, 0);
+
+    reactor->tick();
+    std::cout << "DR-05 repro: after remove completion tick, replacement "
+                 "setup calls="
+              << replacement->setupCalls << ", setup while old remove pending="
+              << replacement->setupWhileOldRemovePending << "\n";
+
+    EXPECT_EQ(replacement->setupCalls, 1);
+    EXPECT_FALSE(replacement->setupWhileOldRemovePending);
+}
+
+TEST(MCTPReactor, replaceConfigurationHandlesSynchronousRemoveCompletion)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto initial = std::make_shared<CountingMCTPDevice>("dr05-sync-initial");
+    auto replacement =
+        std::make_shared<CountingMCTPDevice>("dr05-sync-replacement");
+    initial->completeRemoveImmediately = true;
+
+    reactor->manageMCTPDevice("/test/dr05-sync", initial);
+    reactor->manageMCTPDevice("/test/dr05-sync", replacement);
+
+    EXPECT_EQ(initial->removeCalls, 1);
+    EXPECT_EQ(replacement->setupCalls, 0);
+
+    reactor->tick();
+    EXPECT_EQ(replacement->setupCalls, 1);
+}
+
+TEST(MCTPReactor, replaceConfigurationRemovedBeforeCompletionIsNotRetried)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto initial = std::make_shared<CountingMCTPDevice>("dr05-cancel-initial");
+    auto replacement =
+        std::make_shared<CountingMCTPDevice>("dr05-cancel-replacement");
+
+    reactor->manageMCTPDevice("/test/dr05-cancel", initial);
+    reactor->manageMCTPDevice("/test/dr05-cancel", replacement);
+    EXPECT_EQ(initial->removeCalls, 1);
+
+    reactor->unmanageMCTPDevice("/test/dr05-cancel");
+    EXPECT_EQ(replacement->removeCalls, 1);
+
+    initial->completeRemove();
+    reactor->tick();
+    EXPECT_EQ(replacement->setupCalls, 0);
 }
 
 // Test: deferSetup called multiple times for the same device increments
@@ -2358,6 +2709,7 @@ TEST(MCTPReactor, ebusyPathWithMockDevicesLogs)
     });
 
     auto initial = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*initial, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*endpoint, device()).WillRepeatedly(testing::Return(initial));
 
     EXPECT_CALL(*initial, describe())
@@ -2367,11 +2719,12 @@ TEST(MCTPReactor, ebusyPathWithMockDevicesLogs)
     EXPECT_CALL(*initial, remove()).WillOnce([&]() { endpoint->remove(); });
 
     auto replacement = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*replacement, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*replacement, describe())
         .WillRepeatedly(testing::Return("replacement-ebusy-log"));
-    // Replacement setup is called immediately during the recursive manage;
-    // returns success with null ep → state stays Assigning. unmanage from
-    // Assigning → Quarantine (no replacement->remove).
+    // Replacement setup runs after the old endpoint remove completion is
+    // observed on tick. It returns success with null ep, so state stays
+    // Assigning; unmanage from Assigning → Quarantine (no replacement->remove).
     EXPECT_CALL(*replacement, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), nullptr));
 
@@ -2388,6 +2741,7 @@ TEST(MCTPReactor, ebusyPathWithMockDevicesLogs)
 
     reactor->manageMCTPDevice("/test/ebusy-log", initial);
     reactor->manageMCTPDevice("/test/ebusy-log", replacement);
+    reactor->tick();
     reactor->unmanageMCTPDevice("/test/ebusy-log");
 
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
@@ -3020,11 +3374,10 @@ TEST_F(MCTPReactorFixture, G213trackEndpointRemovedDeviceNotInRepoNoDeferSetup)
     const std::shared_ptr<MockMCTPDevice> managedDevice = this->device;
     int epDeviceCall = 0;
     EXPECT_CALL(*endpoint, device())
-        .WillRepeatedly(
-            testing::Invoke([managedDevice, foreignDevice, &epDeviceCall] {
-                ++epDeviceCall;
-                return (epDeviceCall <= 3) ? managedDevice : foreignDevice;
-            }));
+        .WillRepeatedly([managedDevice, foreignDevice, &epDeviceCall] {
+            ++epDeviceCall;
+            return (epDeviceCall <= 3) ? managedDevice : foreignDevice;
+        });
     EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_))
         .WillOnce(testing::SaveArg<2>(&removeHandler));
 
@@ -3340,6 +3693,7 @@ TEST(MCTPReactor, G223manageMCTPDeviceEBUSYCurrentNonNullExecutesFullPath)
     });
 
     auto initial = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*initial, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*initial, describe())
         .WillRepeatedly(testing::Return("g223-initial"));
     EXPECT_CALL(*endpoint, device()).WillRepeatedly(testing::Return(initial));
@@ -3360,16 +3714,18 @@ TEST(MCTPReactor, G223manageMCTPDeviceEBUSYCurrentNonNullExecutesFullPath)
     EXPECT_CALL(*initial, remove()).WillOnce([&]() { endpoint->remove(); });
 
     auto replacement = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*replacement, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*replacement, describe())
         .WillRepeatedly(testing::Return("g223-replacement"));
-    // New state machine: replacement's setupEndpoint runs immediately during
-    // the recursive manage (no deferred queue). Setup with null ep keeps state
-    // Assigning; unmanage from Assigning → Quarantine (no replacement->remove).
+    // Replacement setup runs after the old endpoint remove completion is
+    // observed on tick. Setup with null ep keeps state Assigning; unmanage from
+    // Assigning → Quarantine (no replacement->remove).
     EXPECT_CALL(*replacement, setup(testing::_))
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), nullptr));
 
     reactor->manageMCTPDevice("/test/g223", initial);
     reactor->manageMCTPDevice("/test/g223", replacement);
+    reactor->tick();
     reactor->unmanageMCTPDevice("/test/g223");
 
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
@@ -3762,6 +4118,7 @@ TEST(MCTPReactor,
     });
 
     auto initial = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*initial, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*initial, describe())
         .WillRepeatedly(testing::Return("g301-initial"));
     EXPECT_CALL(*ep, device()).WillRepeatedly(testing::Return(initial));
@@ -3786,6 +4143,7 @@ TEST(MCTPReactor,
     // state Assigning; unmanage from Assigning → Quarantine (no
     // replacement->remove).
     auto replacement = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*replacement, id()).WillRepeatedly(testing::Return(0U));
     EXPECT_CALL(*replacement, describe())
         .WillRepeatedly(testing::Return("g301-replacement"));
     EXPECT_CALL(*replacement, setup(testing::_))
@@ -3793,6 +4151,7 @@ TEST(MCTPReactor,
 
     reactor->manageMCTPDevice("/g301/path", initial);
     reactor->manageMCTPDevice("/g301/path", replacement);
+    reactor->tick();
     reactor->unmanageMCTPDevice("/g301/path");
 
     // Note: The rethrow branch (code != device_or_resource_busy) is NOT

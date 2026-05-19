@@ -9301,6 +9301,62 @@ TEST_F(FakeConnFixture, MCTPDDeviceRemoveWithEndpointCallsEndpointRemove)
     EXPECT_NO_THROW(dev->remove());
 }
 
+TEST_F(AsyncFixture, MCTPDDeviceRemoveCallbackWithoutEndpointRunsImmediately)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-remove-cb-no-ep", "usb0", std::vector<uint8_t>{0x20});
+
+    bool callbackCalled = false;
+    dev->remove([&callbackCalled]() { callbackCalled = true; });
+
+    EXPECT_TRUE(callbackCalled);
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture, MCTPDDeviceRemoveCallbackWaitsForEndpointRemoveReply)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-remove-cb-ep", "usb0", std::vector<uint8_t>{0x20});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/51"),
+        1, 51);
+    dev->setEndpointForTest(ep);
+
+    bool callbackCalled = false;
+    dev->remove([&callbackCalled]() { callbackCalled = true; });
+
+    EXPECT_FALSE(callbackCalled);
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallSuccess();
+    EXPECT_TRUE(callbackCalled);
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture, MCTPDDeviceRemoveCallbackRunsAfterEndpointRemoveError)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-remove-cb-ep-error", "usb0", std::vector<uint8_t>{0x20});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/52"),
+        1, 52);
+    dev->setEndpointForTest(ep);
+
+    bool callbackCalled = false;
+    dev->remove([&callbackCalled]() { callbackCalled = true; });
+
+    EXPECT_FALSE(callbackCalled);
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallError();
+    EXPECT_TRUE(callbackCalled);
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
 // ===========================================================================
 // Group G201: MCTPDDevice::endpointRemoved() — null endpoint → no crash
 // Source: MCTPEndpoint.cpp line ~684-693: if (endpoint) is false → noop.

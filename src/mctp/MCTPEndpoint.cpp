@@ -955,11 +955,22 @@ void MCTPDDevice::endpointRemoved()
 
 void MCTPDDevice::remove()
 {
+    remove({});
+}
+
+void MCTPDDevice::remove(std::function<void()>&& removed)
+{
     if (endpoint)
     {
         debug("Removing endpoint @ [ {MCTP_ENDPOINT} ]", "MCTP_ENDPOINT",
               endpoint->describe());
-        endpoint->remove();
+        endpoint->remove(std::move(removed));
+        return;
+    }
+
+    if (removed)
+    {
+        removed();
     }
 }
 
@@ -1177,13 +1188,22 @@ void MCTPDEndpoint::subscribe(Event&& degraded, Event&& available,
 
 void MCTPDEndpoint::remove()
 {
+    remove({});
+}
+
+void MCTPDEndpoint::remove(std::function<void()>&& removed)
+{
     connection->async_method_call(
-        [self{shared_from_this()}](const boost::system::error_code& ec) {
+        [self{shared_from_this()}, removed = std::move(removed)](
+            const boost::system::error_code& ec) mutable {
             if (ec)
             {
                 debug("Failed to remove endpoint @ [ {MCTP_ENDPOINT} ]",
                       "MCTP_ENDPOINT", self->describe());
-                return;
+            }
+            if (removed)
+            {
+                removed();
             }
         },
         mctpdBusName, objpath.str, mctpdEndpointControlInterface, "Remove");

@@ -13,6 +13,7 @@
 #include <charconv>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -356,6 +357,31 @@ void MCTPReactor::tick()
     }
 }
 
+void MCTPReactor::addDevice(const std::string& path,
+                            const std::shared_ptr<MCTPDevice>& device)
+{
+    devices.add(path, device);
+    info("MCTP device inventory added at '{INVENTORY_PATH}'", "INVENTORY_PATH",
+         path);
+    if (auto mctpDevice = std::dynamic_pointer_cast<MCTPDDevice>(device))
+    {
+        // There could be case where Discovery Notify is expected to do
+        // device discovery thus setup match rule before hand and setup
+        // callback for the same
+        mctpDevice->onDiscoveryMatchRule();
+        mctpDevice->setRequestSetupCallback(
+            [weak{weak_from_this()}](
+                const std::shared_ptr<MCTPDDevice>& requestingDevice) {
+                auto self = weak.lock();
+                if (!self)
+                {
+                    return;
+                }
+                self->setupEndpoint(requestingDevice);
+            });
+    }
+}
+
 void MCTPReactor::manageMCTPDevice(const std::string& path,
                                    const std::shared_ptr<MCTPDevice>& device)
 {
@@ -379,28 +405,8 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
     switch (states[device->id()])
     {
         case MCTPDeviceState::Unmanaged:
-            devices.add(path, device);
+            addDevice(path, device);
             next(device, MCTPDeviceState::Assigning);
-            info("MCTP device inventory added at '{INVENTORY_PATH}'",
-                 "INVENTORY_PATH", path);
-            if (auto mctpDevice =
-                    std::dynamic_pointer_cast<MCTPDDevice>(device))
-            {
-                // There could be case where Discovery Notify is expected to do
-                // device discovery thus setup match rule before hand and setup
-                // callback for the same
-                mctpDevice->onDiscoveryMatchRule();
-                mctpDevice->setRequestSetupCallback(
-                    [weak{weak_from_this()}](
-                        const std::shared_ptr<MCTPDDevice>& requestingDevice) {
-                        auto self = weak.lock();
-                        if (!self)
-                        {
-                            return;
-                        }
-                        self->setupEndpoint(requestingDevice);
-                    });
-            }
             setupEndpoint(device);
             break;
         case MCTPDeviceState::Assigning:
@@ -419,12 +425,34 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
                 return;
             }
 
-            // Unsynchronised termination so we can configure the new device.
-            // Paired with presence test when handling MCTPDeviceState::Removing
-            // in the subscribed endpoint removed handler
+            warning(
+                "Endpoint reinitialisation due to configuration change at '{INVENTORY_PATH}': Removing '{MCTP_DEVICE}'",
+                "INVENTORY_PATH", path, "MCTP_DEVICE", current->describe());
+
+            auto removed = std::make_shared<bool>(false);
             terminate(current);
-            current->remove();
-            manageMCTPDevice(path, device);
+            current->remove([weak{weak_from_this()}, path, device, removed]() {
+                *removed = true;
+                auto self = weak.lock();
+                if (!self || self->devices.deviceFor(path) != device)
+                {
+                    return;
+                }
+
+                auto state = self->states.find(device->id());
+                if (state != self->states.end() &&
+                    state->second == MCTPDeviceState::Pending)
+                {
+                    self->next(device, MCTPDeviceState::Unassigned);
+                }
+            });
+
+            addDevice(path, device);
+            next(device, MCTPDeviceState::Pending);
+            if (*removed)
+            {
+                next(device, MCTPDeviceState::Unassigned);
+            }
             break;
         }
         case MCTPDeviceState::Quarantine:
@@ -437,6 +465,7 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
             next(device, MCTPDeviceState::Assigned);
             break;
         case MCTPDeviceState::Removing:
+            addDevice(path, device);
             next(device, MCTPDeviceState::Pending);
             break;
         case MCTPDeviceState::Pending:
@@ -446,11 +475,21 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
 
 void MCTPReactor::unmanageMCTPDevice(const std::string& path)
 {
+    unmanageMCTPDevice(path, {});
+}
+
+void MCTPReactor::unmanageMCTPDevice(const std::string& path,
+                                     std::function<void()>&& removed)
+{
     auto device = devices.deviceFor(path);
     if (!device)
     {
         info("Unrecognised inventory item: {INVENTORY_PATH}", "INVENTORY_PATH",
              path);
+        if (removed)
+        {
+            removed();
+        }
         return;
     }
 
@@ -476,7 +515,7 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
             info("Stopping management of MCTP device at [ {MCTP_DEVICE} ]",
                  "MCTP_DEVICE", device->describe());
             next(device, MCTPDeviceState::Removing);
-            device->remove();
+            device->remove(std::move(removed));
             break;
         case MCTPDeviceState::Quarantine:
             break;
@@ -490,7 +529,12 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
         case MCTPDeviceState::Removing:
             break;
         case MCTPDeviceState::Pending:
+            failureCounts.erase(device);
+            devices.remove(device);
+            debug("Stopping management of MCTP device at [ {MCTP_DEVICE} ]",
+                  "MCTP_DEVICE", device->describe());
             next(device, MCTPDeviceState::Removing);
+            device->remove(std::move(removed));
             break;
     }
 }
