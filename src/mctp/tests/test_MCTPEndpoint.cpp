@@ -2521,22 +2521,60 @@ TEST(MCTPDDevice, onDiscoveryNotifyWithoutEndpointAndNoCallbackIsNoop)
 
 #include <sdbusplus/asio/connection.hpp>
 
+class FakeConnSdBusInterface : public sdbusplus::SdBusImpl
+{
+  public:
+    int sd_bus_get_fd(sd_bus* /*bus*/) override
+    {
+        return gFakeSdBusFd;
+    }
+
+    int sd_bus_get_events(sd_bus* /*bus*/) override
+    {
+        return 0;
+    }
+
+    int sd_bus_get_timeout(sd_bus* /*bus*/, uint64_t* timeoutUsec) override
+    {
+        if (timeoutUsec != nullptr)
+        {
+            *timeoutUsec = UINT64_MAX;
+        }
+        return 0;
+    }
+
+    int sd_bus_process(sd_bus* /*bus*/, sd_bus_message** /*ret*/) override
+    {
+        return 0;
+    }
+
+    int sd_bus_add_match(sd_bus* /*bus*/, sd_bus_slot** /*slot*/,
+                         const char* /*path*/,
+                         sd_bus_message_handler_t /*callback*/,
+                         void* /*userdata*/) override
+    {
+        return -ENOTSUP;
+    }
+};
+
 class FakeConnFixture : public ::testing::Test
 {
   protected:
     std::array<int, 2> fds{-1, -1};
     boost::asio::io_context io;
+    FakeConnSdBusInterface sdBusInterface;
     std::shared_ptr<sdbusplus::asio::connection> conn;
 
     void SetUp() override
     {
         ASSERT_EQ(pipe(fds.data()), 0);
         gFakeSdBusFd = fds[0];
-        // Construct without TestSdBusInterface so that sd_bus_add_match and
-        // other virtual calls go through the real SdBusImpl (via libsdbusplus).
-        // For tests that need async mocking, AsyncFixture replaces conn with a
-        // TestSdBusInterface-backed connection in its own SetUp.
-        conn = std::make_shared<sdbusplus::asio::connection>(io, nullptr);
+        // Use a narrow test interface because virtual sd-bus calls from the
+        // shared sdbusplus library do not go through linker --wrap hooks.
+        // Keep match calls on the default SdBusImpl path so tests that cover
+        // subscription failure cleanup still exercise the throwing path.
+        conn = std::make_shared<sdbusplus::asio::connection>(
+            io, sdbusplus::bus_t(nullptr, &sdBusInterface));
     }
 
     void TearDown() override
@@ -9241,6 +9279,62 @@ TEST_F(FakeConnFixture, MCTPDDeviceRemoveWithEndpointCallsEndpointRemove)
     // remove() will call ep->remove() which calls async_method_call with null
     // bus → synchronous error callback → no crash.
     EXPECT_NO_THROW(dev->remove());
+}
+
+TEST_F(AsyncFixture, MCTPDDeviceRemoveCallbackWithoutEndpointRunsImmediately)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-remove-cb-no-ep", "usb0", std::vector<uint8_t>{0x20});
+
+    bool callbackCalled = false;
+    dev->remove([&callbackCalled]() { callbackCalled = true; });
+
+    EXPECT_TRUE(callbackCalled);
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture, MCTPDDeviceRemoveCallbackWaitsForEndpointRemoveReply)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-remove-cb-ep", "usb0", std::vector<uint8_t>{0x20});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/51"),
+        1, 51);
+    dev->setEndpointForTest(ep);
+
+    bool callbackCalled = false;
+    dev->remove([&callbackCalled]() { callbackCalled = true; });
+
+    EXPECT_FALSE(callbackCalled);
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallSuccess();
+    EXPECT_TRUE(callbackCalled);
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture, MCTPDDeviceRemoveCallbackRunsAfterEndpointRemoveError)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-remove-cb-ep-error", "usb0", std::vector<uint8_t>{0x20});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/52"),
+        1, 52);
+    dev->setEndpointForTest(ep);
+
+    bool callbackCalled = false;
+    dev->remove([&callbackCalled]() { callbackCalled = true; });
+
+    EXPECT_FALSE(callbackCalled);
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallError();
+    EXPECT_TRUE(callbackCalled);
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
 }
 
 // ===========================================================================

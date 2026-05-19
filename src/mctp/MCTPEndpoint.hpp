@@ -174,6 +174,15 @@ class MCTPDevice
      * @brief Remove the device and any associated endpoint from the MCTP stack.
      */
     virtual void remove() = 0;
+    virtual void remove(std::function<void()>&& removed)
+    {
+        auto removedCallback = std::move(removed);
+        remove();
+        if (removedCallback)
+        {
+            removedCallback();
+        }
+    }
 
     /**
      * @return A formatted string representing the device in terms of its
@@ -193,6 +202,7 @@ class MCTPDevice
     {
         return std::nullopt;
     }
+
 };
 
 class MCTPDDevice;
@@ -231,6 +241,7 @@ class MCTPDEndpoint :
     void subscribe(Event&& degraded, Event&& available,
                    Event&& removed) override;
     void remove() override;
+    void remove(std::function<void()>&& removed);
 
     std::string describe() const override;
 
@@ -297,6 +308,7 @@ class MCTPDDevice :
                                   const std::shared_ptr<MCTPEndpoint>& ep)>&&
                    added) override;
     void remove() override;
+    void remove(std::function<void()>&& removed) override;
     std::string describe() const override;
     void onDiscoveryNotify(sdbusplus::message_t& msg);
     void onDiscoveryMatchRule();

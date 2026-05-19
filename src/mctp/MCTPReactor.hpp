@@ -79,6 +79,8 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
     void setupEndpoint(const std::shared_ptr<MCTPDevice>& dev);
     void trackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep);
     void untrackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep);
+    void unmanageMCTPDevice(const std::string& path,
+                            std::function<void()>&& removed);
     bool autoUSBRecoveryEnabled = true;
     std::unique_ptr<USBRecovery> usbRecovery;
 };

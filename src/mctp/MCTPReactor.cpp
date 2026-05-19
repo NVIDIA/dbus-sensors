@@ -12,6 +12,7 @@
 #include <charconv>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -188,15 +189,30 @@ void MCTPReactor::setupEndpoint(const std::shared_ptr<MCTPDevice>& dev)
     debug(
         "Attempting to setup up MCTP endpoint for device at [ {MCTP_DEVICE} ]",
         "MCTP_DEVICE", dev->describe());
-    dev->setup([weak{weak_from_this()},
-                dev](const std::error_code& ec,
-                     const std::shared_ptr<MCTPEndpoint>& ep) mutable {
+    dev->setup([weak{weak_from_this()}, wdev = std::weak_ptr<MCTPDevice>(dev)](
+                   const std::error_code& ec,
+                   const std::shared_ptr<MCTPEndpoint>& ep) mutable {
         auto self = weak.lock();
         if (!self)
         {
             info(
-                "The reactor object was destroyed concurrent to the completion of the endpoint setup for '{MCTP_ENDPOINT}'",
-                "MCTP_ENDPOINT", ep->describe());
+                "The reactor object was destroyed concurrent to the completion of the endpoint setup");
+            return;
+        }
+
+        auto dev = wdev.lock();
+        if (!dev)
+        {
+            info(
+                "The device was destroyed concurrent to the completion of endpoint setup");
+            return;
+        }
+
+        if (!self->devices.contains(dev))
+        {
+            debug(
+                "Ignoring endpoint setup completion for unmanaged MCTP device at [ {MCTP_DEVICE} ]",
+                "MCTP_DEVICE", dev->describe());
             return;
         }
 
@@ -316,28 +332,47 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
             return;
         }
 
-        // TODO: Ensure remove completion happens-before add. For now this
-        // happens unsynchronised. Make some noise about it.
         warning(
-            "Unsynchronised endpoint reinitialsation due to configuration change at '{INVENTORY_PATH}': Removing '{MCTP_DEVICE}'",
+            "Endpoint reinitialisation due to configuration change at '{INVENTORY_PATH}': Removing '{MCTP_DEVICE}'",
             "INVENTORY_PATH", path, "MCTP_DEVICE", current->describe());
 
-        unmanageMCTPDevice(path);
+        auto removed = std::make_shared<bool>(false);
+        unmanageMCTPDevice(
+            path, [weak{weak_from_this()}, path, device, removed]() {
+                *removed = true;
+                auto self = weak.lock();
+                if (!self || self->devices.deviceFor(path) != device)
+                {
+                    return;
+                }
+                self->deferSetup(device);
+            });
 
         devices.add(path, device);
-
-        // Pray (this is the unsynchronised bit)
-        deferSetup(device);
+        if (*removed && devices.deviceFor(path) == device)
+        {
+            deferSetup(device);
+        }
     }
 }
 
 void MCTPReactor::unmanageMCTPDevice(const std::string& path)
+{
+    unmanageMCTPDevice(path, {});
+}
+
+void MCTPReactor::unmanageMCTPDevice(const std::string& path,
+                                     std::function<void()>&& removed)
 {
     auto device = devices.deviceFor(path);
     if (!device)
     {
         info("Unrecognised inventory item: {INVENTORY_PATH}", "INVENTORY_PATH",
              path);
+        if (removed)
+        {
+            removed();
+        }
         return;
     }
 
@@ -355,7 +390,7 @@ void MCTPReactor::unmanageMCTPDevice(const std::string& path)
     debug("Stopping management of MCTP device at [ {MCTP_DEVICE} ]",
           "MCTP_DEVICE", device->describe());
 
-    device->remove();
+    device->remove(std::move(removed));
 }
 
 std::optional<std::string> MCTPReactor::getDeviceName(uint8_t eid)

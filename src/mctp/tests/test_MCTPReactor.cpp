@@ -34,6 +34,20 @@ class MockMCTPDevice : public MCTPDevice
     MOCK_METHOD(std::string, describe, (), (const, override));
 };
 
+class AsyncRemoveMockMCTPDevice : public MockMCTPDevice
+{
+  public:
+    using MockMCTPDevice::remove;
+
+    void remove(std::function<void()>&& removed) override
+    {
+        removeComplete = std::move(removed);
+        MockMCTPDevice::remove();
+    }
+
+    std::function<void()> removeComplete;
+};
+
 class MockMCTPEndpoint : public MCTPEndpoint
 {
   public:
@@ -110,6 +124,16 @@ class TestReactorMCTPDDevice : public MCTPDDevice
         removeCalls++;
     }
 
+    void remove(std::function<void()>&& removed) override
+    {
+        auto removedCallback = std::move(removed);
+        remove();
+        if (removedCallback)
+        {
+            removedCallback();
+        }
+    }
+
     std::string describe() const override
     {
         return "test-reactor-mctpd-device";
@@ -157,6 +181,16 @@ class TestUSBMCTPDDevice : public USBMCTPDDevice
     void remove() override
     {
         removeCalls++;
+    }
+
+    void remove(std::function<void()>&& removed) override
+    {
+        auto removedCallback = std::move(removed);
+        remove();
+        if (removedCallback)
+        {
+            removedCallback();
+        }
     }
 
     std::string describe() const override
@@ -490,6 +524,71 @@ TEST(MCTPReactor, replaceConfiguration)
     reactor->manageMCTPDevice("/test", replacement);
     reactor->tick();
     reactor->unmanageMCTPDevice("/test");
+
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(replacement.get()));
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(endpoint.get()));
+}
+
+TEST(MCTPReactor, replaceConfigurationWaitsForAsyncRemoveCompletion)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+
+    std::vector<Association> requiredAssociation{
+        {"configured_by", "configures", "/test/async-replace"}};
+    EXPECT_CALL(assoc,
+                associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
+                          requiredAssociation))
+        .Times(1);
+    EXPECT_CALL(
+        assoc,
+        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
+        .Times(0);
+
+    auto endpoint = std::make_shared<MockMCTPEndpoint>();
+    EXPECT_CALL(*endpoint, describe())
+        .WillRepeatedly(testing::Return("async replace endpoint"));
+    EXPECT_CALL(*endpoint, eid()).WillRepeatedly(testing::Return(9));
+    EXPECT_CALL(*endpoint, network()).WillRepeatedly(testing::Return(1));
+    EXPECT_CALL(*endpoint, remove()).Times(0);
+    EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_));
+
+    auto initial = std::make_shared<AsyncRemoveMockMCTPDevice>();
+    EXPECT_CALL(*initial, describe())
+        .WillRepeatedly(testing::Return("async replace initial"));
+    EXPECT_CALL(*endpoint, device()).WillRepeatedly(testing::Return(initial));
+    EXPECT_CALL(*initial, setup(testing::_))
+        .WillOnce(testing::InvokeArgument<0>(std::error_code(), endpoint));
+    EXPECT_CALL(*initial, remove()).Times(1);
+
+    int replacementSetupCalls = 0;
+    auto replacement = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*replacement, describe())
+        .WillRepeatedly(testing::Return("async replace replacement"));
+    EXPECT_CALL(*replacement, setup(testing::_))
+        .WillOnce([&replacementSetupCalls](auto&& added) {
+            replacementSetupCalls++;
+            added(std::error_code(), nullptr);
+        });
+    EXPECT_CALL(*replacement, remove()).Times(1);
+
+    reactor->manageMCTPDevice("/test/async-replace", initial);
+    reactor->manageMCTPDevice("/test/async-replace", replacement);
+
+    EXPECT_FALSE(reactor->isRetrying(0));
+    reactor->tick();
+    EXPECT_EQ(replacementSetupCalls, 0);
+
+    ASSERT_TRUE(static_cast<bool>(initial->removeComplete));
+    initial->removeComplete();
+    EXPECT_TRUE(reactor->isRetrying(0));
+
+    reactor->tick();
+    EXPECT_EQ(replacementSetupCalls, 1);
+    EXPECT_FALSE(reactor->isRetrying(0));
+
+    reactor->unmanageMCTPDevice("/test/async-replace");
 
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(replacement.get()));
