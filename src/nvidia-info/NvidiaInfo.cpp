@@ -533,8 +533,9 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
 
     for (std::size_t i = 0; i < stored.tpms.size(); ++i)
     {
-        std::string tpmPath = std::format("{}/chassis/motherboard/{}_tpm{}",
-                                          inventoryPath, terminusName, i);
+        std::string tpmPath =
+            std::format("{}/board/HGX_ProcessorModule_{}/tpm{}", inventoryPath,
+                        moduleIdx, i);
         stored.tpms[i].publish(*objServer, tpmPath);
     }
 
