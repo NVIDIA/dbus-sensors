@@ -432,6 +432,7 @@ class MCTPDDevice :
 
     // Health monitoring members
     std::unique_ptr<boost::asio::steady_timer> healthTimer;
+    std::unique_ptr<boost::asio::steady_timer> recoveryTimer;
     bool inHealthRecoveryMode = false;
     std::set<uint8_t> unresponsiveBridgePoolEids;
 
@@ -443,6 +444,9 @@ class MCTPDDevice :
      */
     std::set<uint8_t> discoveredMctpEids;
     void performHealthCheck();
+    void armRecoveryTimeout();
+    void cancelRecoveryTimeout();
+    void onRecoveryTimeout();
     void recover();
     void recover(uint8_t eid);
 

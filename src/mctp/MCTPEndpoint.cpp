@@ -380,6 +380,7 @@ void MCTPDDevice::finaliseEndpoint(
                         weak_from_this(), objpath));
     endpoint = std::make_shared<MCTPDEndpoint>(shared_from_this(), connection,
                                                objpath, network, eid);
+    markDiscoveredMctpEid(eid);
 
     onEndpointEstablished();
 
@@ -390,6 +391,7 @@ void MCTPDDevice::onEndpointEstablished()
 {
     // Clear recovery mode flag when endpoint is successfully established
     inHealthRecoveryMode = false;
+    cancelRecoveryTimeout();
     consecutivePingFailures = 0;
     startHealthMonitoring();
 }
@@ -453,8 +455,10 @@ void MCTPDDevice::performHealthCheck()
     // Reset suppression state for this specific check iteration
     suppressedHealthCheckEids.erase(*staticEID);
 
-    // Only suppress errors for the first (threshold - 1) failures.
-    if (consecutivePingFailures < pingFailureThreshold - 1)
+    // Suppress errors before and after the threshold attempt. The threshold
+    // ping is left unsuppressed so injected TransportErrors produce one RF log.
+    if (consecutivePingFailures < pingFailureThreshold - 1 ||
+        consecutivePingFailures >= pingFailureThreshold)
     {
         suppressedHealthCheckEids.insert(*staticEID);
     }
@@ -561,9 +565,11 @@ void MCTPDDevice::performHealthCheck()
             // Reset suppression state for this EID
             suppressedHealthCheckEids.erase(eid);
 
-            // Suppress signal handler logs for bridge pool health check pings
+            // Suppress errors before and after the threshold attempt. The
+            // threshold ping is left unsuppressed so injected TransportErrors
+            // produce one RF log.
             if (bridgePoolPingFailures[eid] < pingFailureThreshold - 1 ||
-                unresponsiveBridgePoolEids.contains(eid))
+                bridgePoolPingFailures[eid] >= pingFailureThreshold)
             {
                 suppressedHealthCheckEids.insert(eid);
             }
@@ -687,6 +693,61 @@ void MCTPDDevice::markDiscoveredMctpEid(uint8_t eid)
     }
 }
 
+void MCTPDDevice::armRecoveryTimeout()
+{
+    static constexpr std::chrono::seconds recoveryTimeout{10};
+
+    if (!connection || !pollingInterval.has_value() ||
+        pollingInterval.value() == 0)
+    {
+        return;
+    }
+
+    if (!recoveryTimer)
+    {
+        recoveryTimer = std::make_unique<boost::asio::steady_timer>(
+            connection->get_io_context());
+    }
+
+    recoveryTimer->expires_after(recoveryTimeout);
+    recoveryTimer->async_wait(
+        [weak = weak_from_this()](const boost::system::error_code& ec) {
+            if (ec)
+            {
+                return;
+            }
+            if (auto self = weak.lock())
+            {
+                self->onRecoveryTimeout();
+            }
+        });
+}
+
+void MCTPDDevice::cancelRecoveryTimeout()
+{
+    if (recoveryTimer)
+    {
+        recoveryTimer->cancel();
+    }
+}
+
+void MCTPDDevice::onRecoveryTimeout()
+{
+    if (!inHealthRecoveryMode)
+    {
+        return;
+    }
+
+    warning(
+        "Recovery timeout for device {DEVICE_NAME}; restarting health monitoring",
+        "DEVICE_NAME", name);
+    if (endpoint)
+    {
+        inHealthRecoveryMode = false;
+    }
+    startHealthMonitoring();
+}
+
 void MCTPDDevice::recover(uint8_t eid)
 {
     if (!discoveredMctpEids.contains(eid))
@@ -738,6 +799,7 @@ void MCTPDDevice::recover()
     // Stop health monitoring while in recovery mode to avoid wasteful pings.
     // It will restart automatically when device is successfully set up again.
     stopHealthMonitoring();
+    armRecoveryTimeout();
 
     recover(eid);
 }
@@ -799,6 +861,11 @@ void MCTPDDevice::setup(
 
 void MCTPDDevice::endpointRemoved()
 {
+    if (!inHealthRecoveryMode)
+    {
+        cancelRecoveryTimeout();
+    }
+
     if (endpoint)
     {
         debug("Endpoint removed @ [ {MCTP_ENDPOINT} ]", "MCTP_ENDPOINT",
