@@ -43,7 +43,7 @@
 
 namespace fs = std::filesystem;
 static constexpr float pollRateDefault = 0.5;
-constexpr const bool debug = true;
+constexpr const bool debug = false;
 constexpr const char* sensorType = "leakage";
 using sysfsAttributesVec = std::vector<std::pair<std::string, std::string>>;
 
@@ -74,7 +74,7 @@ void createSensors(
     sdbusplus::bus::bus& bus, boost::asio::io_context& io,
     sdbusplus::asio::object_server& objectServer,
     boost::container::flat_map<
-        std::string, std::unique_ptr<DiscreteLeakDetectSensor>>& sensors,
+        std::string, std::shared_ptr<DiscreteLeakDetectSensor>>& sensors,
     std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
 {
     if (!dbusConnection)
@@ -107,10 +107,6 @@ void createSensors(
                     uint8_t address = loadVariant<uint8_t>(cfg, "Address");
                     std::string driver =
                         loadVariant<std::string>(cfg, "Driver");
-                    bool shutdownOnLeak =
-                        loadVariant<bool>(cfg, "ShutdownOnLeak");
-                    unsigned int shutdownDelaySeconds =
-                        loadVariant<unsigned int>(cfg, "ShutdownDelaySeconds");
                     std::string detectorType =
                         loadVariant<std::string>(cfg, "DetectorType");
 
@@ -125,9 +121,6 @@ void createSensors(
                             << "\tPollRate: " << pollRate << "\n"
                             << "\tDriver: " << driver << "\n"
                             << "\tDetectorType: " << detectorType << "\n"
-                            << "\tShutdownOnLeak: " << shutdownOnLeak << "\n"
-                            << "\tShutdownDelaySeconds: "
-                            << shutdownDelaySeconds << "\n"
                             << "\n";
                     }
 
@@ -161,14 +154,16 @@ void createSensors(
 
                             // Create the new sensor
                             auto newSensor =
-                                std::make_unique<DiscreteLeakDetectSensor>(
+                                std::make_shared<DiscreteLeakDetectSensor>(
                                     objectServer, dbusConnection, io,
                                     detectorType, dir, file, *interfacePath,
-                                    pollRate, busId, address, driver,
-                                    shutdownOnLeak, shutdownDelaySeconds);
+                                    pollRate, busId, address, driver);
 
                             // Add the new sensor to the map
-                            sensors[file] = std::move(newSensor);
+                            sensors[file] = newSensor;
+                            boost::asio::post(io, [newSensor]() {
+                                newSensor->startLeakPolicyDiscovery();
+                            });
                         }
                     }
                     else
@@ -189,7 +184,7 @@ int main()
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server objectServer(systemBus, true);
     boost::container::flat_map<std::string,
-                               std::unique_ptr<DiscreteLeakDetectSensor>>
+                               std::shared_ptr<DiscreteLeakDetectSensor>>
         leakSensors;
 
     // Set the output to be unbuffered, so that the output is printed
@@ -234,7 +229,9 @@ int main()
 
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
         setupPropertiesChangedMatches(
-            *systemBus, std::to_array<const char*>({sensorType}), eventHandler);
+            *systemBus,
+            std::to_array<const char*>({sensorType, "LeakDetectionPolicy"}),
+            eventHandler);
     setupManufacturingModeMatch(*systemBus);
     io.run();
     return 0;
