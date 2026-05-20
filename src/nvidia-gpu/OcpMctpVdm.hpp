@@ -1,12 +1,14 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION &
- * AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright OpenBMC Authors
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #pragma once
 
+#include "MessagePackUnpackUtils.hpp"
+
 #include <cstdint>
+#include <functional>
 #include <span>
 
 namespace ocp
@@ -25,9 +27,16 @@ constexpr uint8_t instanceIdBitMask = 0b00011111;
 constexpr uint8_t instanceIdReservedBitMask = 0b00100000;
 constexpr uint8_t datagramBitMask = 0b01000000;
 constexpr uint8_t requestBitMask = 0b10000000;
+constexpr uint8_t eventAckRequiredBitMask = 0b00010000;
+constexpr uint8_t eventVersionBitMask = 0b00001111;
 
 constexpr uint8_t instanceMin = 0;
 constexpr uint8_t instanceMax = 31;
+
+constexpr size_t bindingPciVidSize = 5;
+constexpr size_t commonRequestSize = bindingPciVidSize + 2;
+
+constexpr size_t eventHeaderSize = bindingPciVidSize + 6;
 
 enum class CompletionCode : uint8_t
 {
@@ -38,6 +47,7 @@ enum class CompletionCode : uint8_t
     ERR_NOT_READY = 0x04,
     ERR_UNSUPPORTED_COMMAND_CODE = 0x05,
     ERR_UNSUPPORTED_MSG_TYPE = 0x06,
+    ACCEPTED = 0x7D,
     ERR_BUS_ACCESS = 0x7f,
     ERR_NULL = 0x80,
 };
@@ -89,6 +99,14 @@ struct CommonResponse
     uint16_t data_size;
 } __attribute__((packed));
 
+struct CommonAggregateResponse
+{
+    Message msgHdr;
+    uint8_t command;
+    uint8_t completion_code;
+    uint16_t telemetryCount;
+} __attribute__((packed));
+
 struct CommonNonSuccessResponse
 {
     Message msgHdr;
@@ -100,8 +118,31 @@ struct CommonNonSuccessResponse
 int packHeader(uint16_t pciVendorId, const BindingPciVidInfo& hdr,
                BindingPciVid& msg);
 
+int packHeader(PackBuffer& buffer, uint16_t pciVendorId,
+               MessageType ocpAcceleratorManagementMsgType, uint8_t instanceId,
+               uint8_t msgType);
+
+int unpackHeader(UnpackBuffer& buffer, uint16_t pciVendorId,
+                 MessageType& ocpAcceleratorManagementMsgType,
+                 uint8_t& instanceId, uint8_t& msgType);
+
 int decodeReasonCodeAndCC(std::span<const uint8_t> buf, CompletionCode& cc,
                           uint16_t& reasonCode);
+
+int unpackReasonCodeAndCC(UnpackBuffer& buffer, CompletionCode& cc,
+                          uint16_t& reasonCode);
+
+int decodeEvent(std::span<const uint8_t> buf, uint16_t pciVendorId,
+                uint8_t& messageType, bool& ackRequired, uint8_t& version,
+                uint8_t& eventId, uint8_t& eventClass, uint16_t& eventState,
+                uint8_t& size, std::span<const uint8_t>& eventData);
+
+int decodeAggregateResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    std::move_only_function<int(const uint8_t tag, const uint8_t length,
+                                const uint8_t* value)>
+        handler);
 
 } // namespace accelerator_management
 } // namespace ocp

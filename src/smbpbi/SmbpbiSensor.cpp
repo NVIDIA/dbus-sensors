@@ -1,6 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION &
- * AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright OpenBMC Authors
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -41,8 +40,6 @@ extern "C"
 #include <sys/ioctl.h>
 }
 
-constexpr const bool debug = false;
-
 constexpr const char* configInterface =
     "xyz.openbmc_project.Configuration.SmbpbiVirtualEeprom";
 constexpr const char* sensorRootPath = "/xyz/openbmc_project/sensors/";
@@ -58,9 +55,10 @@ SmbpbiSensor::SmbpbiSensor(
     std::vector<thresholds::Threshold>&& thresholdData, uint8_t busId,
     uint8_t addr, uint16_t offset, std::string& sensorUnits,
     std::string& valueType, size_t pollTime, double minVal, double maxVal,
-    std::string& path) :
+    std::string& path, const PowerState& powerState) :
     Sensor(escapeName(sensorName), std::move(thresholdData),
-           sensorConfiguration, objType, false, false, maxVal, minVal, conn),
+           sensorConfiguration, objType, false, false, maxVal, minVal, conn,
+           powerState),
     busId(busId), addr(addr), offset(offset), sensorUnits(sensorUnits),
     valueType(valueType), objectServer(objectServer),
     inputDev(io, path, boost::asio::random_access_file::read_only),
@@ -232,40 +230,35 @@ int SmbpbiSensor::i2cReadDataBytes(uint8_t* reading, int length)
 
     int ret = 0;
     struct i2c_rdwr_ioctl_data args = {nullptr, 0};
-    struct i2c_msg msg = {0, 0, 0, nullptr};
+    std::array<struct i2c_msg, 2> msgs = {
+        {{0, 0, 0, nullptr}, {0, 0, 0, nullptr}}};
     std::array<uint8_t, 8> cmd{};
 
-    msg.addr = addr;
-    args.msgs = &msg;
-    args.nmsgs = 1;
+    args.msgs = msgs.data();
+    args.nmsgs = msgs.size();
 
-    msg.flags = 0;
-    msg.buf = cmd.data();
+    msgs[0].addr = addr;
+    msgs[0].flags = 0;
+    msgs[0].buf = cmd.data();
     // handle two bytes offset
     if (offset > 255)
     {
-        msg.len = 2;
-        msg.buf[0] = offset >> 8;
-        msg.buf[1] = offset & 0xFF;
+        msgs[0].len = 2;
+        msgs[0].buf[0] = offset >> 8;
+        msgs[0].buf[1] = offset & 0xFF;
     }
     else
     {
-        msg.len = 1;
-        msg.buf[0] = offset & 0xFF;
+        msgs[0].len = 1;
+        msgs[0].buf[0] = offset & 0xFF;
     }
+
+    msgs[1].addr = addr;
+    msgs[1].flags = I2C_M_RD;
+    msgs[1].len = length;
+    msgs[1].buf = reading;
 
     // write offset
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
-    ret = ioctl(fd, I2C_RDWR, &args);
-    if (ret < 0)
-    {
-        return ret;
-    }
-
-    msg.flags = I2C_M_RD;
-    msg.len = length;
-    msg.buf = reading;
-
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     ret = ioctl(fd, I2C_RDWR, &args);
     if (ret < 0)
@@ -290,11 +283,8 @@ int SmbpbiSensor::readRawEEPROMData(double& data)
         data = std::numeric_limits<double>::quiet_NaN();
         return 0;
     }
-    if (debug)
-    {
-        lg2::error("offset: {OFFSET} reading: {READING}", "OFFSET", offset,
-                   "READING", reading);
-    }
+    lg2::debug("offset: {OFFSET} reading: {READING}", "OFFSET", offset,
+               "READING", reading);
     if (sensorType == "temperature")
     {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
@@ -359,18 +349,35 @@ void SmbpbiSensor::waitReadCallback(const boost::system::error_code& ec)
         return;
     }
 
-    if (ret >= 0)
-    {
-        if constexpr (debug)
+    auto outOfRange = [this](auto reading) {
+        if (reading <= this->minValue)
         {
-            lg2::error("Value update to {TEMP}", "TEMP", temp);
+            return true;
         }
-        updateValue(temp);
+        if ((reading >= this->maxValue) && (this->sensorType != "energy"))
+        {
+            return true;
+        }
+        return false;
+    };
+
+    if (ret < 0)
+    {
+        lg2::error("Invalid read at offset: {OFFSET} with value: {VALUE}",
+                   "OFFSET", offset, "VALUE", temp);
+        incrementError();
+    }
+    else if (outOfRange(temp))
+    {
+        lg2::error(
+            "Reading out of range at offset: {OFFSET} with value: {VALUE}",
+            "OFFSET", offset, "VALUE", temp);
+        incrementError();
     }
     else
     {
-        lg2::error("Invalid read getRegsInfo");
-        incrementError();
+        lg2::debug("Value update to {TEMP}", "TEMP", temp);
+        updateValue(temp);
     }
     read();
 }
@@ -420,6 +427,8 @@ static void createSensorCallback(
 
             uint16_t off = loadVariant<uint16_t>(entry.second, "ReadOffset");
 
+            PowerState pwrState = getPowerState(entry.second);
+
             std::string sensorUnits =
                 loadVariant<std::string>(entry.second, "Units");
 
@@ -437,24 +446,22 @@ static void createSensorCallback(
             double minVal = loadVariant<double>(entry.second, "MinValue");
 
             double maxVal = loadVariant<double>(entry.second, "MaxValue");
-            if constexpr (debug)
-            {
-                lg2::info("Configuration parsed for \n\t {CONF}\nwith\n"
-                          "\tName: {NAME}\n"
-                          "\tBus: {BUS}\n"
-                          "\tAddress:{ADDR}\n"
-                          "\tOffset: {OFF}\n"
-                          "\tType : {TYPE}\n"
-                          "\tValue Type : {VALUETYPE}\n"
-                          "\tPollrate: {RATE}\n"
-                          "\tMinValue: {MIN}\n"
-                          "\tMaxValue: {MAX}\n",
-                          "CONF", entry.first, "NAME", name, "BUS",
-                          static_cast<int>(busId), "ADDR",
-                          static_cast<int>(addr), "OFF", static_cast<int>(off),
-                          "UNITS", sensorUnits, "VALUETYPE", valueType, "RATE",
-                          rate, "MIN", minVal, "MAX", maxVal);
-            }
+            lg2::debug("Configuration parsed for \n\t {CONF}\nwith\n"
+                       "\tName: {NAME}\n"
+                       "\tBus: {BUS}\n"
+                       "\tAddress:{ADDR}\n"
+                       "\tOffset: {OFF}\n"
+                       "\tType : {TYPE}\n"
+                       "\tValue Type : {VALUETYPE}\n"
+                       "\tPollrate: {RATE}\n"
+                       "\tMinValue: {MIN}\n"
+                       "\tMaxValue: {MAX}\n"
+                       "\tPowerState: {PWRSTATE}\n",
+                       "CONF", entry.first, "NAME", name, "BUS",
+                       static_cast<int>(busId), "ADDR", static_cast<int>(addr),
+                       "OFF", static_cast<int>(off), "UNITS", sensorUnits,
+                       "VALUETYPE", valueType, "RATE", rate, "MIN", minVal,
+                       "MAX", maxVal, "PWRSTATE", pwrState);
 
             auto& sensor = sensors[name];
             sensor = nullptr;
@@ -464,7 +471,7 @@ static void createSensorCallback(
             sensor = std::make_unique<SmbpbiSensor>(
                 dbusConnection, io, name, pathPair.first, objectType,
                 objectServer, std::move(sensorThresholds), busId, addr, off,
-                sensorUnits, valueType, rate, minVal, maxVal, path);
+                sensorUnits, valueType, rate, minVal, maxVal, path, pwrState);
 
             sensor->init();
         }

@@ -102,6 +102,18 @@ static std::optional<std::string> extractSensorName(
     return std::get<std::string>(findSensorName->second);
 }
 
+static std::optional<std::string> extractPEC(
+    const SensorBaseConfigMap& properties)
+{
+    auto findPEC = properties.find("PEC");
+    if (findPEC == properties.end())
+    {
+        return std::nullopt;
+    }
+
+    return std::visit(VariantToStringVisitor(), findPEC->second);
+}
+
 static std::filesystem::path deriveRootBusPath(int busNumber)
 {
     return "/sys/bus/i2c/devices/i2c-" + std::to_string(busNumber) +
@@ -195,6 +207,13 @@ static void handleSensorConfigurations(
                        *sensorName);
         }
 
+        bool smbusPEC = false;
+        std::optional<std::string> smbusPECStr = extractPEC(sensorConfig);
+        if (smbusPECStr)
+        {
+            smbusPEC = (*smbusPECStr == "Required");
+        }
+
         try
         {
             // May throw for an invalid rootBus
@@ -207,7 +226,7 @@ static void handleSensorConfigurations(
                 std::make_shared<NVMeSensor>(
                     objectServer, io, dbusConnection, *sensorName,
                     std::move(sensorThresholds), interfacePath, *busNumber,
-                    slaveAddr);
+                    slaveAddr, smbusPEC);
 
             context->addSensor(sensorPtr);
         }
@@ -233,18 +252,14 @@ void createSensors(boost::asio::io_context& io,
             handleSensorConfigurations(io, objectServer, dbusConnection,
                                        sensorConfigurations);
         });
-    getter->getConfiguration(std::vector<std::string>{NVMeSensor::sensorType});
+    static constexpr std::array<std::string_view, 1> sensorTypes{
+        {NVMeSensor::sensorType}};
+    getter->getConfiguration(sensorTypes);
 }
 
 static void interfaceRemoved(sdbusplus::message_t& message, NVMEMap& contexts)
 {
-    if (message.is_method_error())
-    {
-        lg2::error("interfacesRemoved callback method error");
-        return;
-    }
-
-    sdbusplus::message::object_path path;
+    sdbusplus::object_path path;
     std::vector<std::string> interfaces;
 
     message.read(path, interfaces);
@@ -303,10 +318,11 @@ int main()
             });
         };
 
+    static constexpr std::array<std::string_view, 1> sensorTypes{
+        {NVMeSensor::sensorType}};
+
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
-        setupPropertiesChangedMatches(
-            *systemBus, std::to_array<const char*>({NVMeSensor::sensorType}),
-            eventHandler);
+        setupPropertiesChangedMatches(*systemBus, sensorTypes, eventHandler);
 
     // Watch for entity-manager to remove configuration interfaces
     // so the corresponding sensors can be removed.

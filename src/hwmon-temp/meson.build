@@ -1,5 +1,6 @@
-src_inc = include_directories('..')
-
+if not get_option('hwmon-temp').allowed()
+    subdir_done()
+endif
 executable(
     'hwmontempsensor',
     'HwmonTempMain.cpp',
@@ -9,3 +10,4 @@ executable(
     install: true,
     install_dir: '/usr/libexec/dbus-sensors',
 )
+

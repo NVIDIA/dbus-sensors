@@ -4,7 +4,6 @@
 
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/async.hpp>
-#include <sdbusplus/async/stdexec/__detail/__then.hpp>
 #include <sdbusplus/message/native_types.hpp>
 #include <sdbusplus/server/manager.hpp>
 
@@ -30,17 +29,15 @@ Monitor::Monitor(sdbusplus::async::context& ctx) :
     ctx.spawn(start());
 }
 
-auto Monitor::inventoryAddedHandler(
-    const sdbusplus::message::object_path& objectPath,
-    const std::string& /*unused*/) -> void
+auto Monitor::inventoryAddedHandler(const sdbusplus::object_path& objectPath,
+                                    const std::string& /*unused*/) -> void
 {
     debug("Received cable added for {NAME}", "NAME", objectPath);
     ctx.spawn(processCableAddedAsync(objectPath));
 }
 
-auto Monitor::inventoryRemovedHandler(
-    const sdbusplus::message::object_path& objectPath,
-    const std::string& /*unused*/) -> void
+auto Monitor::inventoryRemovedHandler(const sdbusplus::object_path& objectPath,
+                                      const std::string& /*unused*/) -> void
 {
     debug("Received cable removed for {NAME}", "NAME", objectPath);
     ctx.spawn(processCableRemovedAsync(objectPath));
@@ -70,8 +67,10 @@ auto Monitor::configUpdateHandler(std::string configFileName)
         co_return;
     }
     co_await entityManager.handleInventoryGet();
-    ctx.spawn(sdbusplus::async::sleep_for(ctx, std::chrono::seconds(5)) |
-              stdexec::then([&]() { reconcileCableData(); }));
+    ctx.spawn([](auto& self) -> sdbusplus::async::task<> {
+        co_await sdbusplus::async::sleep_for(self.ctx, std::chrono::seconds(5));
+        self.reconcileCableData();
+    }(*this));
 }
 
 auto Monitor::start() -> sdbusplus::async::task<>
@@ -92,7 +91,7 @@ auto Monitor::start() -> sdbusplus::async::task<>
     co_return;
 }
 
-auto Monitor::processCableAddedAsync(sdbusplus::message::object_path objectPath)
+auto Monitor::processCableAddedAsync(sdbusplus::object_path objectPath)
     -> sdbusplus::async::task<>
 {
     auto cableName = objectPath.filename();
@@ -126,8 +125,8 @@ auto Monitor::processCableAddedAsync(sdbusplus::message::object_path objectPath)
     co_return;
 }
 
-auto Monitor::processCableRemovedAsync(
-    sdbusplus::message::object_path objectPath) -> sdbusplus::async::task<>
+auto Monitor::processCableRemovedAsync(sdbusplus::object_path objectPath)
+    -> sdbusplus::async::task<>
 {
     auto cableName = objectPath.filename();
 

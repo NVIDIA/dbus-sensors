@@ -1,4 +1,6 @@
-src_inc = include_directories('..')
+if not get_option('intrusion').allowed()
+    subdir_done()
+endif
 
 intrusion_cpp_args = []
 if get_option('intrusion-dbus-log').enabled()

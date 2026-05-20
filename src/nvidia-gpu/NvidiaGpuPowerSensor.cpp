@@ -1,12 +1,12 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION &
- * AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright OpenBMC Authors
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "NvidiaGpuPowerSensor.hpp"
 
 #include "MctpRequester.hpp"
+#include "NvidiaSensorUtils.hpp"
 #include "SensorPaths.hpp"
 #include "Thresholds.hpp"
 #include "Utils.hpp"
@@ -26,14 +26,14 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 using namespace std::literals;
-
-// GPU Power Sensor Averaging Interval in seconds, 0 implies default
-constexpr uint8_t gpuPowerAveragingIntervalInSec{0};
 
 static constexpr double gpuPowerSensorMaxReading = 5000;
 static constexpr double gpuPowerSensorMinReading =
@@ -44,12 +44,13 @@ NvidiaGpuPowerSensor::NvidiaGpuPowerSensor(
     mctp::MctpRequester& mctpRequester, const std::string& name,
     const std::string& sensorConfiguration, uint8_t eid, uint8_t sensorId,
     sdbusplus::asio::object_server& objectServer,
-    std::vector<thresholds::Threshold>&& thresholdData) :
+    std::vector<thresholds::Threshold>&& thresholdData,
+    const gpu::DeviceIdentification deviceType) :
     Sensor(escapeName(name), std::move(thresholdData), sensorConfiguration,
            "power", false, true, gpuPowerSensorMaxReading,
            gpuPowerSensorMinReading, conn),
     eid(eid), sensorId{sensorId},
-    averagingInterval{gpuPowerAveragingIntervalInSec},
+
     mctpRequester(mctpRequester), objectServer(objectServer)
 
 {
@@ -68,6 +69,25 @@ NvidiaGpuPowerSensor::NvidiaGpuPowerSensor(
     association = objectServer.add_interface(dbusPath, association::interface);
 
     setInitialProperties(sensor_paths::unitWatts);
+
+    const std::optional<std::string> physicalContext =
+        nvidia_sensor_utils::deviceTypeToPhysicalContext(deviceType);
+
+    if (physicalContext)
+    {
+        commonPhysicalContextInterface = objectServer.add_interface(
+            dbusPath, "xyz.openbmc_project.Common.PhysicalContext");
+
+        commonPhysicalContextInterface->register_property("Type",
+                                                          *physicalContext);
+
+        if (!commonPhysicalContextInterface->initialize())
+        {
+            lg2::error(
+                "Error initializing PhysicalContext Interface for Power Sensor for eid {EID} and sensor id {SID}",
+                "EID", eid, "SID", sensorId);
+        }
+    }
 }
 
 NvidiaGpuPowerSensor::~NvidiaGpuPowerSensor()
@@ -78,6 +98,10 @@ NvidiaGpuPowerSensor::~NvidiaGpuPowerSensor()
     }
     objectServer.remove_interface(association);
     objectServer.remove_interface(sensorInterface);
+    if (commonPhysicalContextInterface)
+    {
+        objectServer.remove_interface(commonPhysicalContextInterface);
+    }
 }
 
 void NvidiaGpuPowerSensor::checkThresholds()
@@ -85,13 +109,14 @@ void NvidiaGpuPowerSensor::checkThresholds()
     thresholds::checkThresholds(this);
 }
 
-void NvidiaGpuPowerSensor::processResponse(int sendRecvMsgResult)
+void NvidiaGpuPowerSensor::processResponse(const std::error_code& ec,
+                                           std::span<const uint8_t> buffer)
 {
-    if (sendRecvMsgResult != 0)
+    if (ec)
     {
         lg2::error(
             "Error updating Power Sensor for eid {EID} and sensor id {SID} : sending message over MCTP failed, rc={RC}",
-            "EID", eid, "SID", sensorId, "RC", sendRecvMsgResult);
+            "EID", eid, "SID", sensorId, "RC", ec.message());
         return;
     }
 
@@ -100,7 +125,7 @@ void NvidiaGpuPowerSensor::processResponse(int sendRecvMsgResult)
     uint32_t power = 0;
 
     const int rc =
-        gpu::decodeGetCurrentPowerDrawResponse(response, cc, reasonCode, power);
+        gpu::decodeGetPowerDrawResponse(buffer, cc, reasonCode, power);
 
     if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
     {
@@ -118,8 +143,9 @@ void NvidiaGpuPowerSensor::processResponse(int sendRecvMsgResult)
 
 void NvidiaGpuPowerSensor::update()
 {
-    const int rc = gpu::encodeGetCurrentPowerDrawRequest(
-        0, sensorId, averagingInterval, request);
+    const int rc = gpu::encodeGetPowerDrawRequest(
+        gpu::PlatformEnvironmentalCommands::GET_CURRENT_POWER_DRAW, 0, sensorId,
+        averagingInterval, request);
 
     if (rc != 0)
     {
@@ -129,6 +155,15 @@ void NvidiaGpuPowerSensor::update()
     }
 
     mctpRequester.sendRecvMsg(
-        eid, request, response,
-        [this](int sendRecvMsgResult) { processResponse(sendRecvMsgResult); });
+        eid, request,
+        [weak{weak_from_this()}](const std::error_code& ec,
+                                 std::span<const uint8_t> buffer) {
+            std::shared_ptr<NvidiaGpuPowerSensor> self = weak.lock();
+            if (!self)
+            {
+                lg2::error("Invalid reference to NvidiaGpuPowerSensor");
+                return;
+            }
+            self->processResponse(ec, buffer);
+        });
 }

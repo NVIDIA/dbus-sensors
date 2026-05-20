@@ -157,7 +157,7 @@ std::set<std::string> getPermitSet(const SensorBaseConfigMap& config)
 }
 
 bool getSensorConfiguration(
-    const std::string& type,
+    std::string_view type,
     const std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
     ManagedObjectType& resp, bool useCache)
 {
@@ -783,7 +783,7 @@ void setupManufacturingModeMatch(sdbusplus::asio::connection& conn)
     static std::unique_ptr<sdbusplus::bus::match_t> specialModeIntfMatch =
         std::make_unique<sdbusplus::bus::match_t>(
             conn, filterSpecialModeIntfAdd, [](sdbusplus::message_t& m) {
-                sdbusplus::message::object_path path;
+                sdbusplus::object_path path;
                 using PropertyMap =
                     boost::container::flat_map<std::string,
                                                std::variant<std::string>>;
@@ -857,11 +857,12 @@ bool getManufacturingMode()
 
 std::vector<std::unique_ptr<sdbusplus::bus::match_t>>
     setupPropertiesChangedMatches(
-        sdbusplus::asio::connection& bus, std::span<const char* const> types,
+        sdbusplus::asio::connection& bus,
+        std::span<const std::string_view> types,
         const std::function<void(sdbusplus::message_t&)>& handler)
 {
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches;
-    for (const char* type : types)
+    for (const std::string_view type : types)
     {
         auto match = std::make_unique<sdbusplus::bus::match_t>(
             static_cast<sdbusplus::bus_t&>(bus),
@@ -876,16 +877,17 @@ std::vector<std::unique_ptr<sdbusplus::bus::match_t>>
 
 std::vector<std::unique_ptr<sdbusplus::bus::match_t>>
     setupPropertiesChangedMatches(
-        sdbusplus::asio::connection& bus, const I2CDeviceTypeMap& typeMap,
+        sdbusplus::asio::connection& bus,
+        std::span<const std::pair<std::string_view, I2CDeviceType>> typeMap,
         const std::function<void(sdbusplus::message_t&)>& handler)
 {
-    std::vector<const char*> types;
+    std::vector<std::string_view> types;
     types.reserve(typeMap.size());
     for (const auto& [type, dt] : typeMap)
     {
-        types.push_back(type.data());
+        types.push_back(type);
     }
-    return setupPropertiesChangedMatches(bus, {types}, handler);
+    return setupPropertiesChangedMatches(bus, types, handler);
 }
 
 void addEventLog(const std::shared_ptr<sdbusplus::asio::connection>& conn,

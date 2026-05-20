@@ -1,4 +1,6 @@
-src_inc = include_directories('..')
+if not get_option('leakdetector').allowed()
+    subdir_done()
+endif
 phosphor_dbus_interfaces_dep = dependency('phosphor-dbus-interfaces')
 
 executable(

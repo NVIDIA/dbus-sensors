@@ -1,11 +1,11 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION &
- * AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright OpenBMC Authors
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "NvidiaGpuSensor.hpp"
 
+#include "NvidiaSensorUtils.hpp"
 #include "SensorPaths.hpp"
 #include "Thresholds.hpp"
 #include "Utils.hpp"
@@ -25,7 +25,10 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -39,7 +42,8 @@ NvidiaGpuTempSensor::NvidiaGpuTempSensor(
     mctp::MctpRequester& mctpRequester, const std::string& name,
     const std::string& sensorConfiguration, const uint8_t eid, uint8_t sensorId,
     sdbusplus::asio::object_server& objectServer,
-    std::vector<thresholds::Threshold>&& thresholdData) :
+    std::vector<thresholds::Threshold>&& thresholdData,
+    const gpu::DeviceIdentification deviceType) :
     Sensor(escapeName(name), std::move(thresholdData), sensorConfiguration,
            "temperature", false, true, gpuTempSensorMaxReading,
            gpuTempSensorMinReading, conn),
@@ -62,6 +66,45 @@ NvidiaGpuTempSensor::NvidiaGpuTempSensor(
     association = objectServer.add_interface(dbusPath, association::interface);
 
     setInitialProperties(sensor_paths::unitDegreesC);
+
+    if (sensorId == gpuTLimitSensorId)
+    {
+        sensorTypeInterface = objectServer.add_interface(
+            dbusPath, "xyz.openbmc_project.Sensor.Type");
+
+        sensorTypeInterface->register_property(
+            "ReadingBasis",
+            "xyz.openbmc_project.Sensor.Type.ReadingBasisType.Headroom"s);
+        sensorTypeInterface->register_property(
+            "Implementation",
+            "xyz.openbmc_project.Sensor.Type.ImplementationType.Synthesized"s);
+
+        if (!sensorTypeInterface->initialize())
+        {
+            lg2::error(
+                "Error initializing Type Interface for Temperature Sensor for eid {EID} and sensor id {SID}",
+                "EID", eid, "SID", sensorId);
+        }
+    }
+
+    const std::optional<std::string> physicalContext =
+        nvidia_sensor_utils::deviceTypeToPhysicalContext(deviceType);
+
+    if (physicalContext)
+    {
+        commonPhysicalContextInterface = objectServer.add_interface(
+            dbusPath, "xyz.openbmc_project.Common.PhysicalContext");
+
+        commonPhysicalContextInterface->register_property("Type",
+                                                          *physicalContext);
+
+        if (!commonPhysicalContextInterface->initialize())
+        {
+            lg2::error(
+                "Error initializing PhysicalContext Interface for Temperature Sensor for eid {EID} and sensor id {SID}",
+                "EID", eid, "SID", sensorId);
+        }
+    }
 }
 
 NvidiaGpuTempSensor::~NvidiaGpuTempSensor()
@@ -72,6 +115,14 @@ NvidiaGpuTempSensor::~NvidiaGpuTempSensor()
     }
     objectServer.remove_interface(association);
     objectServer.remove_interface(sensorInterface);
+    if (sensorTypeInterface)
+    {
+        objectServer.remove_interface(sensorTypeInterface);
+    }
+    if (commonPhysicalContextInterface)
+    {
+        objectServer.remove_interface(commonPhysicalContextInterface);
+    }
 }
 
 void NvidiaGpuTempSensor::checkThresholds()
@@ -79,13 +130,14 @@ void NvidiaGpuTempSensor::checkThresholds()
     thresholds::checkThresholds(this);
 }
 
-void NvidiaGpuTempSensor::processResponse(int sendRecvMsgResult)
+void NvidiaGpuTempSensor::processResponse(const std::error_code& ec,
+                                          std::span<const uint8_t> buffer)
 {
-    if (sendRecvMsgResult != 0)
+    if (ec)
     {
         lg2::error(
             "Error updating Temperature Sensor for eid {EID} and sensor id {SID} : sending message over MCTP failed, rc={RC}",
-            "EID", eid, "SID", sensorId, "RC", sendRecvMsgResult);
+            "EID", eid, "SID", sensorId, "RC", ec.message());
         return;
     }
 
@@ -93,8 +145,8 @@ void NvidiaGpuTempSensor::processResponse(int sendRecvMsgResult)
     uint16_t reasonCode = 0;
     double tempValue = 0;
 
-    auto rc = gpu::decodeGetTemperatureReadingResponse(
-        getTemperatureReadingResponse, cc, reasonCode, tempValue);
+    auto rc = gpu::decodeGetTemperatureReadingResponse(buffer, cc, reasonCode,
+                                                       tempValue);
 
     if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
     {
@@ -122,6 +174,15 @@ void NvidiaGpuTempSensor::update()
     }
 
     mctpRequester.sendRecvMsg(
-        eid, getTemperatureReadingRequest, getTemperatureReadingResponse,
-        [this](int sendRecvMsgResult) { processResponse(sendRecvMsgResult); });
+        eid, getTemperatureReadingRequest,
+        [weak{weak_from_this()}](const std::error_code& ec,
+                                 std::span<const uint8_t> buffer) {
+            std::shared_ptr<NvidiaGpuTempSensor> self = weak.lock();
+            if (!self)
+            {
+                lg2::error("Invalid reference to NvidiaGpuTempSensor");
+                return;
+            }
+            self->processResponse(ec, buffer);
+        });
 }

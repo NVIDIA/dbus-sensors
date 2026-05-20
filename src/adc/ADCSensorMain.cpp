@@ -49,16 +49,17 @@
 #include <regex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
 
-static constexpr bool debug = false;
 static constexpr float pollRateDefault = 0.5;
 static constexpr float gpioBridgeSetupTimeDefault = 0.02;
 static constexpr double maxVoltageReading = 1.8; // pre sensor scaling
 static constexpr double minVoltageReading = 0;
-static constexpr auto sensorTypes{std::to_array<const char*>({"ADC"})};
+
+static constexpr auto sensorTypes{std::to_array<std::string_view>({"ADC"})};
 static std::regex inputRegex(R"(in(\d+)_input)");
 
 static boost::container::flat_map<size_t, bool> cpuPresence;
@@ -199,7 +200,7 @@ void createSensors(
                     baseConfiguration = nullptr;
 
                     // find base configuration
-                    for (const char* type : sensorTypes)
+                    for (const std::string_view type : sensorTypes)
                     {
                         auto sensorBase =
                             cfgData.find(configInterfaceName(type));
@@ -236,11 +237,8 @@ void createSensors(
                 }
                 if (sensorData == nullptr)
                 {
-                    if constexpr (debug)
-                    {
-                        lg2::error("failed to find match for '{PATH}'", "PATH",
-                                   path.string());
-                    }
+                    lg2::debug("failed to find match for '{PATH}'", "PATH",
+                               path.string());
                     continue;
                 }
 
@@ -387,8 +385,7 @@ void createSensors(
             }
         });
 
-    getter->getConfiguration(
-        std::vector<std::string>{sensorTypes.begin(), sensorTypes.end()});
+    getter->getConfiguration(sensorTypes);
 }
 
 int main()
@@ -411,11 +408,6 @@ int main()
     boost::asio::steady_timer filterTimer(io);
     std::function<void(sdbusplus::message_t&)> eventHandler =
         [&](sdbusplus::message_t& message) {
-            if (message.is_method_error())
-            {
-                lg2::error("callback method error");
-                return;
-            }
             sensorsChanged->insert(message.get_path());
             // this implicitly cancels the timer
             filterTimer.expires_after(std::chrono::seconds(1));
@@ -442,7 +434,7 @@ int main()
             std::string path = message.get_path();
             boost::to_lower(path);
 
-            sdbusplus::message::object_path cpuPath(path);
+            sdbusplus::object_path cpuPath(path);
             std::string cpuName = cpuPath.filename();
             if (!cpuName.starts_with("cpu"))
             {

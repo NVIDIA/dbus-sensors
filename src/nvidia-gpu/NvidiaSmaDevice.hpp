@@ -1,6 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION &
- * AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright OpenBMC Authors
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -20,7 +19,7 @@
 #include <memory>
 #include <string>
 
-class SmaDevice
+class SmaDevice : public std::enable_shared_from_this<SmaDevice>
 {
   public:
     SmaDevice(const SensorConfigs& configs, const std::string& name,
@@ -34,6 +33,8 @@ class SmaDevice
     {
         return path;
     }
+
+    void init();
 
   private:
     void makeSensors();

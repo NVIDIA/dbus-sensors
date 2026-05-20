@@ -69,7 +69,7 @@ struct Sensor
 {
     Sensor(const std::string& name,
            std::vector<thresholds::Threshold>&& thresholdData,
-           const std::string& configurationPath, const std::string& objectType,
+           const std::string& configurationPath, std::string_view objectType,
            bool isSettable, bool isMutable, const double max, const double min,
            std::shared_ptr<sdbusplus::asio::connection>& conn,
            PowerState readState = PowerState::always) :
@@ -78,13 +78,18 @@ struct Sensor
         configInterface(configInterfaceName(objectType)),
         isSensorSettable(isSettable), isValueMutable(isMutable), maxValue(max),
         minValue(min), thresholds(std::move(thresholdData)),
-        hysteresisTrigger((max - min) * 0.01),
-        hysteresisPublish((max - min) * 0.0001), dbusConnection(conn),
-        readState(readState),
+        dbusConnection(conn), readState(readState),
         instrumentation(enableInstrumentation
                             ? std::make_unique<SensorInstrumentation>()
                             : nullptr)
-    {}
+    {
+        // These inits confuse tidy because they're doing constructor params
+        // math on member variables that tidy suggests should be default
+        // initialized. NOLINTBEGIN(cppcoreguidelines-prefer-member-initializer)
+        hysteresisTrigger = (max - min) * 0.01;
+        hysteresisPublish = (max - min) * 0.0001;
+        // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
+    }
     virtual ~Sensor() = default;
     virtual void checkThresholds() = 0;
     std::string name;
@@ -110,8 +115,8 @@ struct Sensor
     double rawValue = std::numeric_limits<double>::quiet_NaN();
     bool overriddenState = false;
     bool internalSet = false;
-    double hysteresisTrigger;
-    double hysteresisPublish;
+    double hysteresisTrigger = 1.0;
+    double hysteresisPublish = 1.0;
     std::shared_ptr<sdbusplus::asio::connection> dbusConnection;
     PowerState readState;
     size_t errCount{0};
@@ -261,7 +266,7 @@ struct Sensor
         return 1;
     }
 
-    void setInitialProperties(const std::string& unit,
+    void setInitialProperties(const std::string_view unit,
                               const std::string& label = std::string(),
                               size_t thresholdSize = 0)
     {
@@ -273,7 +278,7 @@ struct Sensor
 
         createAssociation(association, configurationPath);
 
-        sensorInterface->register_property("Unit", unit);
+        sensorInterface->register_property("Unit", std::string(unit));
         sensorInterface->register_property("MaxValue", maxValue);
         sensorInterface->register_property("MinValue", minValue);
         sensorInterface->register_property(

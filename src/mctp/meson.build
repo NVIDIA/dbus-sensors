@@ -1,3 +1,7 @@
+if not get_option('mctp').allowed()
+    subdir_done()
+endif
+
 executable(
     'mctpreactor',
     'MCTPReactorMain.cpp',
@@ -9,6 +13,7 @@ executable(
     install: true,
     install_dir: '/usr/libexec/dbus-sensors',
 )
+
 if get_option('mctpheartbeat').enabled()
     executable(
         'mctpheartbeat',

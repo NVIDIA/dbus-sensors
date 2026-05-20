@@ -46,6 +46,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -62,15 +63,13 @@ constexpr const char* settingsDaemon = "xyz.openbmc_project.Settings";
 constexpr const char* cfmSettingPath = "/xyz/openbmc_project/control/cfm_limit";
 constexpr const char* cfmSettingIface = "xyz.openbmc_project.Control.CFMLimit";
 
-static constexpr bool debug = false;
-
 static constexpr double cfmMaxReading = 255;
 static constexpr double cfmMinReading = 0;
 
 static constexpr size_t minSystemCfm = 50;
 
 constexpr const auto monitorTypes{
-    std::to_array<const char*>({exitAirType, cfmType})};
+    std::to_array<std::string_view>({exitAirType, cfmType})};
 
 static std::vector<std::shared_ptr<CFMSensor>> cfmSensors;
 
@@ -113,10 +112,6 @@ static void setupSensorMatch(
 static void setMaxPWM(const std::shared_ptr<sdbusplus::asio::connection>& conn,
                       double value)
 {
-    using GetSubTreeType = std::vector<std::pair<
-        std::string,
-        std::vector<std::pair<std::string, std::vector<std::string>>>>>;
-
     conn->async_method_call(
         [conn,
          value](const boost::system::error_code ec, const GetSubTreeType& ret) {
@@ -428,10 +423,7 @@ bool CFMSensor::calculate(double& value)
             [&](const auto& item) { return item.first.ends_with(tachName); });
         if (findReading == tachReadings.end())
         {
-            if constexpr (debug)
-            {
-                lg2::error("Can't find '{NAME}' in readings", "NAME", tachName);
-            }
+            lg2::debug("Can't find '{NAME}' in readings", "NAME", tachName);
             continue; // haven't gotten a reading
         }
 
@@ -456,10 +448,7 @@ bool CFMSensor::calculate(double& value)
         rpm /= findRange->second.second;
         rpm *= 100;
 
-        if constexpr (debug)
-        {
-            lg2::info("Tach '{NAME}' at '{RPM}'", "NAME", tachName, "RPM", rpm);
-        }
+        lg2::debug("Tach '{NAME}' at '{RPM}'", "NAME", tachName, "RPM", rpm);
 
         // Do a linear interpolation to get Ci
         // Ci = C1 + (C2 - C1)/(RPM2 - RPM1) * (TACHi - TACH1)
@@ -486,22 +475,16 @@ bool CFMSensor::calculate(double& value)
         // Now calculate the CFM for this tach
         // CFMi = Ci * Qmaxi * TACHi
         totalCFM += ci * maxCFM * rpm;
-        if constexpr (debug)
-        {
-            lg2::error(
-                "totalCFM = {CFM}, Ci = {CI}, MaxCFM = {MAXCFM}, rpm = {RPM}, c1 = {C1}"
-                ", c2 = {C2}, max = {MAX}, min = {MIN}",
-                "CFM", totalCFM, "CI", ci, "MAXCFM", maxCFM, "RPM", rpm, "C1",
-                c1, "C2", c2, "MAX", tachMaxPercent, "MIN", tachMinPercent);
-        }
+        lg2::debug(
+            "totalCFM = {CFM}, Ci = {CI}, MaxCFM = {MAXCFM}, rpm = {RPM}, c1 = {C1}"
+            ", c2 = {C2}, max = {MAX}, min = {MIN}",
+            "CFM", totalCFM, "CI", ci, "MAXCFM", maxCFM, "RPM", rpm, "C1", c1,
+            "C2", c2, "MAX", tachMaxPercent, "MIN", tachMinPercent);
     }
 
     // divide by 100 since rpm is in percent
     value = totalCFM / 100;
-    if constexpr (debug)
-    {
-        lg2::error("cfm value = {VALUE}", "VALUE", value);
-    }
+    lg2::debug("cfm value = {VALUE}", "VALUE", value);
     return true;
 }
 
@@ -637,11 +620,8 @@ void ExitAirTempSensor::setupMatches()
                             }
                             double reading =
                                 std::visit(VariantToDoubleVisitor(), value);
-                            if constexpr (debug)
-                            {
-                                lg2::error("'{PATH}' reading '{VALUE}'", "PATH",
-                                           cbPath, "VALUE", reading);
-                            }
+                            lg2::debug("'{PATH}' reading '{VALUE}'", "PATH",
+                                       cbPath, "VALUE", reading);
                             self->powerReadings[cbPath] = reading;
                         },
                         matches[0].first, cbPath, properties::interface,
@@ -774,13 +754,10 @@ bool ExitAirTempSensor::calculate(double& val)
         return false;
     }
 
-    if constexpr (debug)
-    {
-        lg2::info(
-            "Power Factor: {POWER_FACTOR}, Inlet Temp: {INLET_TEMP}, Total Power: {TOTAL_POWER}",
-            "POWER_FACTOR", powerFactor, "INLET_TEMP", inletTemp, "TOTAL_POWER",
-            totalPower);
-    };
+    lg2::debug(
+        "Power Factor: {POWER_FACTOR}, Inlet Temp: {INLET_TEMP}, Total Power: {TOTAL_POWER}",
+        "POWER_FACTOR", powerFactor, "INLET_TEMP", inletTemp, "TOTAL_POWER",
+        totalPower);
 
     // Calculate the exit air temp
     // Texit = Tfp + (1.76 * TotalPower / CFM * Faltitude)
@@ -788,10 +765,7 @@ bool ExitAirTempSensor::calculate(double& val)
     reading /= cfm;
     reading += inletTemp;
 
-    if constexpr (debug)
-    {
-        lg2::info("Reading 1: '{VALUE}'", "VALUE", reading);
-    }
+    lg2::debug("Reading 1: '{VALUE}'", "VALUE", reading);
 
     // Now perform the exponential average
     // Calculate alpha based on SDR values and CFM
@@ -829,17 +803,11 @@ bool ExitAirTempSensor::calculate(double& val)
         alphaDT = 1.0;
     }
 
-    if constexpr (debug)
-    {
-        lg2::info("AlphaDT: '{ADT}'", "ADT", alphaDT);
-    }
+    lg2::debug("AlphaDT: '{ADT}'", "ADT", alphaDT);
 
     reading = ((reading * alphaDT) + (lastReading * (1.0 - alphaDT)));
 
-    if constexpr (debug)
-    {
-        lg2::info("Reading 2: '{VALUE}'", "VALUE", reading);
-    }
+    lg2::debug("Reading 2: '{VALUE}'", "VALUE", reading);
 
     val = reading;
     lastReading = reading;
@@ -945,8 +913,7 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
                 exitAirSensor->updateReading();
             }
         });
-    getter->getConfiguration(
-        std::vector<std::string>(monitorTypes.begin(), monitorTypes.end()));
+    getter->getConfiguration(monitorTypes);
 }
 
 int main()

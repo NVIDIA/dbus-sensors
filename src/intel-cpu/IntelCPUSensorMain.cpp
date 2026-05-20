@@ -51,6 +51,7 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -62,8 +63,6 @@
 #define PECI_MBX_INDEX_DDR_DIMM_TEMP MBX_INDEX_DDR_DIMM_TEMP
 #endif
 // clang-format on
-
-static constexpr bool debug = false;
 
 boost::container::flat_map<std::string, std::shared_ptr<IntelCPUSensor>>
     gCpuSensors;
@@ -101,7 +100,7 @@ static constexpr const char* peciDevPath = "/sys/bus/peci/devices/";
 static constexpr const char* rescanPath = "/sys/bus/peci/rescan";
 static constexpr const unsigned int rankNumMax = 8;
 
-static constexpr auto sensorTypes{std::to_array<const char*>({"XeonCPU"})};
+static constexpr auto sensorTypes{std::to_array<std::string_view>({"XeonCPU"})};
 static constexpr auto hiddenProps{std::to_array<const char*>(
     {IntelCPUSensor::labelTcontrol, "Tthrottle", "Tjmax"})};
 
@@ -238,11 +237,8 @@ bool createSensors(boost::asio::io_context& io,
             // shouldn't have an empty name file
             continue;
         }
-        if (debug)
-        {
-            lg2::info("Checking: '{PATH}': '{NAME}'", "PATH", hwmonNamePath,
-                      "NAME", hwmonName);
-        }
+        lg2::debug("Checking: '{PATH}': '{NAME}'", "PATH", hwmonNamePath,
+                   "NAME", hwmonName);
 
         std::string sensorType;
         const SensorData* sensorData = nullptr;
@@ -252,7 +248,7 @@ bool createSensors(boost::asio::io_context& io,
         for (const auto& [path, cfgData] : sensorConfigs)
         {
             sensorData = &cfgData;
-            for (const char* type : sensorTypes)
+            for (const std::string_view type : sensorTypes)
             {
                 sensorType = type;
                 auto sensorBase =
@@ -341,11 +337,8 @@ bool createSensors(boost::asio::io_context& io,
             auto findSensor = gCpuSensors.find(sensorName);
             if (findSensor != gCpuSensors.end())
             {
-                if (debug)
-                {
-                    lg2::info("Skipped: '{PATH}': '{NAME}' is already created",
-                              "PATH", inputPath, "NAME", sensorName);
-                }
+                lg2::debug("Skipped: '{PATH}': '{NAME}' is already created",
+                           "PATH", inputPath, "NAME", sensorName);
                 continue;
             }
 
@@ -399,11 +392,8 @@ bool createSensors(boost::asio::io_context& io,
                 show, dtsOffset);
             sensorPtr->setupRead();
             createdSensors.insert(sensorName);
-            if (debug)
-            {
-                lg2::info("Mapped: '{PATH}' to '{NAME}'", "PATH", inputPath,
-                          "NAME", sensorName);
-            }
+            lg2::debug("Mapped: '{PATH}' to '{NAME}'", "PATH", inputPath,
+                       "NAME", sensorName);
         }
     }
 
@@ -448,11 +438,8 @@ bool exportDevice(const CPUConfig& config)
         if (directoryName.starts_with(busStr) &&
             directoryName.ends_with(addrHexStr))
         {
-            if (debug)
-            {
-                lg2::info("'{PARAMETERS}' on bus '{BUS}' is already exported",
-                          "PARAMETERS", parameters, "BUS", busStr);
-            }
+            lg2::debug("'{PARAMETERS}' on bus '{BUS}' is already exported",
+                       "PARAMETERS", parameters, "BUS", busStr);
 
             std::ofstream delDeviceFile(delDevice);
             if (!delDeviceFile.good())
@@ -647,11 +634,8 @@ void detectCpu(boost::asio::steady_timer& pingTimer,
             keepPinging = true;
         }
 
-        if (debug)
-        {
-            lg2::info("'{NAME}', state: '{STATE}'", "NAME", config.name,
-                      "STATE", config.state);
-        }
+        lg2::debug("'{NAME}', state: '{STATE}'", "NAME", config.name, "STATE",
+                   config.state);
         peci_Unlock(peciFd);
     }
 
@@ -708,7 +692,7 @@ bool getCpuConfig(const std::shared_ptr<sdbusplus::asio::connection>& systemBus,
     bool useCache = false;
     sensorConfigs.clear();
     // use new data the first time, then refresh
-    for (const char* type : sensorTypes)
+    for (std::string_view type : sensorTypes)
     {
         if (!getSensorConfiguration(type, systemBus, sensorConfigs, useCache))
         {
@@ -719,7 +703,7 @@ bool getCpuConfig(const std::shared_ptr<sdbusplus::asio::connection>& systemBus,
 
     // check PECI client addresses and names from CPU configuration
     // before starting ping operation
-    for (const char* type : sensorTypes)
+    for (const std::string_view type : sensorTypes)
     {
         for (const auto& [path, cfgData] : sensorConfigs)
         {
@@ -782,12 +766,9 @@ bool getCpuConfig(const std::shared_ptr<sdbusplus::asio::connection>& systemBus,
                 uint64_t addr = std::visit(VariantToUnsignedIntVisitor(),
                                            findAddress->second);
 
-                if (debug)
-                {
-                    lg2::info(
-                        "bus: {BUS}, addr: {ADDR}, name: {NAME}, type: {TYPE}",
-                        "BUS", bus, "ADDR", addr, "NAME", name, "TYPE", type);
-                }
+                lg2::debug(
+                    "bus: {BUS}, addr: {ADDR}, name: {NAME}, type: {TYPE}",
+                    "BUS", bus, "ADDR", addr, "NAME", name, "TYPE", type);
 
                 cpuConfigs.emplace(bus, addr, name, State::OFF);
             }
@@ -839,16 +820,7 @@ int main()
 
     std::function<void(sdbusplus::message_t&)> eventHandler =
         [&](sdbusplus::message_t& message) {
-            if (message.is_method_error())
-            {
-                lg2::error("callback method error");
-                return;
-            }
-
-            if (debug)
-            {
-                lg2::info("'{PATH}' is changed", "PATH", message.get_path());
-            }
+            lg2::debug("'{PATH}' is changed", "PATH", message.get_path());
 
             // this implicitly cancels the timer
             filterTimer.expires_after(std::chrono::seconds(1));

@@ -1,4 +1,6 @@
-src_inc = include_directories('..')
+if not get_option('psu').allowed()
+    subdir_done()
+endif
 
 executable(
     'psusensor',
@@ -16,3 +18,4 @@ executable(
     install: true,
     install_dir: '/usr/libexec/dbus-sensors',
 )
+

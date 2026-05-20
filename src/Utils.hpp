@@ -51,7 +51,7 @@ using SensorBaseConfigMap =
 using SensorBaseConfiguration = std::pair<std::string, SensorBaseConfigMap>;
 using SensorData = boost::container::flat_map<std::string, SensorBaseConfigMap>;
 using ManagedObjectType =
-    boost::container::flat_map<sdbusplus::message::object_path, SensorData>;
+    boost::container::flat_map<sdbusplus::object_path, SensorData>;
 
 using GetSubTreeType = std::vector<
     std::pair<std::string,
@@ -91,7 +91,7 @@ void setupPowerMatchCallback(
     std::function<void(PowerState type, bool state)>&& callback);
 void setupPowerMatch(const std::shared_ptr<sdbusplus::asio::connection>& conn);
 bool getSensorConfiguration(
-    const std::string& type,
+    std::string_view type,
     const std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
     ManagedObjectType& resp, bool useCache);
 
@@ -114,9 +114,9 @@ void updateTelemetry(const std::string& objPath, const std::string& ifaceName,
                      const std::string& parentChassis);
 #endif
 
-inline std::string configInterfaceName(const std::string& type)
+inline std::string configInterfaceName(std::string_view type)
 {
-    return std::string(configInterfacePrefix) + type;
+    return std::format("{}{}", configInterfacePrefix, type);
 }
 
 namespace mapper
@@ -320,7 +320,7 @@ struct GetSensorConfiguration :
             interface);
     }
 
-    void getConfiguration(const std::vector<std::string>& types,
+    void getConfiguration(std::span<const std::string_view> types,
                           size_t retries = 0)
     {
         if (retries > 5)
@@ -328,7 +328,8 @@ struct GetSensorConfiguration :
             retries = 5;
         }
 
-        std::vector<std::string> interfaces(types.size());
+        std::vector<std::string> interfaces;
+        interfaces.reserve(types.size());
         for (const auto& type : types)
         {
             interfaces.push_back(configInterfaceName(type));
@@ -357,7 +358,10 @@ struct GetSensorConfiguration :
                                        "ERROR_MESSAGE", ec.message());
                             return;
                         }
-                        self->getConfiguration(interfaces, retries - 1);
+                        std::vector<std::string_view> ifaces(interfaces.begin(),
+                                                             interfaces.end());
+
+                        self->getConfiguration(ifaces, retries - 1);
                     });
 
                     return;
@@ -410,7 +414,8 @@ void setupManufacturingModeMatch(sdbusplus::asio::connection& conn);
 bool getManufacturingMode();
 std::vector<std::unique_ptr<sdbusplus::bus::match_t>>
     setupPropertiesChangedMatches(
-        sdbusplus::asio::connection& bus, std::span<const char* const> types,
+        sdbusplus::asio::connection& bus,
+        std::span<const std::string_view> types,
         const std::function<void(sdbusplus::message_t&)>& handler);
 
 template <typename T>

@@ -1,6 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION &
- * AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright OpenBMC Authors
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -35,7 +34,8 @@ struct NvidiaGpuTempSensor :
         mctp::MctpRequester& mctpRequester, const std::string& name,
         const std::string& sensorConfiguration, uint8_t eid, uint8_t sensorId,
         sdbusplus::asio::object_server& objectServer,
-        std::vector<thresholds::Threshold>&& thresholdData);
+        std::vector<thresholds::Threshold>&& thresholdData,
+        gpu::DeviceIdentification deviceType);
 
     ~NvidiaGpuTempSensor() override;
 
@@ -44,7 +44,8 @@ struct NvidiaGpuTempSensor :
     void update();
 
   private:
-    void processResponse(int sendRecvMsgResult);
+    void processResponse(const std::error_code& ec,
+                         std::span<const uint8_t> buffer);
 
     uint8_t eid{};
 
@@ -59,6 +60,8 @@ struct NvidiaGpuTempSensor :
     std::array<uint8_t, sizeof(gpu::GetTemperatureReadingRequest)>
         getTemperatureReadingRequest{};
 
-    std::array<uint8_t, sizeof(gpu::GetTemperatureReadingResponse)>
-        getTemperatureReadingResponse{};
+    std::shared_ptr<sdbusplus::asio::dbus_interface> sensorTypeInterface;
+
+    std::shared_ptr<sdbusplus::asio::dbus_interface>
+        commonPhysicalContextInterface;
 };

@@ -1,4 +1,6 @@
-src_inc = include_directories('..')
+if not get_option('exit-air').allowed()
+    subdir_done()
+endif
 
 executable(
     'exitairtempsensor',
@@ -8,3 +10,4 @@ executable(
     install: true,
     install_dir: '/usr/libexec/dbus-sensors',
 )
+

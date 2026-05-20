@@ -1,11 +1,11 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2022-2025 NVIDIA CORPORATION &
- * AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright OpenBMC Authors
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #pragma once
 #include "Thresholds.hpp"
+#include "Utils.hpp"
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/random_access_file.hpp>
@@ -40,7 +40,7 @@ struct SmbpbiSensor : public Sensor
         std::vector<thresholds::Threshold>&& thresholdData, uint8_t busId,
         uint8_t addr, uint16_t offset, std::string& sensorUnits,
         std::string& valueType, size_t pollTime, double minVal, double maxVal,
-        std::string& path);
+        std::string& path, const PowerState& powerState);
     ~SmbpbiSensor() override;
 
     void checkThresholds() override;

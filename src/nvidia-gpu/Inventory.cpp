@@ -14,14 +14,18 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <variant>
 #include <vector>
 
-constexpr const char* inventoryPrefix = "/xyz/openbmc_project/inventory/";
+constexpr uint32_t milliwattsPerWatt = 1000;
+
 constexpr const char* acceleratorIfaceName =
     "xyz.openbmc_project.Inventory.Item.Accelerator";
 static constexpr const char* assetIfaceName =
@@ -35,13 +39,11 @@ Inventory::Inventory(
     sdbusplus::asio::object_server& objectServer,
     const std::string& inventoryName, mctp::MctpRequester& mctpRequester,
     const gpu::DeviceIdentification deviceTypeIn, const uint8_t eid,
-    boost::asio::io_context& io) :
+    boost::asio::io_context& io,
+    const std::shared_ptr<sdbusplus::asio::dbus_interface>& powerCapInterface) :
     name(escapeName(inventoryName)), mctpRequester(mctpRequester),
     deviceType(deviceTypeIn), eid(eid), retryTimer(io)
 {
-    requestBuffer = std::make_shared<InventoryRequestBuffer>();
-    responseBuffer = std::make_shared<InventoryResponseBuffer>();
-
     std::string path = inventoryPrefix + name;
 
     assetIface = objectServer.add_interface(path, assetIfaceName);
@@ -68,12 +70,37 @@ Inventory::Inventory(
     // Static properties
     if (deviceType == gpu::DeviceIdentification::DEVICE_GPU)
     {
+        constexpr const char* acceleratorTypeGpu =
+            "xyz.openbmc_project.Inventory.Item.Accelerator.AcceleratorType.GPU";
         acceleratorInterface =
             objectServer.add_interface(path, acceleratorIfaceName);
-        acceleratorInterface->register_property("Type", std::string("GPU"));
+        acceleratorInterface->register_property("Type", acceleratorTypeGpu);
+
+        // Register BoostClockFrequency property
+        acceleratorInterface->register_property(
+            "BoostClockFrequency", std::numeric_limits<uint64_t>::max());
+
         acceleratorInterface->initialize();
+
+        // Add to query queue (manually since registerProperty is for strings
+        // only)
+        properties[gpu::InventoryPropertyId::DEFAULT_BOOST_CLOCKS] = {
+            acceleratorInterface, "BoostClockFrequency", 0, true};
     }
 
+    if (powerCapInterface)
+    {
+        properties[gpu::InventoryPropertyId::MIN_DEVICE_POWER_LIMIT] = {
+            powerCapInterface, "MinPowerCapValue", 0, true};
+        properties[gpu::InventoryPropertyId::MAX_DEVICE_POWER_LIMIT] = {
+            powerCapInterface, "MaxPowerCapValue", 0, true};
+        properties[gpu::InventoryPropertyId::RATED_DEVICE_POWER_LIMIT] = {
+            powerCapInterface, "DefaultPowerCap", 0, true};
+    }
+}
+
+void Inventory::init()
+{
     processNextProperty();
 }
 
@@ -134,7 +161,7 @@ void Inventory::sendInventoryPropertyRequest(
     gpu::InventoryPropertyId propertyId)
 {
     int rc = gpu::encodeGetInventoryInformationRequest(
-        0, static_cast<uint8_t>(propertyId), *requestBuffer);
+        0, static_cast<uint8_t>(propertyId), requestBuffer);
     if (rc != 0)
     {
         lg2::error(
@@ -148,15 +175,23 @@ void Inventory::sendInventoryPropertyRequest(
         "Sending inventory request for property ID {PROP_ID} to EID {EID} for {NAME}",
         "PROP_ID", static_cast<uint8_t>(propertyId), "EID", eid, "NAME", name);
 
-    mctpRequester.sendRecvMsg(eid, *requestBuffer, *responseBuffer,
-                              [this, propertyId](int sendRecvMsgResult) {
-                                  this->handleInventoryPropertyResponse(
-                                      propertyId, sendRecvMsgResult);
-                              });
+    mctpRequester.sendRecvMsg(
+        eid, requestBuffer,
+        [weak{weak_from_this()}, propertyId](const std::error_code& ec,
+                                             std::span<const uint8_t> buffer) {
+            std::shared_ptr<Inventory> self = weak.lock();
+            if (!self)
+            {
+                lg2::error("Invalid Inventory reference");
+                return;
+            }
+            self->handleInventoryPropertyResponse(propertyId, ec, buffer);
+        });
 }
 
 void Inventory::handleInventoryPropertyResponse(
-    gpu::InventoryPropertyId propertyId, int sendRecvMsgResult)
+    gpu::InventoryPropertyId propertyId, const std::error_code& ec,
+    std::span<const uint8_t> buffer)
 {
     auto it = properties.find(propertyId);
     if (it == properties.end())
@@ -168,19 +203,19 @@ void Inventory::handleInventoryPropertyResponse(
     }
 
     bool success = false;
-    if (sendRecvMsgResult == 0)
+    if (!ec)
     {
         ocp::accelerator_management::CompletionCode cc{};
         uint16_t reasonCode = 0;
         gpu::InventoryValue info;
         int rc = gpu::decodeGetInventoryInformationResponse(
-            *responseBuffer, cc, reasonCode, propertyId, info);
+            buffer, cc, reasonCode, propertyId, info);
 
         lg2::info(
             "Response for property ID {PROP_ID} from {NAME}, sendRecvMsgResult: {RESULT}, decode_rc: {RC}, completion_code: {CC}, reason_code: {REASON}",
             "PROP_ID", static_cast<uint8_t>(propertyId), "NAME", name, "RESULT",
-            sendRecvMsgResult, "RC", rc, "CC", static_cast<uint8_t>(cc),
-            "REASON", reasonCode);
+            ec.message(), "RC", rc, "CC", static_cast<uint8_t>(cc), "REASON",
+            reasonCode);
 
         if (rc == 0 &&
             cc == ocp::accelerator_management::CompletionCode::SUCCESS)
@@ -239,6 +274,51 @@ void Inventory::handleInventoryPropertyResponse(
                     }
                     break;
 
+                case gpu::InventoryPropertyId::DEFAULT_BOOST_CLOCKS:
+                    if (std::holds_alternative<uint32_t>(info))
+                    {
+                        const uint32_t clockSpeed = std::get<uint32_t>(info);
+                        // Convert to uint64_t for D-Bus interface requirement
+                        const uint64_t clockSpeed64 =
+                            static_cast<uint64_t>(clockSpeed);
+                        it->second.interface->set_property(
+                            it->second.propertyName, clockSpeed64);
+                        success = true;
+                    }
+                    else
+                    {
+                        lg2::error(
+                            "Property ID {PROP_ID} for {NAME} expected uint32_t but got different type",
+                            "PROP_ID", static_cast<uint8_t>(propertyId), "NAME",
+                            name);
+                    }
+                    break;
+
+                case gpu::InventoryPropertyId::MIN_DEVICE_POWER_LIMIT:
+                case gpu::InventoryPropertyId::MAX_DEVICE_POWER_LIMIT:
+                case gpu::InventoryPropertyId::RATED_DEVICE_POWER_LIMIT:
+                    if (std::holds_alternative<uint32_t>(info))
+                    {
+                        // Device reports milliwatts; expose watts on D-Bus
+                        uint32_t powerLimit =
+                            std::get<uint32_t>(info) / milliwattsPerWatt;
+                        it->second.interface->set_property(
+                            it->second.propertyName, powerLimit);
+                        lg2::info(
+                            "Successfully received property ID {PROP_ID} for {NAME} with value: {VALUE}",
+                            "PROP_ID", static_cast<uint8_t>(propertyId), "NAME",
+                            name, "VALUE", powerLimit);
+                        success = true;
+                    }
+                    else
+                    {
+                        lg2::error(
+                            "Property ID {PROP_ID} for {NAME} expected uint32_t but got different type",
+                            "PROP_ID", static_cast<uint8_t>(propertyId), "NAME",
+                            name);
+                    }
+                    break;
+
                 default:
                     lg2::error("Unsupported property ID {PROP_ID} for {NAME}",
                                "PROP_ID", static_cast<uint8_t>(propertyId),
@@ -273,15 +353,22 @@ void Inventory::handleInventoryPropertyResponse(
         else
         {
             retryTimer.expires_after(retryDelay);
-            retryTimer.async_wait([this](const boost::system::error_code& ec) {
-                if (ec)
-                {
-                    lg2::error("Retry timer error for {NAME}: {ERROR}", "NAME",
-                               name, "ERROR", ec.message());
-                    return;
-                }
-                this->processNextProperty();
-            });
+            retryTimer.async_wait(
+                [weak{weak_from_this()}](const boost::system::error_code& ec) {
+                    std::shared_ptr<Inventory> self = weak.lock();
+                    if (!self)
+                    {
+                        lg2::error("Invalid reference to Inventory");
+                        return;
+                    }
+                    if (ec)
+                    {
+                        lg2::error("Retry timer error for {NAME}: {ERROR}",
+                                   "NAME", self->name, "ERROR", ec.message());
+                        return;
+                    }
+                    self->processNextProperty();
+                });
             return;
         }
     }

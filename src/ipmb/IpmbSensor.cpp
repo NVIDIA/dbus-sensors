@@ -50,8 +50,10 @@
 #include <variant>
 #include <vector>
 
-constexpr const bool debug = false;
 static constexpr uint8_t meAddressDefault = 1;
+static constexpr double ipmbMaxReading = 0xFF;
+static constexpr double ipmbMinReading = 0;
+
 static constexpr uint8_t lun = 0;
 static constexpr uint8_t hostSMbusIndexDefault = 0x03;
 static constexpr uint8_t ipmbBusIndexDefault = 0;
@@ -435,16 +437,14 @@ void IpmbSensor::ipmbRequestCompletionCb(const boost::system::error_code& ec,
         return;
     }
     const std::vector<uint8_t>& data = std::get<5>(response);
-    if constexpr (debug)
+
+    std::ostringstream tempStream;
+    for (int d : data)
     {
-        std::ostringstream tempStream;
-        for (int d : data)
-        {
-            tempStream << std::setfill('0') << std::setw(2) << std::hex << d
-                       << " ";
-        }
-        lg2::info("'{NAME}': '{DATA}'", "NAME", name, "DATA", tempStream.str());
+        tempStream << std::setfill('0') << std::setw(2) << std::hex << d << " ";
     }
+    lg2::debug("'{NAME}': '{DATA}'", "NAME", name, "DATA", tempStream.str());
+
     if (data.empty())
     {
         incrementError();
@@ -718,18 +718,12 @@ void interfaceRemoved(
     boost::container::flat_map<std::string, std::shared_ptr<IpmbSensor>>&
         sensors)
 {
-    if (message.is_method_error())
-    {
-        lg2::error("interfacesRemoved callback method error");
-        return;
-    }
-
-    sdbusplus::message::object_path removedPath;
+    sdbusplus::object_path removedPath;
     std::vector<std::string> interfaces;
 
     message.read(removedPath, interfaces);
 
-    // If the xyz.openbmc_project.Confguration.X interface was removed
+    // If the xyz.openbmc_project.Configuration.X interface was removed
     // for one or more sensors, delete those sensor objects.
     auto sensorIt = sensors.begin();
     while (sensorIt != sensors.end())

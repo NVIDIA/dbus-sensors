@@ -50,14 +50,15 @@
 #include <optional>
 #include <regex>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <variant>
 #include <vector>
 
 // The following two structures need to be consistent
-static auto sensorTypes{std::to_array<const char*>(
-    {"AspeedFan", "I2CFan", "NuvotonFan", "HPEFan"})};
+static constexpr std::array<std::string_view, 4> sensorTypes{
+    {"AspeedFan", "I2CFan", "NuvotonFan", "HPEFan"}};
 
 enum FanTypes
 {
@@ -82,6 +83,7 @@ static const std::map<std::string, FanTypes> compatibleFanTypes = {
     {"aspeed,ast2400-pwm-tacho", FanTypes::aspeed},
     {"aspeed,ast2500-pwm-tacho", FanTypes::aspeed},
     {"aspeed,ast2600-pwm-tach", FanTypes::aspeed},
+    {"aspeed,ast2700-pwm-tach", FanTypes::aspeed},
     {"nuvoton,npcm750-pwm-fan", FanTypes::nuvoton},
     {"nuvoton,npcm845-pwm-fan", FanTypes::nuvoton},
     {"hpe,gxp-fan-ctrl", FanTypes::hpe}
@@ -144,11 +146,11 @@ bool findPwmfanPath(unsigned int configPwmfanIndex,
     /* Search PWM since pwm-fan had separated
      * PWM from tach directory and 1 channel only*/
     std::vector<std::filesystem::path> pwmfanPaths;
-    std::string pwnfanDevName("pwm-fan");
+    std::string pwmfanDevName("pwm-fan");
 
-    pwnfanDevName += std::to_string(configPwmfanIndex);
+    pwmfanDevName += std::to_string(configPwmfanIndex);
 
-    if (!findFiles(std::filesystem::path("/sys/class/hwmon"), R"(pwm\d+)",
+    if (!findFiles(std::filesystem::path("/sys/class/hwmon"), R"(pwm\d+$)",
                    pwmfanPaths))
     {
         lg2::error("No PWMs are found!");
@@ -167,7 +169,7 @@ bool findPwmfanPath(unsigned int configPwmfanIndex,
             continue;
         }
 
-        if (link.filename().string() == pwnfanDevName)
+        if (link.filename().string() == pwmfanDevName)
         {
             pwmPath = path;
             return true;
@@ -192,7 +194,7 @@ bool findPwmPath(const std::filesystem::path& directory, unsigned int pwm,
             lg2::error("exists() failed: '{ERROR_MESSAGE}'", "ERROR_MESSAGE",
                        ec.message());
         }
-        /* try search form pwm-fanX directory */
+        /* try search from pwm-fanX directory */
         return findPwmfanPath(pwm, pwmPath);
     }
 
@@ -320,7 +322,7 @@ void createSensors(
             // convert to 0 based
             size_t index = std::stoul(indexStr) - 1;
 
-            const char* baseType = nullptr;
+            std::string_view baseType;
             const SensorData* sensorData = nullptr;
             const std::string* interfacePath = nullptr;
             const SensorBaseConfiguration* baseConfiguration = nullptr;
@@ -669,9 +671,7 @@ void createSensors(
 
         createRedundancySensor(tachSensors, dbusConnection, objectServer);
     });
-    getter->getConfiguration(
-        std::vector<std::string>{sensorTypes.begin(), sensorTypes.end()},
-        retries);
+    getter->getConfiguration(sensorTypes, retries);
 }
 
 int main()
@@ -701,11 +701,6 @@ int main()
     boost::asio::steady_timer filterTimer(io);
     std::function<void(sdbusplus::message_t&)> eventHandler =
         [&](sdbusplus::message_t& message) {
-            if (message.is_method_error())
-            {
-                lg2::error("callback method error");
-                return;
-            }
             sensorsChanged->insert(message.get_path());
             // this implicitly cancels the timer
             filterTimer.expires_after(std::chrono::seconds(1));

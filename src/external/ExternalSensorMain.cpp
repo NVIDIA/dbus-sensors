@@ -20,9 +20,11 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -55,9 +57,7 @@
 // https://gerrit.openbmc-project.xyz/c/openbmc/docs/+/41452
 // https://github.com/openbmc/docs/tree/master/designs/
 
-static constexpr bool debug = false;
-
-static const char* sensorType = "ExternalSensor";
+static constexpr std::string_view sensorType = "ExternalSensor";
 
 void updateReaper(
     boost::container::flat_map<std::string, std::shared_ptr<ExternalSensor>>&
@@ -117,10 +117,7 @@ void updateReaper(
 
     if (!needCheck)
     {
-        if constexpr (debug)
-        {
-            lg2::error("Next ExternalSensor timer idle");
-        }
+        lg2::debug("Next ExternalSensor timer idle");
 
         return;
     }
@@ -143,13 +140,9 @@ void updateReaper(
         updateReaper(sensors, timer, std::chrono::steady_clock::now());
     });
 
-    if constexpr (debug)
-    {
-        lg2::error(
-            "Next ExternalSensor timer '{VALUE}' us", "VALUE",
-            std::chrono::duration_cast<std::chrono::microseconds>(nextCheck)
-                .count());
-    }
+    lg2::debug("Next ExternalSensor timer '{VALUE}' us", "VALUE",
+               std::chrono::duration_cast<std::chrono::microseconds>(nextCheck)
+                   .count());
 }
 
 void createSensors(
@@ -161,10 +154,7 @@ void createSensors(
         sensorsChanged,
     boost::asio::steady_timer& reaperTimer)
 {
-    if constexpr (debug)
-    {
-        lg2::error("ExternalSensor considering creating sensors");
-    }
+    lg2::debug("ExternalSensor considering creating sensors");
 
     auto getter = std::make_shared<GetSensorConfiguration>(
         dbusConnection,
@@ -172,8 +162,8 @@ void createSensors(
          &reaperTimer](const ManagedObjectType& sensorConfigurations) {
             bool firstScan = (sensorsChanged == nullptr);
 
-            for (const std::pair<sdbusplus::message::object_path, SensorData>&
-                     sensor : sensorConfigurations)
+            for (const std::pair<sdbusplus::object_path, SensorData>& sensor :
+                 sensorConfigurations)
             {
                 const std::string& interfacePath = sensor.first.str;
                 const SensorData& sensorData = sensor.second;
@@ -191,7 +181,7 @@ void createSensors(
                 const SensorBaseConfigMap& baseConfigMap =
                     baseConfiguration.second;
 
-                // MinValue and MinValue are mandatory numeric parameters
+                // MinValue and MaxValue are mandatory numeric parameters
                 auto minFound = baseConfigMap.find("MinValue");
                 if (minFound == baseConfigMap.end())
                 {
@@ -293,12 +283,8 @@ void createSensors(
                             sensorsChanged->erase(it);
                             findSensor->second = nullptr;
                             found = true;
-                            if constexpr (debug)
-                            {
-                                lg2::error(
-                                    "ExternalSensor '{NAME}' change found",
-                                    "NAME", sensorName);
-                            }
+                            lg2::debug("ExternalSensor '{NAME}' change found",
+                                       "NAME", sensorName);
                             break;
                         }
                     }
@@ -319,34 +305,37 @@ void createSensors(
 
                 auto& sensorEntry = sensors[sensorName];
                 sensorEntry = nullptr;
-
-                sensorEntry = std::make_shared<ExternalSensor>(
-                    sensorType, objectServer, dbusConnection, sensorName,
-                    sensorUnits, std::move(sensorThresholds), interfacePath,
-                    maxValue, minValue, timeoutSecs, readState);
-                sensorEntry->initWriteHook(
-                    [&sensors, &reaperTimer](
-                        const std::chrono::steady_clock::time_point& now) {
-                        updateReaper(sensors, reaperTimer, now);
-                    });
-
-                if constexpr (debug)
+                try
                 {
-                    lg2::error("ExternalSensor '{NAME}' created", "NAME",
+                    sensorEntry = std::make_shared<ExternalSensor>(
+                        sensorType, objectServer, dbusConnection, sensorName,
+                        sensorUnits, std::move(sensorThresholds), interfacePath,
+                        maxValue, minValue, timeoutSecs, readState);
+                    sensorEntry->initWriteHook(
+                        [&sensors, &reaperTimer](
+                            const std::chrono::steady_clock::time_point& now) {
+                            updateReaper(sensors, reaperTimer, now);
+                        });
+
+                    lg2::debug("ExternalSensor '{NAME}' created", "NAME",
                                sensorName);
+                }
+                catch (const std::exception& e)
+                {
+                    lg2::error(
+                        "Failed to create ExternalSensor '{NAME}': {ERROR}",
+                        "NAME", sensorName, "ERROR", e.what());
+                    continue;
                 }
             }
         });
-
-    getter->getConfiguration(std::vector<std::string>{sensorType});
+    constexpr std::array<std::string_view, 1> sensorTypes{{sensorType}};
+    getter->getConfiguration(sensorTypes);
 }
 
 int main()
 {
-    if constexpr (debug)
-    {
-        lg2::error("ExternalSensor service starting up");
-    }
+    lg2::debug("ExternalSensor service starting up");
 
     boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
@@ -370,19 +359,10 @@ int main()
     std::function<void(sdbusplus::message_t&)> eventHandler =
         [&objectServer, &sensors, &systemBus, &sensorsChanged, &filterTimer,
          &reaperTimer](sdbusplus::message_t& message) mutable {
-            if (message.is_method_error())
-            {
-                lg2::error("callback method error");
-                return;
-            }
-
             const auto* messagePath = message.get_path();
             sensorsChanged->insert(messagePath);
-            if constexpr (debug)
-            {
-                lg2::error("ExternalSensor change event received: '{PATH}'",
-                           "PATH", messagePath);
-            }
+            lg2::debug("ExternalSensor change event received: '{PATH}'", "PATH",
+                       messagePath);
 
             // this implicitly cancels the timer
             filterTimer.expires_after(std::chrono::seconds(1));
@@ -405,14 +385,11 @@ int main()
                 });
         };
 
+    static constexpr std::array<std::string_view, 1> sensorTypes{{sensorType}};
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
-        setupPropertiesChangedMatches(
-            *systemBus, std::to_array<const char*>({sensorType}), eventHandler);
+        setupPropertiesChangedMatches(*systemBus, sensorTypes, eventHandler);
 
-    if constexpr (debug)
-    {
-        lg2::error("ExternalSensor service entering main loop");
-    }
+    lg2::debug("ExternalSensor service entering main loop");
 
     io.run();
 }

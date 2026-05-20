@@ -122,4 +122,14 @@ class MCTPDeviceRepository
             }
         }
     }
+
+    auto begin()
+    {
+        return devices.begin();
+    }
+
+    auto end()
+    {
+        return devices.end();
+    }
 };

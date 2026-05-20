@@ -193,6 +193,11 @@ class MCTPDevice
     {
         return std::nullopt;
     }
+
+    /**
+     * @return An opaque, internally-stable identifier representing the device
+     */
+    virtual std::size_t id() const = 0;
 };
 
 class MCTPDDevice;
@@ -218,7 +223,7 @@ class MCTPDEndpoint :
     MCTPDEndpoint(
         const std::shared_ptr<MCTPDDevice>& dev,
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
-        sdbusplus::message::object_path objpath, int network, uint8_t eid) :
+        sdbusplus::object_path objpath, int network, uint8_t eid) :
         dev(dev), connection(connection), objpath(std::move(objpath)),
         mctp{network, eid}
     {}
@@ -249,7 +254,7 @@ class MCTPDEndpoint :
   private:
     std::shared_ptr<MCTPDDevice> dev;
     std::shared_ptr<sdbusplus::asio::connection> connection;
-    sdbusplus::message::object_path objpath;
+    sdbusplus::object_path objpath;
     struct
     {
         int network;
@@ -270,7 +275,7 @@ class MCTPDEndpoint :
  *
  * The construction or destruction of an MctpdDevice is not required to be
  * correlated with signals from @c mctpd. For instance, EntityManager may expose
- * the existance of an MCTP-capable device through its usual configuration
+ * the existence of an MCTP-capable device through its usual configuration
  * mechanisms.
  */
 class MCTPDDevice :
@@ -406,6 +411,7 @@ class MCTPDDevice :
     // Callback to request setup through the reactor
     std::function<void(const std::shared_ptr<MCTPDDevice>&)>
         requestSetupCallback;
+    std::size_t id() const override;
 
   private:
     static void onEndpointInterfacesRemoved(

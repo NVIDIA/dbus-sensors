@@ -1,6 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION &
- * AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright OpenBMC Authors
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -17,12 +16,16 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
+#include <system_error>
 #include <vector>
 
 constexpr uint8_t gpuPowerSensorId{0};
 
-struct NvidiaGpuPowerSensor : public Sensor
+struct NvidiaGpuPowerSensor :
+    public Sensor,
+    public std::enable_shared_from_this<NvidiaGpuPowerSensor>
 {
   public:
     NvidiaGpuPowerSensor(
@@ -30,7 +33,8 @@ struct NvidiaGpuPowerSensor : public Sensor
         mctp::MctpRequester& mctpRequester, const std::string& name,
         const std::string& sensorConfiguration, uint8_t eid, uint8_t sensorId,
         sdbusplus::asio::object_server& objectServer,
-        std::vector<thresholds::Threshold>&& thresholdData);
+        std::vector<thresholds::Threshold>&& thresholdData,
+        gpu::DeviceIdentification deviceType);
 
     ~NvidiaGpuPowerSensor() override;
 
@@ -39,13 +43,14 @@ struct NvidiaGpuPowerSensor : public Sensor
     void update();
 
   private:
-    void processResponse(int sendRecvMsgResult);
+    void processResponse(const std::error_code& ec,
+                         std::span<const uint8_t> buffer);
 
     uint8_t eid{};
 
     uint8_t sensorId;
 
-    uint8_t averagingInterval;
+    uint8_t averagingInterval = 0;
 
     std::shared_ptr<sdbusplus::asio::connection> conn;
 
@@ -53,7 +58,8 @@ struct NvidiaGpuPowerSensor : public Sensor
 
     sdbusplus::asio::object_server& objectServer;
 
-    std::array<uint8_t, sizeof(gpu::GetCurrentPowerDrawRequest)> request{};
+    std::array<uint8_t, sizeof(gpu::GetPowerDrawRequest)> request{};
 
-    std::array<uint8_t, sizeof(gpu::GetCurrentPowerDrawResponse)> response{};
+    std::shared_ptr<sdbusplus::asio::dbus_interface>
+        commonPhysicalContextInterface;
 };

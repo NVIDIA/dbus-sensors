@@ -15,7 +15,7 @@
 class NVMeSensor : public Sensor
 {
   public:
-    static constexpr const char* sensorType = "NVME1000";
+    static constexpr std::string_view sensorType = "NVME1000";
 
     NVMeSensor(sdbusplus::asio::object_server& objectServer,
                boost::asio::io_context& io,
@@ -23,7 +23,7 @@ class NVMeSensor : public Sensor
                const std::string& sensorName,
                std::vector<thresholds::Threshold>&& thresholds,
                const std::string& sensorConfiguration, int busNumber,
-               uint8_t slaveAddr);
+               uint8_t slaveAddr, bool smbusPEC);
     ~NVMeSensor() override;
 
     NVMeSensor& operator=(const NVMeSensor& other) = delete;
@@ -32,6 +32,7 @@ class NVMeSensor : public Sensor
 
     const int bus;
     const uint8_t address;
+    const bool smbusPEC;
 
   private:
     const unsigned int scanDelayTicks = 5 * 60;

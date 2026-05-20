@@ -1,6 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION &
- * AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright OpenBMC Authors
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -17,12 +16,16 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
+#include <system_error>
 #include <vector>
 
 constexpr uint8_t gpuVoltageSensorId{0};
 
-struct NvidiaGpuVoltageSensor : public Sensor
+struct NvidiaGpuVoltageSensor :
+    public Sensor,
+    public std::enable_shared_from_this<NvidiaGpuVoltageSensor>
 {
   public:
     NvidiaGpuVoltageSensor(
@@ -30,7 +33,8 @@ struct NvidiaGpuVoltageSensor : public Sensor
         mctp::MctpRequester& mctpRequester, const std::string& name,
         const std::string& sensorConfiguration, uint8_t eid, uint8_t sensorId,
         sdbusplus::asio::object_server& objectServer,
-        std::vector<thresholds::Threshold>&& thresholdData);
+        std::vector<thresholds::Threshold>&& thresholdData,
+        gpu::DeviceIdentification deviceType);
 
     ~NvidiaGpuVoltageSensor() override;
 
@@ -39,7 +43,8 @@ struct NvidiaGpuVoltageSensor : public Sensor
     void update();
 
   private:
-    void processResponse(int sendRecvMsgResult);
+    void processResponse(const std::error_code& ec,
+                         std::span<const uint8_t> buffer);
 
     uint8_t eid{};
 
@@ -53,5 +58,6 @@ struct NvidiaGpuVoltageSensor : public Sensor
 
     std::array<uint8_t, sizeof(gpu::GetVoltageRequest)> request{};
 
-    std::array<uint8_t, sizeof(gpu::GetVoltageResponse)> response{};
+    std::shared_ptr<sdbusplus::asio::dbus_interface>
+        commonPhysicalContextInterface;
 };

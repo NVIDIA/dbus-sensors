@@ -17,13 +17,12 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
-static constexpr bool debug = false;
-
 ExternalSensor::ExternalSensor(
-    const std::string& objectType, sdbusplus::asio::object_server& objectServer,
+    std::string_view objectType, sdbusplus::asio::object_server& objectServer,
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     const std::string& sensorName, const std::string& sensorUnits,
     std::vector<thresholds::Threshold>&& thresholdsIn,
@@ -62,18 +61,21 @@ ExternalSensor::ExternalSensor(
 
     association =
         objectServer.add_interface(objectPath, association::interface);
-    setInitialProperties(sensorUnits);
-
-    if constexpr (debug)
+    std::string fullUnits = sensor_paths::convertToFullUnits(sensorUnits);
+    if (fullUnits.empty())
     {
-        lg2::error(
-            "ExternalSensor '{NAME}' constructed: path '{PATH}', type '{TYPE}', "
-            "min '{MIN}', max '{MAX}', timeout '{TIMEOUT}' us",
-            "NAME", name, "PATH", objectPath, "TYPE", objectType, "MIN",
-            minReading, "MAX", maxReading, "TIMEOUT",
-            std::chrono::duration_cast<std::chrono::microseconds>(writeTimeout)
-                .count());
+        lg2::error("Invalid units for sensor: {UNITS}", "UNITS", sensorUnits);
+        throw std::invalid_argument("Invalid units for sensor");
     }
+    setInitialProperties(fullUnits);
+
+    lg2::debug(
+        "ExternalSensor '{NAME}' constructed: path '{PATH}', type '{TYPE}', "
+        "min '{MIN}', max '{MAX}', timeout '{TIMEOUT}' us",
+        "NAME", name, "PATH", objectPath, "TYPE", objectType, "MIN", minReading,
+        "MAX", maxReading, "TIMEOUT",
+        std::chrono::duration_cast<std::chrono::microseconds>(writeTimeout)
+            .count());
 }
 
 // Separate function from constructor, because of a gotcha: can't use the
@@ -94,10 +96,7 @@ void ExternalSensor::initWriteHook(
             lockThis->externalSetTrigger();
             return;
         }
-        if constexpr (debug)
-        {
-            lg2::error("ExternalSensor receive ignored, sensor gone");
-        }
+        lg2::debug("ExternalSensor receive ignored, sensor gone");
     };
 }
 
@@ -113,10 +112,7 @@ ExternalSensor::~ExternalSensor()
     }
     objServer.remove_interface(sensorInterface);
 
-    if constexpr (debug)
-    {
-        lg2::error("ExternalSensor '{NAME}' destructed", "NAME", name);
-    }
+    lg2::debug("ExternalSensor '{NAME}' destructed", "NAME", name);
 }
 
 void ExternalSensor::checkThresholds()
@@ -190,11 +186,8 @@ std::chrono::steady_clock::duration ExternalSensor::ageRemaining(
 
 void ExternalSensor::externalSetTrigger()
 {
-    if constexpr (debug)
-    {
-        lg2::error("ExternalSensor '{NAME}' received '{VALUE}'", "NAME", name,
-                   "VALUE", value);
-    }
+    lg2::debug("ExternalSensor '{NAME}' received '{VALUE}'", "NAME", name,
+               "VALUE", value);
 
     if (std::isfinite(value))
     {

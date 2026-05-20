@@ -1,11 +1,11 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION &
- * AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright OpenBMC Authors
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "NvidiaGpuEnergySensor.hpp"
 
+#include "NvidiaSensorUtils.hpp"
 #include "SensorPaths.hpp"
 #include "Thresholds.hpp"
 #include "Utils.hpp"
@@ -25,7 +25,10 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -41,7 +44,8 @@ NvidiaGpuEnergySensor::NvidiaGpuEnergySensor(
     mctp::MctpRequester& mctpRequester, const std::string& name,
     const std::string& sensorConfiguration, const uint8_t eid, uint8_t sensorId,
     sdbusplus::asio::object_server& objectServer,
-    std::vector<thresholds::Threshold>&& thresholdData) :
+    std::vector<thresholds::Threshold>&& thresholdData,
+    const gpu::DeviceIdentification deviceType) :
     Sensor(escapeName(name), std::move(thresholdData), sensorConfiguration,
            "energy", false, true, gpuEnergySensorMaxReading,
            gpuEnergySensorMinReading, conn),
@@ -63,6 +67,25 @@ NvidiaGpuEnergySensor::NvidiaGpuEnergySensor(
     association = objectServer.add_interface(dbusPath, association::interface);
 
     setInitialProperties(sensor_paths::unitJoules);
+
+    const std::optional<std::string> physicalContext =
+        nvidia_sensor_utils::deviceTypeToPhysicalContext(deviceType);
+
+    if (physicalContext)
+    {
+        commonPhysicalContextInterface = objectServer.add_interface(
+            dbusPath, "xyz.openbmc_project.Common.PhysicalContext");
+
+        commonPhysicalContextInterface->register_property("Type",
+                                                          *physicalContext);
+
+        if (!commonPhysicalContextInterface->initialize())
+        {
+            lg2::error(
+                "Error initializing PhysicalContext Interface for Energy Sensor for eid {EID} and sensor id {SID}",
+                "EID", eid, "SID", sensorId);
+        }
+    }
 }
 
 NvidiaGpuEnergySensor::~NvidiaGpuEnergySensor()
@@ -73,6 +96,10 @@ NvidiaGpuEnergySensor::~NvidiaGpuEnergySensor()
     }
     objectServer.remove_interface(sensorInterface);
     objectServer.remove_interface(association);
+    if (commonPhysicalContextInterface)
+    {
+        objectServer.remove_interface(commonPhysicalContextInterface);
+    }
 }
 
 void NvidiaGpuEnergySensor::checkThresholds()
@@ -80,13 +107,14 @@ void NvidiaGpuEnergySensor::checkThresholds()
     thresholds::checkThresholds(this);
 }
 
-void NvidiaGpuEnergySensor::processResponse(int sendRecvMsgResult)
+void NvidiaGpuEnergySensor::processResponse(const std::error_code& ec,
+                                            std::span<const uint8_t> buffer)
 {
-    if (sendRecvMsgResult != 0)
+    if (ec)
     {
         lg2::error(
             "Error updating Energy Sensor for eid {EID} and sensor id {SID} : sending message over MCTP failed, rc={RC}",
-            "EID", eid, "SID", sensorId, "RC", sendRecvMsgResult);
+            "EID", eid, "SID", sensorId, "RC", ec.message());
         return;
     }
 
@@ -94,8 +122,8 @@ void NvidiaGpuEnergySensor::processResponse(int sendRecvMsgResult)
     uint16_t reasonCode = 0;
     uint64_t energyValue = 0;
 
-    auto rc = gpu::decodeGetCurrentEnergyCounterResponse(
-        response, cc, reasonCode, energyValue);
+    auto rc = gpu::decodeGetCurrentEnergyCounterResponse(buffer, cc, reasonCode,
+                                                         energyValue);
 
     if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
     {
@@ -124,6 +152,15 @@ void NvidiaGpuEnergySensor::update()
     }
 
     mctpRequester.sendRecvMsg(
-        eid, request, response,
-        [this](int sendRecvMsgResult) { processResponse(sendRecvMsgResult); });
+        eid, request,
+        [weak{weak_from_this()}](const std::error_code& ec,
+                                 std::span<const uint8_t> buffer) {
+            std::shared_ptr<NvidiaGpuEnergySensor> self = weak.lock();
+            if (!self)
+            {
+                lg2::error("invalid reference to NvidiaGpuEnergySensor");
+                return;
+            }
+            self->processResponse(ec, buffer);
+        });
 }

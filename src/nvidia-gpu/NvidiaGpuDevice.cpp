@@ -1,37 +1,61 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION &
- * AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright OpenBMC Authors
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include "NvidiaGpuDevice.hpp"
 
-#include "Inventory.hpp"
-#include "NvidiaDeviceDiscovery.hpp"
-#include "NvidiaGpuSensor.hpp"
 #include "Thresholds.hpp"
 #include "Utils.hpp"
 
-#include <bits/basic_string.h>
-
+#include <Inventory.hpp>
 #include <MctpRequester.hpp>
+#include <NvidiaDeviceDiscovery.hpp>
+#include <NvidiaDriverInformation.hpp>
+#include <NvidiaEventReporting.hpp>
+#include <NvidiaGpuControl.hpp>
+#include <NvidiaGpuCurrentUtilization.hpp>
 #include <NvidiaGpuEnergySensor.hpp>
 #include <NvidiaGpuMctpVdm.hpp>
+#include <NvidiaGpuPowerPeakReading.hpp>
 #include <NvidiaGpuPowerSensor.hpp>
-#include <NvidiaGpuThresholds.hpp>
+#include <NvidiaGpuSensor.hpp>
 #include <NvidiaGpuVoltageSensor.hpp>
+#include <NvidiaLongRunningHandler.hpp>
+#include <NvidiaPcieFunction.hpp>
+#include <NvidiaPcieInterface.hpp>
+#include <NvidiaPciePort.hpp>
+#include <NvidiaPciePortMetrics.hpp>
+#include <OcpMctpVdm.hpp>
 #include <boost/asio/io_context.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
+#include <limits>
 #include <memory>
+#include <span>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
+
+static constexpr uint8_t gpuTLimitCriticalThresholdId{1};
+static constexpr uint8_t gpuTLimitWarningThresholdId{2};
+static constexpr uint8_t gpuTLimitHardshutDownThresholdId{4};
+
+// nota bene: the order has to match the order in processTLimitThresholds
+static constexpr std::array<uint8_t, 3> thresholdIds{
+    gpuTLimitWarningThresholdId, gpuTLimitCriticalThresholdId,
+    gpuTLimitHardshutDownThresholdId};
+
+static constexpr const char* controlPowerPrefix =
+    "/xyz/openbmc_project/control/power/";
 
 GpuDevice::GpuDevice(const SensorConfigs& configs, const std::string& name,
                      const std::string& path,
@@ -41,58 +65,215 @@ GpuDevice::GpuDevice(const SensorConfigs& configs, const std::string& name,
                      sdbusplus::asio::object_server& objectServer) :
     eid(eid), sensorPollMs(std::chrono::milliseconds{configs.pollRate}),
     waitTimer(io, std::chrono::steady_clock::duration(0)),
-    mctpRequester(mctpRequester), conn(conn), objectServer(objectServer),
-    configs(configs), name(escapeName(name)), path(path)
+    mctpRequester(mctpRequester), io(io), conn(conn),
+    objectServer(objectServer), configs(configs), name(escapeName(name)),
+    path(path)
+{
+    const std::string powerControlPath = controlPowerPrefix + this->name;
+
+    powerCapInterface = objectServer.add_interface(
+        powerControlPath, "xyz.openbmc_project.Control.Power.Cap");
+
+    powerCapInterface->register_property("PowerCap",
+                                         std::numeric_limits<uint32_t>::max());
+    powerCapInterface->register_property("PowerCapEnable", false);
+    powerCapInterface->register_property("MinPowerCapValue", uint32_t{0});
+    powerCapInterface->register_property("MaxPowerCapValue",
+                                         std::numeric_limits<uint32_t>::max());
+    powerCapInterface->register_property(
+        "DefaultPowerCap", std::numeric_limits<uint32_t>::max(),
+        sdbusplus::asio::PropertyPermission::readOnly);
+
+    powerCapInterface->initialize();
+}
+
+GpuDevice::~GpuDevice()
+{
+    objectServer.remove_interface(powerCapInterface);
+}
+
+void GpuDevice::init()
 {
     inventory = std::make_shared<Inventory>(
         conn, objectServer, name, mctpRequester,
-        gpu::DeviceIdentification::DEVICE_GPU, eid, io);
+        gpu::DeviceIdentification::DEVICE_GPU, eid, io, powerCapInterface);
+
+    inventory->init();
+
     makeSensors();
+
+    eventReporting->init();
 }
 
 void GpuDevice::makeSensors()
 {
     tempSensor = std::make_shared<NvidiaGpuTempSensor>(
         conn, mctpRequester, name + "_TEMP_0", path, eid, gpuTempSensorId,
-        objectServer, std::vector<thresholds::Threshold>{});
-
-    readThermalParameters(
-        eid,
-        std::vector<gpuThresholdId>{gpuTLimitWarnringThresholdId,
-                                    gpuTLimitCriticalThresholdId,
-                                    gpuTLimitHardshutDownThresholdId},
-        mctpRequester,
-        std::bind_front(&GpuDevice::processTLimitThresholds, this));
+        objectServer, std::vector<thresholds::Threshold>{},
+        gpu::DeviceIdentification::DEVICE_GPU);
 
     dramTempSensor = std::make_shared<NvidiaGpuTempSensor>(
         conn, mctpRequester, name + "_DRAM_0_TEMP_0", path, eid,
         gpuDramTempSensorId, objectServer,
         std::vector<thresholds::Threshold>{thresholds::Threshold{
-            thresholds::Level::CRITICAL, thresholds::Direction::HIGH, 95.0}});
+            thresholds::Level::CRITICAL, thresholds::Direction::HIGH, 95.0}},
+        gpu::DeviceIdentification::DEVICE_GPU);
 
     powerSensor = std::make_shared<NvidiaGpuPowerSensor>(
         conn, mctpRequester, name + "_Power_0", path, eid, gpuPowerSensorId,
-        objectServer, std::vector<thresholds::Threshold>{});
+        objectServer, std::vector<thresholds::Threshold>{},
+        gpu::DeviceIdentification::DEVICE_GPU);
+
+    peakPower = std::make_shared<NvidiaGpuPowerPeakReading>(
+        mctpRequester, name + "_Power_0", eid, gpuPeakPowerSensorId,
+        objectServer);
 
     energySensor = std::make_shared<NvidiaGpuEnergySensor>(
         conn, mctpRequester, name + "_Energy_0", path, eid, gpuEnergySensorId,
-        objectServer, std::vector<thresholds::Threshold>{});
+        objectServer, std::vector<thresholds::Threshold>{},
+        gpu::DeviceIdentification::DEVICE_GPU);
 
     voltageSensor = std::make_shared<NvidiaGpuVoltageSensor>(
         conn, mctpRequester, name + "_Voltage_0", path, eid, gpuVoltageSensorId,
-        objectServer, std::vector<thresholds::Threshold>{});
+        objectServer, std::vector<thresholds::Threshold>{},
+        gpu::DeviceIdentification::DEVICE_GPU);
+
+    longRunningHandler = std::make_shared<NvidiaLongRunningResponseHandler>();
+
+    eventReporting = std::make_shared<NvidiaEventReportingConfig>(
+        eid, mctpRequester,
+        std::initializer_list<EventDescriptor>{
+            {gpu::MessageType::DEVICE_CAPABILITY_DISCOVERY,
+             static_cast<uint8_t>(
+                 gpu::DeviceCapabilityDiscoveryEvents::LONG_RUNNING_RESPONSE),
+             std::bind_front(&NvidiaLongRunningResponseHandler::handler,
+                             longRunningHandler)}});
+
+    currentUtilization = std::make_shared<NvidiaGpuCurrentUtilization>(
+        conn, mctpRequester, objectServer, name, eid, longRunningHandler);
+
+    driverInfo = std::make_shared<NvidiaDriverInformation>(
+        conn, mctpRequester, name, path, eid, objectServer);
+
+    gpuControl = std::make_shared<NvidiaGpuControl>(
+        objectServer, name, inventoryPrefix + name, mctpRequester, eid,
+        powerCapInterface);
+
+    pcieInterface = std::make_shared<NvidiaPcieInterface>(
+        conn, mctpRequester, name, path, eid, objectServer,
+        gpu::DeviceIdentification::DEVICE_GPU);
+
+    pciePort = std::make_shared<NvidiaPciePortInfo>(
+        conn, mctpRequester, "UP_0", name, path, eid,
+        gpu::PciePortType::UPSTREAM, 0, 0, objectServer,
+        gpu::DeviceIdentification::DEVICE_GPU);
+
+    pcieFunction = std::make_shared<NvidiaPcieFunction>(
+        conn, mctpRequester, name, path, eid, 0, objectServer,
+        gpu::DeviceIdentification::DEVICE_GPU);
+
+    pciePortMetrics.emplace_back(makeNvidiaPciePortErrors(
+        conn, mctpRequester, "UP_0", name, path, eid,
+        gpu::PciePortType::UPSTREAM, 0, 0, objectServer,
+        gpu::DeviceIdentification::DEVICE_GPU));
+
+    pciePortMetrics.emplace_back(makeNvidiaPciePortCounters(
+        conn, mctpRequester, "UP_0", name, path, eid,
+        gpu::PciePortType::UPSTREAM, 0, 0, objectServer,
+        gpu::DeviceIdentification::DEVICE_GPU));
+
+    pciePortMetrics.emplace_back(makeNvidiaPciePortL0ToRecoveryCount(
+        conn, mctpRequester, "UP_0", name, path, eid,
+        gpu::PciePortType::UPSTREAM, 0, 0, objectServer,
+        gpu::DeviceIdentification::DEVICE_GPU));
+
+    getTLimitThresholds();
 
     lg2::info("Added GPU {NAME} Sensors with chassis path: {PATH}.", "NAME",
               name, "PATH", path);
-
     read();
 }
 
-void GpuDevice::processTLimitThresholds(uint8_t rc,
-                                        const std::vector<int32_t>& thresholds)
+void GpuDevice::getTLimitThresholds()
+{
+    thresholds = {};
+    current_threshold_index = 0;
+    getNextThermalParameter();
+}
+
+void GpuDevice::readThermalParameterCallback(const std::error_code& ec,
+                                             std::span<const uint8_t> buffer)
+{
+    if (ec)
+    {
+        lg2::error(
+            "Error reading thermal parameter: sending message over MCTP failed, rc={RC}",
+            "RC", ec.message());
+        processTLimitThresholds(ec);
+        return;
+    }
+
+    ocp::accelerator_management::CompletionCode cc{};
+    uint16_t reasonCode = 0;
+    int32_t threshold = 0;
+
+    int rc = gpu::decodeReadThermalParametersResponse(buffer, cc, reasonCode,
+                                                      threshold);
+
+    if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
+    {
+        lg2::error(
+            "Error reading thermal parameter: decode failed, rc={RC}, cc={CC}, reasonCode={RESC}",
+            "RC", rc, "CC", cc, "RESC", reasonCode);
+        processTLimitThresholds(ec);
+        return;
+    }
+
+    thresholds[current_threshold_index] = threshold;
+
+    current_threshold_index++;
+
+    if (current_threshold_index < thresholdIds.size())
+    {
+        getNextThermalParameter();
+        return;
+    }
+    processTLimitThresholds(std::error_code{});
+}
+
+void GpuDevice::getNextThermalParameter()
+{
+    uint8_t id = thresholdIds[current_threshold_index];
+    auto rc =
+        gpu::encodeReadThermalParametersRequest(0, id, thermalParamReqMsg);
+    if (rc != 0)
+    {
+        lg2::error(
+            "Error reading thermal parameter for eid {EID} and parameter id {PID} : encode failed. rc={RC}",
+            "EID", eid, "PID", id, "RC", rc);
+        processTLimitThresholds(
+            std::make_error_code(static_cast<std::errc>(rc)));
+        return;
+    }
+
+    mctpRequester.sendRecvMsg(
+        eid, thermalParamReqMsg,
+        [weak{weak_from_this()}](const std::error_code& ec,
+                                 std::span<const uint8_t> buffer) {
+            std::shared_ptr<GpuDevice> self = weak.lock();
+            if (!self)
+            {
+                lg2::error("Failed to get lock on GpuDevice");
+                return;
+            }
+            self->readThermalParameterCallback(ec, buffer);
+        });
+}
+
+void GpuDevice::processTLimitThresholds(const std::error_code& ec)
 {
     std::vector<thresholds::Threshold> tLimitThresholds{};
-    if (rc == 0)
+    if (!ec)
     {
         tLimitThresholds = {
             thresholds::Threshold{thresholds::Level::WARNING,
@@ -108,7 +289,8 @@ void GpuDevice::processTLimitThresholds(uint8_t rc,
 
     tLimitSensor = std::make_shared<NvidiaGpuTempSensor>(
         conn, mctpRequester, name + "_TEMP_1", path, eid, gpuTLimitSensorId,
-        objectServer, std::move(tLimitThresholds));
+        objectServer, std::move(tLimitThresholds),
+        gpu::DeviceIdentification::DEVICE_GPU);
 }
 
 void GpuDevice::read()
@@ -120,15 +302,33 @@ void GpuDevice::read()
     }
     dramTempSensor->update();
     powerSensor->update();
+    peakPower->update();
     energySensor->update();
     voltageSensor->update();
+    driverInfo->update();
+    gpuControl->update();
+    currentUtilization->update();
+    pcieInterface->update();
+    pciePort->update();
+    pcieFunction->update();
+    for (auto& metrics : pciePortMetrics)
+    {
+        metrics->update();
+    }
 
     waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
-    waitTimer.async_wait([this](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            return;
-        }
-        read();
-    });
+    waitTimer.async_wait(
+        [weak{weak_from_this()}](const boost::system::error_code& ec) {
+            std::shared_ptr<GpuDevice> self = weak.lock();
+            if (!self)
+            {
+                lg2::error("Invalid reference to GpuDevice");
+                return;
+            }
+            if (ec)
+            {
+                return;
+            }
+            self->read();
+        });
 }
