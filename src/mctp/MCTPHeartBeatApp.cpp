@@ -706,6 +706,14 @@ static void addedSPIEndpoint(
             "Failed to manage device described by inventory at {EXCEPTION}",
             "EXCEPTION", e);
     }
+    catch (const std::exception& e)
+    {
+        // MCTPHeartbeatService ctor throws std::runtime_error on socket
+        // init failure. Log and swallow at this signal-handler boundary so
+        // a transient socket failure doesn't take down the daemon.
+        lg2::error("Failed to initialise SPI endpoint heartbeat: {EXCEPTION}",
+                   "EXCEPTION", e);
+    }
 }
 
 // Function to check if an endpoint exists and initialize heartbeat if it does

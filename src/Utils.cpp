@@ -33,7 +33,9 @@
 #include <sdbusplus/exception.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
+#ifdef NVIDIA_SHMEM
 #include <tal.hpp>
+#endif
 
 #include <algorithm>
 #include <array>
