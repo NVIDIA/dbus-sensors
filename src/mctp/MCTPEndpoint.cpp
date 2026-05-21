@@ -387,7 +387,10 @@ void MCTPDDevice::performDiscovery()
                         "ALLOCATED", allocated);
                     if (eid == 0 && !allocated && objpath.empty())
                     {
-                        // Post reset, endpoint was removed.
+                        // InterfacesRemoved normally performs this cleanup
+                        // before the LearnEndpoint reply is handled. Use the
+                        // same idempotent path if that signal was not observed.
+                        self->endpointRemoved();
                         requestSetup();
                     }
                 }

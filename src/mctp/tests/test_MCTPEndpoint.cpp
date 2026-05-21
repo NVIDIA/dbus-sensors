@@ -67,6 +67,11 @@ class TestUSBMCTPDDevice : public USBMCTPDDevice
     {
         endpoint = ep;
     }
+
+    bool hasEndpointForTest() const
+    {
+        return endpoint != nullptr;
+    }
 };
 
 TEST(I2CMCTPDDevice, matchEmptyConfig)
@@ -12640,13 +12645,24 @@ TEST_F(AsyncFixture,
         sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
+    std::size_t removalCallbackCount = 0;
+    ep->notifyRemoved =
+        [&removalCallbackCount,
+         &ep](const std::shared_ptr<MCTPEndpoint>& removedEndpoint) {
+            EXPECT_EQ(removedEndpoint, ep);
+            ++removalCallbackCount;
+        };
     dev->setEndpointForTest(ep);
+    ASSERT_TRUE(dev->hasEndpointForTest());
 
     bool callbackFired = false;
+    bool endpointClearedBeforeCallback = false;
     dev->requestSetupCallback =
-        [&callbackFired](const std::shared_ptr<MCTPDDevice>& device) {
-            (void)device;
+        [&callbackFired, &endpointClearedBeforeCallback,
+         dev](const std::shared_ptr<MCTPDDevice>& device) {
+            EXPECT_EQ(device, dev);
             callbackFired = true;
+            endpointClearedBeforeCallback = !dev->hasEndpointForTest();
         };
 
     dev->performDiscovery();
@@ -12661,6 +12677,61 @@ TEST_F(AsyncFixture,
     driveAsyncCallAssignEndpoint(0, 1, "", false);
 
     EXPECT_TRUE(callbackFired);
+    EXPECT_TRUE(endpointClearedBeforeCallback);
+    EXPECT_FALSE(dev->hasEndpointForTest());
+    EXPECT_EQ(removalCallbackCount, 1U);
+    gPendingAsyncCalls.clear();
+}
+
+TEST_F(AsyncFixture,
+       DR08_resetRediscoveryDoesNotDuplicateInterfacesRemovedCleanup)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-dr08", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    std::size_t removalCallbackCount = 0;
+    ep->notifyRemoved =
+        [&removalCallbackCount,
+         &ep](const std::shared_ptr<MCTPEndpoint>& removedEndpoint) {
+            EXPECT_EQ(removedEndpoint, ep);
+            ++removalCallbackCount;
+        };
+    dev->setEndpointForTest(ep);
+
+    bool callbackFired = false;
+    bool endpointPresentDuringCallback = true;
+    dev->requestSetupCallback =
+        [&callbackFired, &endpointPresentDuringCallback,
+         dev](const std::shared_ptr<MCTPDDevice>& device) {
+            EXPECT_EQ(device, dev);
+            callbackFired = true;
+            endpointPresentDuringCallback = dev->hasEndpointForTest();
+        };
+
+    dev->performDiscovery();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallUnknownInterface();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    // mctpd emits InterfacesRemoved before returning the zero-valued
+    // LearnEndpoint reply. Simulate that ordering and verify the fallback
+    // cleanup below remains idempotent.
+    dev->endpointRemoved();
+    ASSERT_FALSE(dev->hasEndpointForTest());
+    ASSERT_EQ(removalCallbackCount, 1U);
+
+    driveAsyncCallAssignEndpoint(0, 1, "", false);
+
+    EXPECT_TRUE(callbackFired);
+    EXPECT_FALSE(endpointPresentDuringCallback);
+    EXPECT_FALSE(dev->hasEndpointForTest());
+    EXPECT_EQ(removalCallbackCount, 1U);
     gPendingAsyncCalls.clear();
 }
 
@@ -12710,6 +12781,7 @@ TEST_F(AsyncFixture,
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
+    ASSERT_TRUE(dev->hasEndpointForTest());
 
     bool callbackFired = false;
     dev->requestSetupCallback =
@@ -12732,6 +12804,7 @@ TEST_F(AsyncFixture,
                                  true);
 
     EXPECT_FALSE(callbackFired);
+    EXPECT_TRUE(dev->hasEndpointForTest());
     gPendingAsyncCalls.clear();
 }
 
