@@ -1755,6 +1755,7 @@ TEST(MCTPDDevice, onDiscoveryNotifyWhenDiscoveryAlreadyNeededIsNoop)
 
 TEST(MCTPDDevice, onDiscoveryNotifySetsDebounceFlagWithoutRunningTimer)
 {
+    boost::asio::io_context io;
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         nullptr, "usb-discovery-flag", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(12));
@@ -1764,7 +1765,6 @@ TEST(MCTPDDevice, onDiscoveryNotifySetsDebounceFlagWithoutRunningTimer)
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/12"),
         1, 12);
     dev->setEndpointForTest(endpoint);
-    boost::asio::io_context io;
     dev->discoveryCheckTimer = std::make_unique<boost::asio::steady_timer>(io);
     dev->discoveryNeeded = false;
 
@@ -2060,13 +2060,13 @@ TEST(MCTPDEndpoint, describeContainsNetworkAndEid)
 
 TEST(MCTPDEndpoint, updateConnectivityDegradedWithCallbackStopsHealthMonitoring)
 {
+    boost::asio::io_context io;
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         nullptr, "usb-deg-cb", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(12), std::nullopt, std::nullopt, std::nullopt,
         std::nullopt, std::optional<uint8_t>(1));
     auto endpoint = std::make_shared<MCTPDEndpoint>(
         dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 12);
-    boost::asio::io_context io;
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     int degradedCalls = 0;
     endpoint->notifyDegraded =
@@ -2391,13 +2391,13 @@ TEST(MCTPDEndpoint, updateConnectivityUnknownStringIsIgnored)
 
 TEST(MCTPDDevice, recoverNoArgWithoutEndpointSetsRecoveryMode)
 {
+    boost::asio::io_context io;
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         nullptr, "usb-recover-no-arg", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(12), std::nullopt, std::nullopt, std::nullopt,
         std::nullopt, std::optional<uint8_t>(1));
     dev->inHealthRecoveryMode = false;
     dev->consecutivePingFailures = 2;
-    boost::asio::io_context io;
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
 
     dev->recover();
@@ -2407,12 +2407,12 @@ TEST(MCTPDDevice, recoverNoArgWithoutEndpointSetsRecoveryMode)
 
 TEST(MCTPDDevice, recoverWithoutEndpointSetsRecoveryModeAndStopsMonitoring)
 {
+    boost::asio::io_context io;
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         nullptr, "usb-recover-no-ep", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(12), std::nullopt, std::nullopt, std::nullopt,
         std::nullopt, std::optional<uint8_t>(1));
     dev->inHealthRecoveryMode = false;
-    boost::asio::io_context io;
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
 
     dev->recover();
