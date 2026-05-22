@@ -231,7 +231,6 @@ if get_option('leak-detect').allowed()
         ],
         install: true,
     )
-    subdir('external')
 endif
 
 if get_option('discrete-leak-detect').allowed()
