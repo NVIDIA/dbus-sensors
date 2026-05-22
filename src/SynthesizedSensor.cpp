@@ -52,7 +52,7 @@
 constexpr const char* synthesizedsensorType = "SummationSensor";
 static constexpr bool debug = false;
 constexpr const auto monitorTypes{
-    std::to_array<const char*>({synthesizedsensorType})};
+    std::to_array<std::string_view>({synthesizedsensorType})};
 
 static std::vector<std::shared_ptr<SynthesizedSensor>> synthSensors;
 
@@ -359,8 +359,7 @@ void createSensor(sdbusplus::asio::object_server& objectServer,
                 }
             }
         });
-    getter->getConfiguration(
-        std::vector<std::string>(monitorTypes.begin(), monitorTypes.end()));
+    getter->getConfiguration(monitorTypes);
 }
 
 int main()

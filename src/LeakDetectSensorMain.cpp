@@ -31,6 +31,7 @@
 #include <sdbusplus/message.hpp>
 #include <tal.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -42,15 +43,20 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
 
 static constexpr float pollRateDefault = 0.1;
 
-static const I2CDeviceTypeMap i2CDeviceTypes{
-    {"MAX1363", I2CDeviceType{"max1363", false}},
-    {"ADS7142", I2CDeviceType{"ads7142", false}}};
+static constexpr auto i2CDeviceTypes =
+    std::to_array<std::pair<std::string_view, I2CDeviceType>>(
+        {{"MAX1363", I2CDeviceType{"max1363", false}},
+         {"ADS7142", I2CDeviceType{"ads7142", false}}});
+
+static constexpr auto sensorTypes{
+    std::to_array<std::string_view>({LeakDetectSensor::entityMgrConfigType})};
 
 static std::shared_ptr<I2CDeviceParams> getI2CParams(
     const SensorBaseConfigMap& cfg)
@@ -67,7 +73,10 @@ static std::shared_ptr<I2CDeviceParams> getI2CParams(
 
     std::string deviceType =
         std::visit(VariantToStringVisitor(), findDeviceType->second);
-    auto findI2CDevType = i2CDeviceTypes.find(deviceType);
+    auto findI2CDevType =
+        std::ranges::find_if(i2CDeviceTypes, [&deviceType](const auto& entry) {
+            return entry.first == deviceType;
+        });
     if (findI2CDevType == i2CDeviceTypes.end())
     {
         std::cerr << "Missing device info, cannot instantiate I2CDevice\n";
@@ -163,7 +172,7 @@ static std::shared_ptr<I2CDevice> getI2CDevice(const I2CDeviceParams& params)
     }
     catch (std::runtime_error&)
     {
-        std::cerr << "Failed to instantiate " << params.type->name
+        std::cerr << "Failed to instantiate " << params.type.name
                   << " at address " << params.address << " on bus "
                   << params.bus << "\n";
         return nullptr;
@@ -430,8 +439,7 @@ void createSensors(
                                        sensorConfigurations);
         });
 
-    getter->getConfiguration(
-        std::vector<std::string>{LeakDetectSensor::entityMgrConfigType});
+    getter->getConfiguration(sensorTypes);
 }
 
 int main()
@@ -501,10 +509,7 @@ int main()
         };
 
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
-        setupPropertiesChangedMatches(
-            *systemBus,
-            std::to_array<const char*>({LeakDetectSensor::entityMgrConfigType}),
-            eventHandler);
+        setupPropertiesChangedMatches(*systemBus, sensorTypes, eventHandler);
 
     systemBus->request_name("xyz.openbmc_project.LeakDetector");
 
