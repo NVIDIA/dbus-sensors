@@ -38,6 +38,7 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -228,10 +229,10 @@ int main()
         };
 
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
-        setupPropertiesChangedMatches(
-            *systemBus,
-            std::to_array<const char*>({sensorType, "LeakDetectionPolicy"}),
-            eventHandler);
+        setupPropertiesChangedMatches(*systemBus,
+                                      std::to_array<std::string_view>(
+                                          {sensorType, "LeakDetectionPolicy"}),
+                                      eventHandler);
     setupManufacturingModeMatch(*systemBus);
     io.run();
     return 0;

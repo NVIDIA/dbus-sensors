@@ -62,6 +62,7 @@ extern "C"
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -514,7 +515,7 @@ void createSensors(boost::asio::io_context& io,
             // Clear flag when sensor configuration handling completes
             createSensorsInProgress = false;
         });
-    getter->getConfiguration(std::vector<std::string>{
+    getter->getConfiguration(std::vector<std::string_view>{
         NVMeSensor::sensorType, NVMeStatusSensor::sensorType});
 }
 
@@ -734,7 +735,7 @@ int main()
     std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
         setupPropertiesChangedMatches(
             *systemBus,
-            std::to_array<const char*>(
+            std::to_array<std::string_view>(
                 {NVMeSensor::sensorType, NVMeStatusSensor::sensorType}),
             eventHandler);
 

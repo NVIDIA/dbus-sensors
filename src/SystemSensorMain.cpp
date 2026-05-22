@@ -22,6 +22,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -169,7 +170,7 @@ void createSensors(
         });
 
     getter->getConfiguration(
-        std::vector<std::string>{sensorTypes.begin(), sensorTypes.end()});
+        std::vector<std::string_view>{sensorTypes.begin(), sensorTypes.end()});
 }
 
 int main()
