@@ -119,7 +119,7 @@ if get_option('boot-progress').allowed()
         'BootProgressSensor.cpp',
         dependencies: [default_deps, utils_dep],
         implicit_include_directories: false,
-        include_directories: ['../include'] + peci_incdirs,
+        include_directories: ['../include'],
         install: true,
     )
 endif
