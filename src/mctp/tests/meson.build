@@ -28,6 +28,14 @@ if meson.get_compiler('cpp').has_argument('-Wno-subobject-linkage')
     subobject_linkage_disable_args += ['-Wno-subobject-linkage']
 endif
 
+# The project enables Boost.Asio io_uring globally for daemon builds, but unit
+# tests should not depend on the kernel/container io_uring resource limits.
+boost_asio_test_backend_args = [
+    '-UBOOST_ASIO_HAS_IO_URING',
+    '-DBOOST_ASIO_DISABLE_IO_URING',
+    '-UBOOST_ASIO_DISABLE_EPOLL',
+]
+
 # ld --wrap flags to intercept sd-bus calls in fake-connection tests
 sd_bus_wrap_link_args = [
     '-Wl,--wrap,sd_bus_get_fd',
@@ -70,6 +78,7 @@ test(
         '../MCTPEndpoint.cpp',
         '../MCTPEndpointUtils.cpp',
         'phosphor_logging_drain.cpp',
+        cpp_args: boost_asio_test_backend_args,
         dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
         include_directories: '..',
@@ -87,7 +96,7 @@ test(
         'sd_bus_wrappers.cpp',
         'filesystem_wrappers.cpp',
         'phosphor_logging_drain.cpp',
-        cpp_args: ['-fno-access-control'],
+        cpp_args: boost_asio_test_backend_args + ['-fno-access-control'],
         link_args: socket_wrap_link_args,
         dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
@@ -103,6 +112,7 @@ test(
         '../MCTPEndpoint.cpp',
         '../MCTPEndpointUtils.cpp',
         'phosphor_logging_drain.cpp',
+        cpp_args: boost_asio_test_backend_args,
         dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
         include_directories: '..',
@@ -116,6 +126,7 @@ test(
         'test_MCTPEndpointUtils.cpp',
         '../MCTPEndpointUtils.cpp',
         'phosphor_logging_drain.cpp',
+        cpp_args: boost_asio_test_backend_args,
         dependencies: [ut_deps_list, utils_dep],
         implicit_include_directories: false,
         include_directories: '..',
@@ -133,7 +144,7 @@ test(
         'sd_bus_wrappers.cpp',
         'filesystem_wrappers.cpp',
         'phosphor_logging_drain.cpp',
-        cpp_args: ['-fno-access-control'],
+        cpp_args: boost_asio_test_backend_args + ['-fno-access-control'],
         link_args: custom_devices_wrap_link_args,
         dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
@@ -153,7 +164,9 @@ test(
         'sd_bus_wrappers.cpp',
         'filesystem_wrappers.cpp',
         'phosphor_logging_drain.cpp',
-        cpp_args: subobject_linkage_disable_args + ['-fno-access-control'],
+        cpp_args: subobject_linkage_disable_args + boost_asio_test_backend_args + [
+            '-fno-access-control',
+        ],
         link_args: custom_devices_wrap_link_args,
         dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
@@ -167,7 +180,9 @@ test(
         'test_MCTPHeartBeatApp',
         'test_MCTPHeartBeatApp.cpp',
         'sd_bus_wrappers.cpp',
-        cpp_args: subobject_linkage_disable_args + ['-fno-access-control'],
+        cpp_args: subobject_linkage_disable_args + boost_asio_test_backend_args + [
+            '-fno-access-control',
+        ],
         link_args: socket_wrap_link_args,
         dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
