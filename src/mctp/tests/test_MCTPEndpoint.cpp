@@ -3157,12 +3157,14 @@ TEST_F(FakeConnFixture, performHealthCheckTimerSuccessPathCovered)
     catch (...) // NOLINT(bugprone-empty-catch)
     {}
 
-    // io.run_one() fires the timer lambda with ec=0 → if (!ec) is TRUE →
-    // calls self->performHealthCheck() (queues another 0s timer) — success
-    // branch covered.
+    // Use poll_one() (non-blocking) instead of run_one() so this test cannot
+    // hang if performHealthCheck() exits early without scheduling a timer due
+    // to environment-specific fake-bus behavior.
+    // When the 0s timer is queued, poll_one() still executes one ready handler
+    // and covers the timer success branch.
     try
     {
-        io.run_one();
+        io.poll_one();
     }
     catch (...) // NOLINT(bugprone-empty-catch)
     {}
@@ -3182,8 +3184,11 @@ TEST_F(FakeConnFixture, performHealthCheckTimerSuccessPathCovered)
     }
     catch (...) // NOLINT(bugprone-empty-catch)
     {}
-    // Leave dev/ep alive; any remaining pending handlers are dropped when the
-    // io_context (fixture member) is torn down at test exit.
+    // Drop ownership so any remaining weak_ptr-based handlers no-op instead of
+    // re-scheduling more work during fixture teardown.
+    dev->setEndpointForTest(nullptr);
+    dev.reset();
+    ep.reset();
 }
 
 // 36. AssignEndpointStatic branch with bridgePoolStartEid set — covers both
