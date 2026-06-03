@@ -1,3 +1,4 @@
+#include "MCTPBridgePoolDevice.hpp"
 #include "MCTPCustomDevices.hpp"
 #include "MCTPEndpoint.hpp"
 #include "MCTPEndpointUtils.hpp"
@@ -154,6 +155,13 @@ class DBusAssociationServer : public AssociationServer
         {
             return USBGadgetMCTPDevice::from(connection, *iface);
         }
+
+        iface = BridgePoolMCTPDevice::match(config);
+        if (iface)
+        {
+            info("Creating BridgePoolMCTPDevice");
+            return BridgePoolMCTPDevice::from(connection, *iface);
+        }
     }
     catch (const std::invalid_argument& ex)
     {
@@ -213,7 +221,9 @@ static void removeInventory(const std::shared_ptr<MCTPReactor>& reactor,
             USBMCTPDDevice::match(removed) || SPIMCTPDDevice::match(removed) ||
             XROTMCTPDDevice::match(removed) ||
             PCIeMCTPDDevice::match(removed) ||
-            USBGadgetMCTPDevice::match(removed);
+<<<<<<< HEAD
+            USBGadgetMCTPDevice::match(removed) ||
+            BridgePoolMCTPDevice::match(removed);
         if (mctpConfigRemoved)
         {
             info(
@@ -578,6 +588,13 @@ int main()
         auto gsc = std::make_shared<GetSensorConfiguration>(
             systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
         const std::vector<std::string_view> types{{"MCTPPCIeTarget"}};
+        gsc->getConfiguration(types);
+    });
+
+    boost::asio::post(io, [reactor, systemBus]() {
+        auto gsc = std::make_shared<GetSensorConfiguration>(
+            systemBus, std::bind_front(manageMCTPEntity, systemBus, reactor));
+        const std::vector<std::string_view> types{{"MCTPBridgePoolDevice"}};
         gsc->getConfiguration(types);
     });
 

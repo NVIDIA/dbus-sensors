@@ -11,6 +11,7 @@ executable(
     'MCTPEndpointUtils.cpp',
     'USBRecovery.cpp',
     'MCTPCustomDevices.cpp',
+    'MCTPBridgePoolDevice.cpp',
     dependencies: [default_deps, utils_dep, libusb_dep],
     install: true,
     install_dir: '/usr/libexec/dbus-sensors',
