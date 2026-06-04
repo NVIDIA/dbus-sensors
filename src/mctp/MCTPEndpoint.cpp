@@ -188,9 +188,8 @@ void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& /*unused*/)
             }
             if (auto self = weakThis.lock())
             {
-                // Call performDiscovery(), then reset flags
-                self->performDiscovery();
                 self->discoveryNeeded = false;
+                self->performDiscovery();
             }
         });
 }

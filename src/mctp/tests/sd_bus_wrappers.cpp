@@ -38,7 +38,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Set this to a valid file descriptor before constructing a fake connection.
@@ -297,6 +299,7 @@ bool gMockSdBusCallAsync = false;
 static int gAsyncReplySerial =
     1000; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<PendingAsync> gPendingAsyncCalls;
+std::function<void()> gSdBusCallAsyncHook;
 
 // ── std::filesystem intercept globals ────────────────────────────────────────
 bool gMockCreateDirectories = false;
@@ -495,6 +498,12 @@ int __wrap_sd_bus_call_async(sd_bus* bus, sd_bus_slot** slot, sd_bus_message* m,
     if (slot != nullptr)
     {
         *slot = nullptr;
+    }
+    if (gSdBusCallAsyncHook)
+    {
+        auto hook = std::move(gSdBusCallAsyncHook);
+        gSdBusCallAsyncHook = {};
+        hook();
     }
     // Seal the message before storing: sd_bus_message_new_method_return and
     // sd_bus_message_new_method_errorf both require a sealed call message
