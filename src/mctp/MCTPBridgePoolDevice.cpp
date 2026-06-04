@@ -37,8 +37,8 @@ constexpr const char* mctpdEndpointControlInterface =
     "au.com.codeconstruct.MCTP.Endpoint1";
 constexpr const char* mctpdBridgeInterface =
     "au.com.codeconstruct.MCTP.Bridge1";
-constexpr const char* associationDefinitionsInterface =
-    "xyz.openbmc_project.Association.Definitions";
+constexpr const char* associationInterface =
+    "xyz.openbmc_project.Association";
 
 // Parse the network id from a mctpd endpoint path of the form
 // /au/com/codeconstruct/mctp1/networks/<N>/endpoints/<EID>.
@@ -155,10 +155,10 @@ bool BridgePoolMCTPDevice::resolveBridge()
     // named bridgeName. Read its Bridge1.PoolStart/PoolEnd and the network id
     // from its path; compute bridgedEid = PoolStart + poolIndex.
     //
-    // Properties are read with explicit, narrow types (uint8_t for the pool
-    // bounds, std::vector<Association> for the association list) rather than via
-    // GetManagedObjects, because the project-wide BasicVariantType used by
-    // ManagedObjectType cannot represent the a(sss) Associations property.
+    // The pool bounds are read with an explicit narrow type (uint8_t) rather
+    // than via GetManagedObjects, because the project-wide BasicVariantType
+    // used by ManagedObjectType cannot represent them alongside the other
+    // endpoint properties.
     GetSubTreeType subtree;
     try
     {
@@ -184,40 +184,48 @@ bool BridgePoolMCTPDevice::resolveBridge()
         // Confirm this bridge endpoint belongs to the configured bridge by
         // resolving its configured_by association to the EM object and
         // comparing the trailing Name segment to bridgeName.
-        std::vector<Association> associations;
+        //
+        // The configured_by association on a mctpd endpoint path is published
+        // by the MCTPReactor (this process), NOT by mctpd: mctpd only owns the
+        // Endpoint1/Bridge1 interfaces there. Read it back through the
+        // ObjectMapper's synthesised `<path>/configured_by` object (interface
+        // xyz.openbmc_project.Association, property `endpoints`, type `as`).
+        // Querying mctpd for Association.Definitions always throws (it does not
+        // own that interface), and a synchronous call to the reactor's own name
+        // would risk deadlocking its single-threaded event loop.
+        std::vector<std::string> configuredByPaths;
         try
         {
             auto method = connection->new_method_call(
-                mctpdBusName, bridgePath.c_str(), properties::interface,
-                properties::get);
-            method.append(associationDefinitionsInterface, "Associations");
+                mapper::busName, (bridgePath + "/configured_by").c_str(),
+                properties::interface, properties::get);
+            method.append(associationInterface, "endpoints");
             auto reply = connection->call(method);
-            std::variant<std::vector<Association>> value;
+            std::variant<std::vector<std::string>> value;
             reply.read(value);
-            associations = std::get<std::vector<Association>>(value);
+            configuredByPaths = std::get<std::vector<std::string>>(value);
         }
         catch (const std::exception&)
         {
-            // No configured_by on the bridge endpoint yet — cannot match it to
-            // an EM name; try the next candidate.
+            // configured_by not synthesised yet (the parent endpoint has not
+            // been associated to its EM object) — try the next candidate.
             continue;
         }
 
         bool bridgeMatches = false;
-        for (const auto& [forward, backward, endpoint] : associations)
+        for (const auto& emPath : configuredByPaths)
         {
-            if (forward != "configured_by")
-            {
-                continue;
-            }
-            // endpoint is the EM object path; its trailing segment is the
+            // emPath is the EM object path; its trailing segment is the
             // bridge's Name.
-            const auto slash = endpoint.find_last_of('/');
+            const auto slash = emPath.find_last_of('/');
             std::string emName = (slash == std::string::npos)
-                                     ? endpoint
-                                     : endpoint.substr(slash + 1);
-            bridgeMatches = (emName == bridgeName);
-            break;
+                                     ? emPath
+                                     : emPath.substr(slash + 1);
+            if (emName == bridgeName)
+            {
+                bridgeMatches = true;
+                break;
+            }
         }
         if (!bridgeMatches)
         {

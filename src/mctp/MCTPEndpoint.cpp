@@ -1768,6 +1768,7 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
         }
     }
 
+<<<<<<< HEAD
     std::optional<std::uint8_t> staticEID{};
     if (mStaticEndpointID == iface.end())
     {
