@@ -950,11 +950,16 @@ void MCTPDDevice::setup(
     }
     else
     {
+        // mctpd 2.5 AssignEndpoint has D-Bus signature "ay" (physaddr only);
+        // ignoreMessageTypes is not a per-endpoint argument on the dynamic path
+        // (it is a bus-owner-wide setting in mctpd.conf). Passing it here makes
+        // the call signature "ayay", which sd-bus rejects with InvalidArgs, so
+        // no EID is ever assigned. AssignEndpointStatic above keeps its 5-arg
+        // form ("ayyyayay"), which matches mctpd and is unaffected.
         connection->async_method_call(
             onSetup, mctpdBusName,
             mctpdControlPath + std::string("/interfaces/") + interface,
-            mctpdControlInterface, "AssignEndpoint", physaddr,
-            ignoreMessageTypes.value_or(std::vector<uint8_t>{}));
+            mctpdControlInterface, "AssignEndpoint", physaddr);
     }
 }
 
