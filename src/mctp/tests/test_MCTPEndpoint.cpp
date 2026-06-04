@@ -7994,6 +7994,7 @@ class AsyncFixture : public FakeConnFixture
 
     void TearDown() override
     {
+        gSdBusCallAsyncHook = {};
         gMockSdBusCallAsync = false;
         gMockSdBusCallSuccess = false;
         gPendingAsyncCalls.clear();
@@ -11168,6 +11169,74 @@ TEST_F(AsyncFixture, endpointRemovedKeepsRecoveryModeForSetupFallback)
     catch (...) // NOLINT(bugprone-empty-catch)
     {}
     suppressedHealthCheckEids.erase(9);
+}
+
+TEST_F(AsyncFixture,
+       DR01_discoveryTimerExpiryKeepsReentrantNotifyPendingRegression)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-discovery-reentrant-expiry", "usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(9));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->discoveryCheckTimer = std::make_unique<boost::asio::steady_timer>(io);
+
+    std::cout << "DR-01 repro: configured already-discovered endpoint EID 9 "
+                 "with DiscoveryNotify debounce timer\n";
+
+    auto msg = sdbusplus::message_t(nullptr);
+    dev->onDiscoveryNotify(msg);
+
+    ASSERT_TRUE(dev->discoveryNeeded);
+
+    bool reentrantNotifyHandled = false;
+    gSdBusCallAsyncHook = [dev, &reentrantNotifyHandled]() {
+        reentrantNotifyHandled = true;
+        std::cout << "DR-01 repro: injecting reentrant DiscoveryNotify while "
+                     "timer expiry callback is inside performDiscovery()\n";
+        auto reentrantMsg = sdbusplus::message_t(nullptr);
+        dev->onDiscoveryNotify(reentrantMsg);
+    };
+
+    std::cout << "DR-01 repro: running io_context until the discovery timer "
+                 "expires after the 5s debounce window\n";
+    io.restart();
+    const auto handlers = io.run_for(std::chrono::milliseconds{5200});
+
+    const auto cancelableTimers = dev->discoveryCheckTimer->cancel();
+    std::cout << "DR-01 repro: after timer expiry, handlers=" << handlers
+              << ", reentrant notify handled=" << reentrantNotifyHandled
+              << ", discoveryNeeded=" << dev->discoveryNeeded
+              << ", pending async calls=" << gPendingAsyncCalls.size()
+              << ", cancelable discovery timers=" << cancelableTimers << "\n";
+
+    if (!dev->discoveryNeeded || cancelableTimers == 0U)
+    {
+        std::cout << "DR-01 reproduced: reentrant DiscoveryNotify was not left "
+                     "pending after the timer expiry callback returned\n";
+    }
+
+    EXPECT_GT(handlers, 0U);
+    EXPECT_TRUE(reentrantNotifyHandled);
+    EXPECT_TRUE(dev->discoveryNeeded)
+        << "DR-01 reproduced: timer callback cleared discoveryNeeded after a "
+           "reentrant DiscoveryNotify.";
+    EXPECT_EQ(gPendingAsyncCalls.size(), 1U);
+    EXPECT_EQ(cancelableTimers, 1U)
+        << "DR-01 reproduced: no debounce timer remained armed for the "
+           "reentrant DiscoveryNotify.";
+
+    gPendingAsyncCalls.clear();
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
 }
 
 // ===========================================================================

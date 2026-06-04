@@ -12,6 +12,7 @@
 #include <sdbusplus/sdbus.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 // ── PendingAsync ─────────────────────────────────────────────────────────────
@@ -139,6 +140,7 @@ class TestSdBusInterface : public sdbusplus::SdBusImpl
 // it is also used inside the class body.
 extern bool gMockSdBusCallAsync;
 extern std::vector<PendingAsync> gPendingAsyncCalls;
+extern std::function<void()> gSdBusCallAsyncHook;
 
 // ── std::filesystem intercept globals ────────────────────────────────────────
 extern bool gMockCreateDirectories;
