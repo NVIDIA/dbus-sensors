@@ -600,6 +600,15 @@ class USBMCTPDDevice : public MCTPDDevice
   private:
     static constexpr const char* configType = "MCTPUSBDevice";
     const uint8_t recoveryThreshold;
+
+    /** Resolve the MCTP-over-USB netdev for the device at @a port by walking
+     *  the controller tree rooted at @a rootHubPath (both from entity-manager)
+     *  and returning the netdev of the interface that owns a net/ directory,
+     *  mirroring I2CMCTPDDevice::interfaceFromBus /
+     *  SPIMCTPDDevice::interfaceFromBusCs.
+     */
+    static std::string interfaceFromRootHubPort(
+        const std::string& rootHubPath, const std::string& port);
 };
 
 class SPIMCTPDDevice : public MCTPDDevice

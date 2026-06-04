@@ -1705,7 +1705,6 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     std::vector<uint8_t> address{};
     auto mName = iface.find("Name");
     auto mType = iface.find("Type");
-    auto mInterface = iface.find("Interface");
     auto mStaticEndpointID = iface.find("StaticEndpointID");
     auto mbridgePoolStartEid = iface.find("BridgePoolStartEID");
     auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
@@ -1724,17 +1723,51 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
         throw std::invalid_argument("Not an USB device");
     }
 
-    if (mName == iface.end() || mType == iface.end() ||
-        mInterface == iface.end())
+    if (mName == iface.end())
     {
         throw std::invalid_argument(
             "Configuration object violates MCTPUSBDevice schema");
     }
 
     auto name = std::visit(VariantToStringVisitor(), mName->second);
-    auto interface = std::visit(VariantToStringVisitor(), mInterface->second);
 
-<<<<<<< HEAD
+    // The migrated MCTPUSBDevice schema describes the endpoint by physical USB
+    // topology (RootHubPath/Port); resolve the netdev at runtime from sysfs,
+    // mirroring I2C/I3C/SPI. A literal "Interface" (netdev name) is still
+    // accepted as a backward-compatible override.
+    std::string interface;
+    auto mInterface = iface.find("Interface");
+    if (mInterface != iface.end())
+    {
+        interface = std::visit(VariantToStringVisitor(), mInterface->second);
+    }
+    else
+    {
+        auto mRootHubPath = iface.find("RootHubPath");
+        auto mPort = iface.find("Port");
+        if (mRootHubPath == iface.end() || mPort == iface.end())
+        {
+            throw std::invalid_argument(
+                "Configuration object violates MCTPUSBDevice schema");
+        }
+
+        auto rootHubPath =
+            std::visit(VariantToStringVisitor(), mRootHubPath->second);
+        auto port = std::visit(VariantToStringVisitor(), mPort->second);
+
+        try
+        {
+            interface = interfaceFromRootHubPort(rootHubPath, port);
+        }
+        catch (const MCTPException& ex)
+        {
+            warning(
+                "Failed to resolve MCTPUSBDevice netdev at [ RootHubPath: {ROOT_HUB}, Port: {PORT} ]: {EXCEPTION}",
+                "ROOT_HUB", rootHubPath, "PORT", port, "EXCEPTION", ex);
+            return {};
+        }
+    }
+
     std::optional<std::uint8_t> staticEID{};
     if (mStaticEndpointID == iface.end())
     {
@@ -1991,6 +2024,51 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
             "USB_INTERFACE", interface, "EXCEPTION", ex);
         return {};
     }
+}
+
+std::string USBMCTPDDevice::interfaceFromRootHubPort(
+    const std::string& rootHubPath, const std::string& port)
+{
+    // The MCTP netdev is exposed by the one USB interface of the device at this
+    // physical port that owns a net/ directory. Walk the controller's device
+    // tree from the configured RootHubPath -- no USB bus number is assumed and
+    // no parallel sysfs base path is hardcoded -- find the interface for this
+    // port and return its netdev. USB interface directories are named
+    // "<bus>-<port>:<config>.<altsetting>"; the trailing ':' in portTag anchors
+    // the match so a child port ("<port>.N") cannot match.
+    const std::string portTag = std::format("-{}:", port);
+
+    std::error_code ec;
+    std::filesystem::recursive_directory_iterator walk(
+        rootHubPath, std::filesystem::directory_options::skip_permission_denied,
+        ec);
+    if (ec)
+    {
+        error("Cannot traverse RootHubPath {ROOT_HUB}: {ERROR}", "ROOT_HUB",
+              rootHubPath, "ERROR", ec.message());
+        throw MCTPException("Cannot traverse RootHubPath");
+    }
+
+    for (const auto& entry : walk)
+    {
+        std::error_code dec;
+        if (!entry.is_directory(dec) ||
+            entry.path().filename().string().find(portTag) ==
+                std::string::npos)
+        {
+            continue;
+        }
+
+        std::filesystem::directory_iterator nets(entry.path() / "net", dec);
+        if (!dec && nets != std::filesystem::end(nets))
+        {
+            return nets->path().filename();
+        }
+    }
+
+    error("No MCTP netdev under RootHubPath {ROOT_HUB} for Port {PORT}",
+          "ROOT_HUB", rootHubPath, "PORT", port);
+    throw MCTPException("No matching net device found for USB endpoint");
 }
 
 /* MCTP SPI*/
