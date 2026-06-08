@@ -231,7 +231,8 @@ int DiscreteLeakDetectSensor::getLeakInfo()
 
     if (oldLeakLevel != leakLevel)
     {
-        std::cout << "Leak value changed from "
+        std::cout << "DiscreteLeakDetectSensor " << name
+                  << ": Leak value changed from "
                   << getLeakLevelStatusName(oldLeakLevel) << " to "
                   << getLeakLevelStatusName(leakLevel) << "\n";
         if (leakLevel == LeakLevel::NORMAL)
@@ -340,24 +341,27 @@ std::string DiscreteLeakDetectSensor::getLeakLevelStateString(
 void DiscreteLeakDetectSensor::monitor()
 {
     waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
-    waitTimer.async_wait([this](const boost::system::error_code& ec) {
+    waitTimer.async_wait([this, sensorName = name](
+                             const boost::system::error_code& ec) {
         if (ec == boost::asio::error::operation_aborted)
         {
-            std::cerr << "Read operation aborted\n";
+            std::cerr << "DiscreteLeakDetectSensor " << sensorName
+                      << ": Read operation aborted\n";
             return; // we're being cancelled
         }
         // read timer error
         if (ec)
         {
-            std::cerr << "timer error\n";
+            std::cerr << "DiscreteLeakDetectSensor " << sensorName
+                      << ": timer error\n";
             return;
         }
 
         int ret = getLeakInfo();
         if (ret < 0)
         {
-            std::cerr << "DiscreteLeakDetectSensor::getLeakInfo error";
-            std::cerr << "\n";
+            std::cerr << "DiscreteLeakDetectSensor " << sensorName
+                      << ": getLeakInfo error\n";
         }
 
         // Start read for next leakage status
@@ -413,7 +417,8 @@ void DiscreteLeakDetectSensor::startShutdown()
 
         startedShutdownTimer = true;
         shutdownTimer.expires_after(std::chrono::seconds(delaySec));
-        shutdownTimer.async_wait([this, gen](const boost::system::error_code& ec) {
+        shutdownTimer.async_wait([this, gen, sensorName = name](
+                                     const boost::system::error_code& ec) {
             if (gen != shutdownTimerGeneration_)
             {
                 return;
@@ -421,14 +426,16 @@ void DiscreteLeakDetectSensor::startShutdown()
             startedShutdownTimer = false;
             if (ec == boost::asio::error::operation_aborted)
             {
-                std::cout << "Timer aborted before expiration \n";
+                std::cout << "DiscreteLeakDetectSensor " << sensorName
+                          << ": Timer aborted before expiration\n";
                 return; // we're being canceled
             }
 
             if (ec)
             {
-                std::cerr << "Shutdown Timer callback error: " << ec.message()
-                          << "\n";
+                std::cerr << "DiscreteLeakDetectSensor " << sensorName
+                          << ": Shutdown Timer callback error: "
+                          << ec.message() << "\n";
                 return;
             }
 
@@ -463,10 +470,11 @@ void DiscreteLeakDetectSensor::executeShutdown()
             "xyz.openbmc_project.State.Host.Transition.Off");
 
         dbusConnection->async_method_call(
-            [](const boost::system::error_code& ec) {
+            [sensorName = name](const boost::system::error_code& ec) {
                 if (ec)
                 {
-                    std::cerr << "Failed to execute graceful shutdown due to "
+                    std::cerr << "DiscreteLeakDetectSensor " << sensorName
+                              << ": Failed to execute graceful shutdown due to "
                               << ec.message() << "\n";
                 }
             },
@@ -482,10 +490,11 @@ void DiscreteLeakDetectSensor::executeShutdown()
             state::convertForMessage(state::Chassis::Transition::Off);
 
         dbusConnection->async_method_call(
-            [](const boost::system::error_code& ec) {
+            [sensorName = name](const boost::system::error_code& ec) {
                 if (ec)
                 {
-                    std::cerr << "Failed to execute chassis shutdown due to "
+                    std::cerr << "DiscreteLeakDetectSensor " << sensorName
+                              << ": Failed to execute chassis shutdown due to "
                               << ec.message() << "\n";
                 }
             },
