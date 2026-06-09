@@ -29,27 +29,33 @@
 namespace nvidia::info::persistence
 {
 
-// Builds <dir>/ProcessorModule_<idx>_Info.json. No I/O.
-std::filesystem::path persistedPathFor(std::string_view dir,
-                                       int32_t processorModuleIndex);
+// Identity of a persisted info file. A module can hold multiple sockets, so
+// both fields are needed (module alone would collide across sockets).
+struct PersistedId
+{
+    int32_t processorModuleIndex{0};
+    int32_t socket{0};
+};
 
-// Inverse of persistedPathFor()'s filename portion. Only single-digit
-// indices 0..9 are accepted: this avoids leading-zero aliasing
-// ("ProcessorModule_05_Info.json") and caps modules at 0..9, matching
-// the range CreateInfo enforces. Returns nullopt for any other shape.
-std::optional<int32_t> moduleIndexFromPersistedFilename(
-    std::string_view filename);
+// Builds <dir>/ProcessorModule_<idx>_Socket_<socket>_Info.json. No I/O.
+std::filesystem::path persistedPathFor(std::string_view dir, PersistedId id);
 
-// Atomically writes jsonStr to persistedPathFor(dir, idx) via a sibling
-// .tmp file + rename, with an fsync between flush and rename. Creates
-// dir (and any missing parents) if needed. Returns false on any I/O
-// error; the caller is expected to roll back D-Bus state.
-bool persistInfoJson(std::string_view dir, int32_t processorModuleIndex,
+// Inverse of persistedPathFor()'s filename portion. The module must be a
+// single digit 0..9 (avoids leading-zero aliasing and matches the range
+// CreateInfo enforces); the socket is 0..255 with no leading zeros.
+// Returns nullopt for any other shape.
+std::optional<PersistedId> persistedIdFromFilename(std::string_view filename);
+
+// Atomically writes jsonStr to persistedPathFor(dir, id) via a sibling .tmp
+// file + rename, with an fsync between flush and rename. Creates dir (and
+// any missing parents) if needed. Returns false on any I/O error; the
+// caller is expected to roll back D-Bus state.
+bool persistInfoJson(std::string_view dir, PersistedId id,
                      const std::string& jsonStr);
 
 // Best-effort delete; missing file is not an error. Logged failures
 // are intentionally non-fatal because callers (recovery, rejection)
 // must continue regardless.
-void removePersistedFile(std::string_view dir, int32_t processorModuleIndex);
+void removePersistedFile(std::string_view dir, PersistedId id);
 
 } // namespace nvidia::info::persistence

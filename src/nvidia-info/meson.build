@@ -41,7 +41,12 @@ executable(
     'nvidiainfo',
     nvidia_info_sources,
     nvidia_info_schema_embed,
-    cpp_args: ['-DJSON_IMPLICIT_CONVERSIONS=0'],
+    cpp_args: [
+        '-DJSON_IMPLICIT_CONVERSIONS=0',
+        '-DNVIDIA_INFO_SOCKETS_PER_MODULE=' + get_option(
+            'nvidia-info-sockets-per-module',
+        ).to_string(),
+    ],
     implicit_include_directories: false,
     include_directories: [nvidia_info_include_dir, sensor_include_dir],
     dependencies: [

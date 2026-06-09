@@ -26,6 +26,7 @@
 #include <format>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -205,7 +206,9 @@ const nlohmann::json_schema::json_validator& terminusSchemaValidator()
     return *validator;
 }
 
-// Validates each element, tagging exceptions with "<Section>[<index>]:".
+// Validates each element, tagging failures with "<Section>[<index>]:".
+// Catches only the validators' std::invalid_argument so unexpected
+// exceptions (e.g. bad_alloc) propagate untouched.
 template <typename T>
 void validateEach(std::vector<T>& v, const char* section)
 {
@@ -215,9 +218,9 @@ void validateEach(std::vector<T>& v, const char* section)
         {
             v[i].validate();
         }
-        catch (const std::exception& e)
+        catch (const std::invalid_argument& e)
         {
-            throw std::invalid_argument(
+            throw SchemaViolation(
                 std::format("{}[{}]: {}", section, i, e.what()));
         }
     }
@@ -231,11 +234,10 @@ void validateAgainstSchema(const Json& doc)
     {
         terminusSchemaValidator().validate(doc);
     }
-    catch (const std::exception& e)
+    catch (const std::invalid_argument& e)
     {
-        // Re-tag so processAndPublish treats schema and validate() failures
-        // identically.
-        throw std::invalid_argument(
+        // Translate the validator's failure into our D-Bus error.
+        throw SchemaViolation(
             std::format("schema validation failed: {}", e.what()));
     }
 }
@@ -246,6 +248,35 @@ void validate(TerminusData& t)
     validateEach(t.dimms, "Memory");
     validateEach(t.pcieSlots, "PCIeSlots");
     validateEach(t.tpms, "TPM");
+}
+
+TerminusData parseAndValidate(const std::string& rawJson)
+{
+    Json doc;
+    try
+    {
+        doc = Json::parse(rawJson);
+    }
+    catch (const Json::exception& e)
+    {
+        throw SchemaViolation(std::format("invalid JSON: {}", e.what()));
+    }
+
+    validateAgainstSchema(doc);
+
+    TerminusData td;
+    try
+    {
+        from_json(doc, td);
+    }
+    catch (const Json::exception& e)
+    {
+        throw SchemaViolation(
+            std::format("payload did not match expected shape: {}", e.what()));
+    }
+
+    validate(td);
+    return td;
 }
 
 } // namespace info

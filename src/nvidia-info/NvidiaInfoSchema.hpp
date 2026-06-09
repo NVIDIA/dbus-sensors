@@ -23,13 +23,59 @@
 #include "NvidiaInfoTpm.hpp"
 
 #include <nlohmann/json.hpp>
+#include <sdbusplus/exception.hpp>
 
+#include <cerrno>
+#include <string>
 #include <vector>
 
 namespace nvidia
 {
 namespace info
 {
+
+// Base for payload rejections. These are D-Bus exceptions, so they are
+// thrown directly and serialized by sdbusplus' method dispatch without a
+// translating catch; subclasses fix the error name. errno is EINVAL (the
+// caller sent bad data). The detail string is carried as the description.
+struct InfoError : sdbusplus::exception_t
+{
+    explicit InfoError(std::string detailArg) : detail(std::move(detailArg)) {}
+    const char* description() const noexcept override
+    {
+        return detail.c_str();
+    }
+    const char* what() const noexcept override
+    {
+        return detail.c_str();
+    }
+    int get_errno() const noexcept override
+    {
+        return EINVAL;
+    }
+    std::string detail;
+};
+
+// JSON parse, schema, or structural payload problem.
+struct SchemaViolation : InfoError
+{
+    using InfoError::InfoError;
+    const char* name() const noexcept override
+    {
+        return "xyz.openbmc_project.NvidiaInfo.Error.SchemaViolation";
+    }
+};
+
+// Payload inconsistent with the platform topology (socket/module/rank, or
+// non-uniform component counts across a module's sockets).
+struct InvalidConfiguration : InfoError
+{
+    using InfoError::InfoError;
+    const char* name() const noexcept override
+    {
+        return "xyz.openbmc_project.NvidiaInfo.Error.InvalidConfiguration";
+    }
+};
 
 // In-memory representation of a per-terminus Info JSON payload.
 struct TerminusData
@@ -43,13 +89,19 @@ struct TerminusData
 void from_json(const Json& j, TerminusData& t);
 
 // Validates doc against the embedded JSON schema. Authoritative guard for
-// structure; must run before get<TerminusData>(). Throws
-// std::invalid_argument on any violation.
+// structure; must run before get<TerminusData>(). Throws SchemaViolation on
+// any violation.
 void validateAgainstSchema(const Json& doc);
 
 // Runs each section's validate() (derivation only). Throws the first
-// std::invalid_argument it encounters, wrapped with section/index context.
+// SchemaViolation it encounters, wrapped with section/index context.
 void validate(TerminusData& t);
+
+// Daemon-facing entry: parse rawJson, enforce the schema, derive, and run
+// per-section validate(). Throws SchemaViolation on any malformed/invalid
+// input (nlohmann parse/type errors are translated here, the one library
+// boundary). Unexpected exceptions (e.g. bad_alloc) propagate.
+TerminusData parseAndValidate(const std::string& rawJson);
 
 } // namespace info
 } // namespace nvidia

@@ -27,6 +27,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -64,6 +65,8 @@ struct TerminusInfo
     TerminusData terminus;
     // Module index used to look up the processor-module path for associations.
     int32_t moduleIndex{0};
+    // CPU socket; (moduleIndex, socket) is the terminus identity.
+    int32_t socket{0};
 };
 
 class NvidiaInfo
@@ -108,16 +111,30 @@ class NvidiaInfo
     // D-Bus interface that exposes CreateInfo method
     std::shared_ptr<sdbusplus::asio::dbus_interface> serviceIface;
 
-    // Parse, validate, and publish rawJson. On failure clears terminus
-    // state, removes the persisted file, and throws SdBusError. If
-    // persistOnSuccess is true, persistence failure is fatal.
-    void processAndPublish(std::string terminusName, std::string rawJson,
-                           int32_t moduleIndex, bool persistOnSuccess,
-                           std::string_view context);
+    // Parse, validate, and publish rawJson for module; the socket is read
+    // from the payload's Processor entry. Throws SdBusError on failure
+    // (callers handle any persisted-file cleanup); if persistOnSuccess, a
+    // persist failure rolls back the publish.
+    void processAndPublish(int32_t moduleIndex, std::string rawJson,
+                           bool persistOnSuccess, std::string_view context);
+
+    // socket - moduleIndex * socketsPerModule: the per-module offset for
+    // DIMM/PCIe/TPM numbering. nullopt if out of range for the platform
+    // (rank outside [0, socketsPerModule)); validated in processAndPublish.
+    static std::optional<int32_t> rankWithinModule(int32_t moduleIndex,
+                                                   int32_t socket);
+
+    // Throws if another published socket in the same module has a different
+    // DIMM/PCIe/TPM count; rank-based numbering needs a uniform count or the
+    // object paths would overlap.
+    void assertUniformCounts(int32_t moduleIndex, int32_t socket,
+                             const TerminusData& td) const;
 
     void clearTerminusInfo(const std::string& terminusName);
+    // rank is the validated rankWithinModule() value, computed by the caller.
     void updateTerminusInfo(const std::string& terminusName,
-                            int32_t moduleIndex, TerminusData td);
+                            int32_t moduleIndex, int32_t socket, int32_t rank,
+                            TerminusData td);
 
     // Patch Association.Definitions on this terminus's DIMM and PCIe
     // slot objects using whatever discovered paths are known. Idempotent.
