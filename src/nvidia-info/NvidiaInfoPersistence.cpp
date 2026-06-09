@@ -22,6 +22,7 @@
 #include <phosphor-logging/lg2.hpp>
 
 #include <cerrno>
+#include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -41,38 +42,75 @@ namespace
 {
 
 constexpr std::string_view persistedFilenamePrefix = "ProcessorModule_";
+constexpr std::string_view persistedFilenameInfix = "_Socket_";
 constexpr std::string_view persistedFilenameSuffix = "_Info.json";
+
+// Parses an unsigned decimal field into [0, maxValue]. from_chars handles
+// the digit parse, overflow, and rejecting signs/whitespace (unsigned, so
+// '-' is invalid); we only add the leading-zero rejection it lacks (a bare
+// "0" is allowed). Returns nullopt on any other shape.
+std::optional<int32_t> parseBoundedField(std::string_view digits,
+                                         int32_t maxValue)
+{
+    if (digits.empty() || (digits.size() > 1 && digits.front() == '0'))
+    {
+        return std::nullopt;
+    }
+    unsigned value = 0;
+    const auto* end = digits.data() + digits.size();
+    const auto [ptr, ec] = std::from_chars(digits.data(), end, value);
+    if (ec != std::errc{} || ptr != end ||
+        value > static_cast<unsigned>(maxValue))
+    {
+        return std::nullopt;
+    }
+    return static_cast<int32_t>(value);
+}
 
 } // namespace
 
-std::filesystem::path persistedPathFor(std::string_view dir,
-                                       int32_t processorModuleIndex)
+std::filesystem::path persistedPathFor(std::string_view dir, PersistedId id)
 {
     return std::filesystem::path(dir) /
-           std::format("{}{}{}", persistedFilenamePrefix, processorModuleIndex,
-                       persistedFilenameSuffix);
+           std::format("{}{}{}{}{}", persistedFilenamePrefix,
+                       id.processorModuleIndex, persistedFilenameInfix,
+                       id.socket, persistedFilenameSuffix);
 }
 
-std::optional<int32_t> moduleIndexFromPersistedFilename(
-    std::string_view filename)
+std::optional<PersistedId> persistedIdFromFilename(std::string_view filename)
 {
     if (!filename.starts_with(persistedFilenamePrefix) ||
         !filename.ends_with(persistedFilenameSuffix))
     {
         return std::nullopt;
     }
-    const std::string_view digits =
+    // Strip the fixed prefix/suffix, leaving "<module>_Socket_<socket>".
+    const std::string_view core =
         filename.substr(persistedFilenamePrefix.size(),
                         filename.size() - persistedFilenamePrefix.size() -
                             persistedFilenameSuffix.size());
-    if (digits.size() != 1 || digits[0] < '0' || digits[0] > '9')
+
+    const auto infixPos = core.find(persistedFilenameInfix);
+    if (infixPos == std::string_view::npos)
     {
         return std::nullopt;
     }
-    return digits[0] - '0';
+    const std::string_view moduleDigits = core.substr(0, infixPos);
+    const std::string_view socketDigits =
+        core.substr(infixPos + persistedFilenameInfix.size());
+
+    // Module stays single-digit 0..9 (matches the CreateInfo range);
+    // socket is 0..255.
+    const auto processorModuleIndex = parseBoundedField(moduleDigits, 9);
+    const auto socket = parseBoundedField(socketDigits, 255);
+    if (!processorModuleIndex || !socket)
+    {
+        return std::nullopt;
+    }
+    return PersistedId{*processorModuleIndex, *socket};
 }
 
-bool persistInfoJson(std::string_view dir, int32_t processorModuleIndex,
+bool persistInfoJson(std::string_view dir, PersistedId id,
                      const std::string& jsonStr)
 {
     namespace fs = std::filesystem;
@@ -86,7 +124,7 @@ bool persistInfoJson(std::string_view dir, int32_t processorModuleIndex,
         return false;
     }
 
-    const fs::path finalPath = persistedPathFor(dir, processorModuleIndex);
+    const fs::path finalPath = persistedPathFor(dir, id);
     const fs::path tempPath = std::format("{}.tmp", finalPath.string());
 
     try
@@ -149,10 +187,10 @@ bool persistInfoJson(std::string_view dir, int32_t processorModuleIndex,
     return true;
 }
 
-void removePersistedFile(std::string_view dir, int32_t processorModuleIndex)
+void removePersistedFile(std::string_view dir, PersistedId id)
 {
     namespace fs = std::filesystem;
-    const fs::path path = persistedPathFor(dir, processorModuleIndex);
+    const fs::path path = persistedPathFor(dir, id);
     std::error_code ec;
     fs::remove(path, ec);
     if (ec)

@@ -120,6 +120,41 @@ Json validBase()
     };
 }
 
+// validBase() with the Processor socket overridden. On the test build
+// (sockets-per-module defaults to 1) a payload is only valid for module M
+// when its socket is M, so live tests pair createInfoFromJsonString(M, ...)
+// with socket M.
+Json validBaseWithSocket(int32_t socket)
+{
+    Json j = validBase();
+    j["Processor"][0]["Socket"] = socket;
+    return j;
+}
+
+// validBaseWithSocket() with two of each non-Processor section, to exercise
+// the per-array DIMM/PCIe/TPM publish loops. One CPU per payload, so
+// Processor stays single.
+Json multiComponentPayload(int32_t socket)
+{
+    Json j = validBaseWithSocket(socket);
+    {
+        Json mem2 = j["Memory"][0];
+        mem2["MemoryDeviceLocator"] = "LP5x_17";
+        mem2["SerialNumber"] = "SN-MEM-2";
+        j["Memory"].push_back(std::move(mem2));
+    }
+    {
+        Json slot2 = j["PCIeSlots"][0];
+        slot2["LocationCode"] = "UPHY0:16-31";
+        j["PCIeSlots"].push_back(std::move(slot2));
+    }
+    {
+        Json tpm2 = j["TPM"][0];
+        j["TPM"].push_back(std::move(tpm2));
+    }
+    return j;
+}
+
 // Drives schema -> derive -> per-section validate end-to-end. Throws on
 // rejection just like processAndPublish would.
 void parseAndDerive(const Json& doc)
@@ -131,9 +166,9 @@ void parseAndDerive(const Json& doc)
 }
 
 // Returns a schema-valid TerminusData JSON with two of every section,
-// with required-unique fields perturbed so each entry is distinct.
-// Used to exercise the multi-instance code paths (e.g. CPU index math
-// in updateTerminusInfo, the dimm/pcieslot per-array publish loops).
+// including two Processors. Used only by the pure schema/derivation test:
+// the schema permits multiple Processors, even though the live publish
+// model is one CPU (one socket) per payload.
 Json validBaseMulti()
 {
     Json j = validBase();
@@ -220,7 +255,7 @@ TEST(SchemaGate, RejectsMissingTopLevel)
     {
         Json j = validBase();
         j.erase(key);
-        EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument)
+        EXPECT_THROW(nvi::validateAgainstSchema(j), nvi::SchemaViolation)
             << "schema must require top-level " << key;
     }
 }
@@ -306,7 +341,7 @@ TEST(SchemaGate, RejectsMissingPerSectionRequired)
     {
         Json j = validBase();
         j[c.section][0].erase(c.field);
-        EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument)
+        EXPECT_THROW(nvi::validateAgainstSchema(j), nvi::SchemaViolation)
             << c.section << "." << c.field << " must be required by the schema";
     }
 }
@@ -316,32 +351,32 @@ TEST(SchemaGate, RejectsOutOfRangeIntegers)
     {
         Json j = validBase();
         j["Processor"][0]["Socket"] = 256;
-        EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument);
+        EXPECT_THROW(nvi::validateAgainstSchema(j), nvi::SchemaViolation);
     }
     {
         Json j = validBase();
         j["Processor"][0]["CoreCount"] = 0; // minimum 1
-        EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument);
+        EXPECT_THROW(nvi::validateAgainstSchema(j), nvi::SchemaViolation);
     }
     {
         Json j = validBase();
         j["PCIeSlots"][0]["Generation"] = 7; // 0-6
-        EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument);
+        EXPECT_THROW(nvi::validateAgainstSchema(j), nvi::SchemaViolation);
     }
     {
         Json j = validBase();
         j["PCIeSlots"][0]["Lanes"] = 65; // 0-64
-        EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument);
+        EXPECT_THROW(nvi::validateAgainstSchema(j), nvi::SchemaViolation);
     }
     {
         Json j = validBase();
         j["PCIeSlots"][0]["MaxLinkSpeed"] = 7;
-        EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument);
+        EXPECT_THROW(nvi::validateAgainstSchema(j), nvi::SchemaViolation);
     }
     {
         Json j = validBase();
         j["Memory"][0]["ProcessorModuleIndex"] = 10;
-        EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument);
+        EXPECT_THROW(nvi::validateAgainstSchema(j), nvi::SchemaViolation);
     }
 }
 
@@ -350,17 +385,17 @@ TEST(SchemaGate, RejectsBadEnumStrings)
     {
         Json j = validBase();
         j["Memory"][0]["FormFactor"] = "BOGUS";
-        EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument);
+        EXPECT_THROW(nvi::validateAgainstSchema(j), nvi::SchemaViolation);
     }
     {
         Json j = validBase();
         j["Memory"][0]["MemoryType"] = "DDR5x";
-        EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument);
+        EXPECT_THROW(nvi::validateAgainstSchema(j), nvi::SchemaViolation);
     }
     {
         Json j = validBase();
         j["Memory"][0]["MemoryMedia"] = "GDDR";
-        EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument);
+        EXPECT_THROW(nvi::validateAgainstSchema(j), nvi::SchemaViolation);
     }
 }
 
@@ -379,13 +414,13 @@ TEST(SchemaGate, ProcessorIdRegex)
     EXPECT_NO_THROW(nvi::validateAgainstSchema(withId("0XDeadBeefCafeBabe")));
 
     // Reject: empty, 17 digits, non-hex, embedded space.
-    EXPECT_THROW(nvi::validateAgainstSchema(withId("")), std::invalid_argument);
+    EXPECT_THROW(nvi::validateAgainstSchema(withId("")), nvi::SchemaViolation);
     EXPECT_THROW(nvi::validateAgainstSchema(withId("0xDEADBEEFCAFEBABE0")),
-                 std::invalid_argument);
+                 nvi::SchemaViolation);
     EXPECT_THROW(nvi::validateAgainstSchema(withId("0xZZ")),
-                 std::invalid_argument);
+                 nvi::SchemaViolation);
     EXPECT_THROW(nvi::validateAgainstSchema(withId(" 0x1")),
-                 std::invalid_argument);
+                 nvi::SchemaViolation);
 }
 
 TEST(SchemaGate, ValidateTagsSectionAndIndex)
@@ -410,7 +445,7 @@ TEST(SchemaGate, ValidateTagsSectionAndIndex)
         nvi::validate(td);
         FAIL() << "validate() must throw on bad idStr";
     }
-    catch (const std::invalid_argument& e)
+    catch (const nvi::SchemaViolation& e)
     {
         const std::string what = e.what();
         EXPECT_NE(what.find("Processor[2]:"), std::string::npos)
@@ -775,48 +810,81 @@ class PersistenceTest : public ::testing::Test
     }
 };
 
-TEST_F(PersistenceTest, FilenameRoundTripDigits0Through9)
+TEST_F(PersistenceTest, FilenameRoundTrips)
 {
-    for (int32_t i = 0; i <= 9; ++i)
+    // Module 0..9 paired with a range of sockets, including multi-digit
+    // and the 0/255 boundaries.
+    static constexpr std::array kCases{
+        pst::PersistedId{0, 0},  pst::PersistedId{0, 1},
+        pst::PersistedId{1, 0},  pst::PersistedId{3, 7},
+        pst::PersistedId{9, 9},  pst::PersistedId{0, 99},
+        pst::PersistedId{2, 255}};
+    for (const auto& id : kCases)
     {
-        const auto p = pst::persistedPathFor(tmpdir.string(), i);
+        const auto p = pst::persistedPathFor(tmpdir.string(), id);
         EXPECT_EQ(p.parent_path(), tmpdir);
-        const auto idx =
-            pst::moduleIndexFromPersistedFilename(p.filename().string());
-        ASSERT_TRUE(idx.has_value()) << "no parse for " << p.filename();
-        EXPECT_EQ(*idx, i);
+        const auto parsed = pst::persistedIdFromFilename(p.filename().string());
+        ASSERT_TRUE(parsed.has_value()) << "no parse for " << p.filename();
+        EXPECT_EQ(parsed->processorModuleIndex, id.processorModuleIndex);
+        EXPECT_EQ(parsed->socket, id.socket);
     }
 }
 
-TEST_F(PersistenceTest, FilenameRejectsAnythingButSingleDigit)
+TEST_F(PersistenceTest, FilenameRejectsBadShapes)
 {
-    using pst::moduleIndexFromPersistedFilename;
-    EXPECT_FALSE(moduleIndexFromPersistedFilename(""));
-    EXPECT_FALSE(moduleIndexFromPersistedFilename("Foo.json"));
-    EXPECT_FALSE(moduleIndexFromPersistedFilename(
-        "ProcessorModule_10_Info.json"));    // two digits
-    EXPECT_FALSE(moduleIndexFromPersistedFilename(
-        "ProcessorModule_05_Info.json"));    // leading-zero alias
-    EXPECT_FALSE(moduleIndexFromPersistedFilename(
-        "ProcessorModule_-1_Info.json"));    // signed
-    EXPECT_FALSE(moduleIndexFromPersistedFilename(
-        "ProcessorModule_a_Info.json"));     // non-digit
-    EXPECT_FALSE(moduleIndexFromPersistedFilename(
-        "ProcessorModule_0_Info.json.tmp")); // mid-write artifact
-    EXPECT_FALSE(moduleIndexFromPersistedFilename(
-        "ProcessorModule_0_Info.txt"));      // wrong suffix
-    EXPECT_FALSE(moduleIndexFromPersistedFilename(
-        "ProcessorModule__Info.json"));      // empty digit slot
+    using pst::persistedIdFromFilename;
+    EXPECT_FALSE(persistedIdFromFilename(""));
+    EXPECT_FALSE(persistedIdFromFilename("Foo.json"));
+    EXPECT_FALSE(persistedIdFromFilename(
+        "ProcessorModule_0_Info.json"));              // legacy: no socket field
+    EXPECT_FALSE(persistedIdFromFilename(
+        "ProcessorModule_10_Socket_0_Info.json"));    // two-digit module
+    EXPECT_FALSE(persistedIdFromFilename(
+        "ProcessorModule_05_Socket_0_Info.json"));    // module leading zero
+    EXPECT_FALSE(persistedIdFromFilename(
+        "ProcessorModule_0_Socket_05_Info.json"));    // socket leading zero
+    EXPECT_FALSE(persistedIdFromFilename(
+        "ProcessorModule_0_Socket_256_Info.json"));   // socket > 255
+    EXPECT_FALSE(persistedIdFromFilename(
+        "ProcessorModule_0_Socket_-1_Info.json"));    // signed socket
+    EXPECT_FALSE(persistedIdFromFilename(
+        "ProcessorModule_0_Socket_a_Info.json"));     // non-digit socket
+    EXPECT_FALSE(persistedIdFromFilename(
+        "ProcessorModule_a_Socket_0_Info.json"));     // non-digit module
+    EXPECT_FALSE(persistedIdFromFilename(
+        "ProcessorModule_0_Socket__Info.json"));      // empty socket slot
+    EXPECT_FALSE(persistedIdFromFilename(
+        "ProcessorModule_0_Socket_0_Info.json.tmp")); // mid-write artifact
+    EXPECT_FALSE(persistedIdFromFilename(
+        "ProcessorModule_0_Socket_0_Info.txt"));      // wrong suffix
 }
 
 TEST_F(PersistenceTest, PersistWritesExactBytesAndOverwrites)
 {
-    const auto p = pst::persistedPathFor(tmpdir.string(), 3);
-    ASSERT_TRUE(pst::persistInfoJson(tmpdir.string(), 3, "first"));
+    const auto p =
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{3, 3});
+    ASSERT_TRUE(
+        pst::persistInfoJson(tmpdir.string(), pst::PersistedId{3, 3}, "first"));
     EXPECT_EQ(slurp(p), "first");
     // Overwriting must not throw and must replace cleanly.
-    ASSERT_TRUE(pst::persistInfoJson(tmpdir.string(), 3, "second"));
+    ASSERT_TRUE(pst::persistInfoJson(tmpdir.string(), pst::PersistedId{3, 3},
+                                     "second"));
     EXPECT_EQ(slurp(p), "second");
+}
+
+TEST_F(PersistenceTest, PersistDistinctSocketsCoexist)
+{
+    // Two sockets of the same module must not clobber each other on disk.
+    ASSERT_TRUE(pst::persistInfoJson(tmpdir.string(), pst::PersistedId{0, 0},
+                                     "socket0"));
+    ASSERT_TRUE(pst::persistInfoJson(tmpdir.string(), pst::PersistedId{0, 1},
+                                     "socket1"));
+    EXPECT_EQ(
+        slurp(pst::persistedPathFor(tmpdir.string(), pst::PersistedId{0, 0})),
+        "socket0");
+    EXPECT_EQ(
+        slurp(pst::persistedPathFor(tmpdir.string(), pst::PersistedId{0, 1})),
+        "socket1");
 }
 
 TEST_F(PersistenceTest, PersistCreatesMissingDirectory)
@@ -824,14 +892,17 @@ TEST_F(PersistenceTest, PersistCreatesMissingDirectory)
     namespace fs = std::filesystem;
     auto sub = tmpdir / "nested" / "deep";
     ASSERT_FALSE(fs::exists(sub));
-    EXPECT_TRUE(pst::persistInfoJson(sub.string(), 7, "{}"));
-    EXPECT_TRUE(fs::exists(pst::persistedPathFor(sub.string(), 7)));
+    EXPECT_TRUE(
+        pst::persistInfoJson(sub.string(), pst::PersistedId{7, 7}, "{}"));
+    EXPECT_TRUE(fs::exists(
+        pst::persistedPathFor(sub.string(), pst::PersistedId{7, 7})));
 }
 
 TEST_F(PersistenceTest, PersistLeavesNoTempArtifact)
 {
     namespace fs = std::filesystem;
-    ASSERT_TRUE(pst::persistInfoJson(tmpdir.string(), 0, "hello"));
+    ASSERT_TRUE(
+        pst::persistInfoJson(tmpdir.string(), pst::PersistedId{0, 0}, "hello"));
     int tmps = 0;
     for (const auto& e : fs::directory_iterator(tmpdir))
     {
@@ -845,18 +916,21 @@ TEST_F(PersistenceTest, PersistLeavesNoTempArtifact)
 
 TEST_F(PersistenceTest, RemoveOnExistingClearsFile)
 {
-    const auto p = pst::persistedPathFor(tmpdir.string(), 0);
-    ASSERT_TRUE(pst::persistInfoJson(tmpdir.string(), 0, "x"));
+    const auto p =
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{0, 0});
+    ASSERT_TRUE(
+        pst::persistInfoJson(tmpdir.string(), pst::PersistedId{0, 0}, "x"));
     ASSERT_TRUE(std::filesystem::exists(p));
-    pst::removePersistedFile(tmpdir.string(), 0);
+    pst::removePersistedFile(tmpdir.string(), pst::PersistedId{0, 0});
     EXPECT_FALSE(std::filesystem::exists(p));
 }
 
 TEST_F(PersistenceTest, RemoveMissingIsNoThrow)
 {
-    EXPECT_NO_THROW(pst::removePersistedFile(tmpdir.string(), 8));
-    EXPECT_FALSE(
-        std::filesystem::exists(pst::persistedPathFor(tmpdir.string(), 8)));
+    EXPECT_NO_THROW(
+        pst::removePersistedFile(tmpdir.string(), pst::PersistedId{8, 8}));
+    EXPECT_FALSE(std::filesystem::exists(
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{8, 8})));
 }
 
 // ============================================================================
@@ -944,56 +1018,96 @@ TEST_F(NvidiaInfoLiveTest, RejectsMalformedJsonAndLeavesNoFile)
 {
     auto svc = makeService();
     EXPECT_THROW(svc->createInfoFromJsonString(0, "this is not json"),
-                 sdbusplus::exception::SdBusError);
-    EXPECT_FALSE(
-        std::filesystem::exists(pst::persistedPathFor(tmpdir.string(), 0)));
+                 nvi::SchemaViolation);
+    EXPECT_FALSE(std::filesystem::exists(
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{0, 0})));
 }
 
 TEST_F(NvidiaInfoLiveTest, RejectsSchemaInvalidAndLeavesNoFile)
 {
     auto svc = makeService();
-    Json bad = validBase();
+    Json bad = validBaseWithSocket(0);
     bad["Processor"][0].erase("Socket");
     EXPECT_THROW(svc->createInfoFromJsonString(0, bad.dump()),
-                 sdbusplus::exception::SdBusError);
-    EXPECT_FALSE(
-        std::filesystem::exists(pst::persistedPathFor(tmpdir.string(), 0)));
+                 nvi::SchemaViolation);
+    EXPECT_FALSE(std::filesystem::exists(
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{0, 0})));
+}
+
+TEST_F(NvidiaInfoLiveTest, RejectsSocketModuleMismatch)
+{
+    // On a 1-socket-per-module build, socket must equal module; a socket
+    // outside the module's range is rejected.
+    auto svc = makeService();
+    EXPECT_THROW(
+        svc->createInfoFromJsonString(0, validBaseWithSocket(1).dump()),
+        nvi::InvalidConfiguration);
+    EXPECT_FALSE(std::filesystem::exists(
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{0, 1})));
+}
+
+TEST_F(NvidiaInfoLiveTest, RejectsMultipleProcessors)
+{
+    // One socket per payload: a payload with more than one Processor is
+    // rejected rather than keyed off the first.
+    auto svc = makeService();
+    EXPECT_THROW(svc->createInfoFromJsonString(0, validBaseMulti().dump()),
+                 nvi::SchemaViolation);
 }
 
 TEST_F(NvidiaInfoLiveTest, ValidPayloadPersistsExactBytes)
 {
     auto svc = makeService();
-    const std::string js = validBase().dump();
+    const std::string js = validBaseWithSocket(3).dump();
     ASSERT_NO_THROW(svc->createInfoFromJsonString(3, js));
-    const auto p = pst::persistedPathFor(tmpdir.string(), 3);
+    const auto p =
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{3, 3});
     ASSERT_TRUE(std::filesystem::exists(p));
     EXPECT_EQ(slurp(p), js);
 }
 
-TEST_F(NvidiaInfoLiveTest, FailureAfterSuccessRemovesPriorFile)
+TEST_F(NvidiaInfoLiveTest, MalformedRetryKeepsPriorFile)
 {
+    // A malformed payload has no parseable socket, so the daemon can't tell
+    // which file it belongs to and leaves the last known-good file intact.
     auto svc = makeService();
-    const std::string js = validBase().dump();
+    const std::string js = validBaseWithSocket(0).dump();
     ASSERT_NO_THROW(svc->createInfoFromJsonString(0, js));
-    const auto p = pst::persistedPathFor(tmpdir.string(), 0);
+    const auto p =
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{0, 0});
     ASSERT_TRUE(std::filesystem::exists(p));
 
-    // Now feed the same module a malformed payload. processAndPublish
-    // catches, calls removePersistedFile, then throws.
     EXPECT_THROW(svc->createInfoFromJsonString(0, "not json"),
-                 sdbusplus::exception::SdBusError);
-    EXPECT_FALSE(std::filesystem::exists(p));
+                 nvi::SchemaViolation);
+    EXPECT_TRUE(std::filesystem::exists(p))
+        << "unidentifiable malformed payload must not drop the good file";
+    EXPECT_EQ(slurp(p), js);
 }
 
 TEST_F(NvidiaInfoLiveTest, RepublishIsIdempotent)
 {
     auto svc = makeService();
-    const std::string js = validBase().dump();
+    const std::string js = validBaseWithSocket(0).dump();
     EXPECT_NO_THROW(svc->createInfoFromJsonString(0, js));
     // Second call clears prior interfaces and re-registers; must not throw.
     EXPECT_NO_THROW(svc->createInfoFromJsonString(0, js));
-    EXPECT_TRUE(
-        std::filesystem::exists(pst::persistedPathFor(tmpdir.string(), 0)));
+    EXPECT_TRUE(std::filesystem::exists(
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{0, 0})));
+}
+
+TEST_F(NvidiaInfoLiveTest, DistinctModulesCoexist)
+{
+    // The overwrite bug: with (module, socket) identity the NVL72 layout
+    // (module 0/socket 0, module 1/socket 1) keeps both files.
+    auto svc = makeService();
+    ASSERT_NO_THROW(
+        svc->createInfoFromJsonString(0, validBaseWithSocket(0).dump()));
+    ASSERT_NO_THROW(
+        svc->createInfoFromJsonString(1, validBaseWithSocket(1).dump()));
+    EXPECT_TRUE(std::filesystem::exists(
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{0, 0})));
+    EXPECT_TRUE(std::filesystem::exists(
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{1, 1})));
 }
 
 TEST_F(NvidiaInfoLiveTest, RecoveryKeepsValidPersistedFile)
@@ -1001,8 +1115,9 @@ TEST_F(NvidiaInfoLiveTest, RecoveryKeepsValidPersistedFile)
     // Pre-populate a valid persisted file before constructing NvidiaInfo;
     // loadPersistedInfoFiles in the ctor must accept it and leave the file
     // alone.
-    const std::string js = validBase().dump();
-    const auto p = pst::persistedPathFor(tmpdir.string(), 5);
+    const std::string js = validBaseWithSocket(5).dump();
+    const auto p =
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{5, 5});
     {
         std::ofstream out(p);
         out << js;
@@ -1014,7 +1129,8 @@ TEST_F(NvidiaInfoLiveTest, RecoveryKeepsValidPersistedFile)
 
 TEST_F(NvidiaInfoLiveTest, RecoveryDropsCorruptPersistedFile)
 {
-    const auto p = pst::persistedPathFor(tmpdir.string(), 5);
+    const auto p =
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{5, 5});
     {
         std::ofstream out(p);
         out << "{ corrupted";
@@ -1027,9 +1143,9 @@ TEST_F(NvidiaInfoLiveTest, RecoveryDropsCorruptPersistedFile)
 TEST_F(NvidiaInfoLiveTest, RecoveryIgnoresNonMatchingFilenames)
 {
     namespace fs = std::filesystem;
-    // A two-digit "module" that the recovery filename regex must reject;
+    // A legacy socket-less filename that the recovery parser must reject;
     // the file must be left alone (we only delete files we recognize).
-    const auto stranger = tmpdir / "ProcessorModule_10_Info.json";
+    const auto stranger = tmpdir / "ProcessorModule_0_Info.json";
     {
         std::ofstream out(stranger);
         out << "garbage";
@@ -1043,29 +1159,30 @@ TEST_F(NvidiaInfoLiveTest, AcceptsIndexZeroAndNine)
 {
     // CreateInfo must accept the 0 and 9 boundaries of the 0..9 range
     // declared by createInfoFromJsonString. The "above 9" / "negative"
-    // reject paths are covered separately.
+    // reject paths are covered separately. socket == module on a
+    // 1-socket-per-module build.
     auto svc = makeService();
-    const std::string js = validBase().dump();
     for (int32_t idx : {0, 9})
     {
+        const std::string js = validBaseWithSocket(idx).dump();
         ASSERT_NO_THROW(svc->createInfoFromJsonString(idx, js))
             << "index " << idx << " must be accepted";
         EXPECT_TRUE(std::filesystem::exists(
-            pst::persistedPathFor(tmpdir.string(), idx)))
+            pst::persistedPathFor(tmpdir.string(), pst::PersistedId{idx, idx})))
             << "index " << idx << " must persist";
     }
 }
 
 TEST_F(NvidiaInfoLiveTest, AcceptsMultipleInstancesPerSection)
 {
-    // First exercise of the publish loops with cpuCount > 1: validates
-    // updateTerminusInfo's `cpuIndex = moduleIdx * cpuCount + i` math
-    // and the per-array dimm/pcieslot/tpm publish paths under
-    // multi-instance JSON. Persisted file must be exact bytes.
+    // Exercises the per-array DIMM/PCIe/TPM publish loops and their
+    // rank-based index math for a single socket carrying two of each
+    // component. Persisted file must be exact bytes.
     auto svc = makeService();
-    const std::string js = validBaseMulti().dump();
+    const std::string js = multiComponentPayload(2).dump();
     ASSERT_NO_THROW(svc->createInfoFromJsonString(2, js));
-    const auto p = pst::persistedPathFor(tmpdir.string(), 2);
+    const auto p =
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{2, 2});
     ASSERT_TRUE(std::filesystem::exists(p));
     EXPECT_EQ(slurp(p), js);
 }
@@ -1075,10 +1192,12 @@ TEST_F(NvidiaInfoLiveTest, RecoveryDropsSchemaInvalidFile)
     // Distinct from RecoveryDropsCorruptPersistedFile: that test feeds
     // unparseable JSON; this one feeds JSON that parses cleanly but
     // fails schema validation. Both paths should clean the file via
-    // processAndPublish's catch -> removePersistedFile.
-    Json bad = validBase();
+    // processAndPublish's catch -> removePersistedFile (recovery knows
+    // the socket from the filename).
+    Json bad = validBaseWithSocket(5);
     bad["Processor"][0].erase("Socket");
-    const auto p = pst::persistedPathFor(tmpdir.string(), 5);
+    const auto p =
+        pst::persistedPathFor(tmpdir.string(), pst::PersistedId{5, 5});
     {
         std::ofstream out(p);
         out << bad.dump();
@@ -1093,25 +1212,25 @@ TEST_F(NvidiaInfoLiveTest, RecoveryProcessesMultipleFiles)
 {
     // Single-file recovery is covered by RecoveryKeepsValidPersistedFile.
     // This test pre-populates three valid files at non-contiguous
-    // indices and asserts the directory iterator processes all of them
-    // (none rejected, all still on disk after construction).
-    const std::string js = validBase().dump();
+    // (module, socket) pairs and asserts the directory iterator processes
+    // all of them (none rejected, all still on disk after construction).
     static constexpr std::array<int32_t, 3> kIdx{0, 3, 7};
     for (int32_t idx : kIdx)
     {
-        std::ofstream out(pst::persistedPathFor(tmpdir.string(), idx));
-        out << js;
+        std::ofstream out(
+            pst::persistedPathFor(tmpdir.string(), pst::PersistedId{idx, idx}));
+        out << validBaseWithSocket(idx).dump();
     }
     for (int32_t idx : kIdx)
     {
-        ASSERT_TRUE(std::filesystem::exists(
-            pst::persistedPathFor(tmpdir.string(), idx)));
+        ASSERT_TRUE(std::filesystem::exists(pst::persistedPathFor(
+            tmpdir.string(), pst::PersistedId{idx, idx})));
     }
     auto svc = makeService();
     for (int32_t idx : kIdx)
     {
         EXPECT_TRUE(std::filesystem::exists(
-            pst::persistedPathFor(tmpdir.string(), idx)))
+            pst::persistedPathFor(tmpdir.string(), pst::PersistedId{idx, idx})))
             << "module " << idx << " must survive recovery";
     }
 }

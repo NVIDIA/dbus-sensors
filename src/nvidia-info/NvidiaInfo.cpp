@@ -39,6 +39,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -48,6 +49,23 @@
 
 namespace nvidia::info
 {
+
+namespace
+{
+
+// Sockets per processor module (meson option nvidia-info-sockets-per-module);
+// defaults to 1 so test/schema sources compile without the -D flag. Drives
+// the rank-within-module derivation for DIMM/PCIe/TPM numbering.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#ifndef NVIDIA_INFO_SOCKETS_PER_MODULE
+#define NVIDIA_INFO_SOCKETS_PER_MODULE 1
+#endif
+constexpr int32_t socketsPerModule = NVIDIA_INFO_SOCKETS_PER_MODULE;
+
+// Upper bound on the CPU socket index, matching the schema's Socket range.
+constexpr uint32_t maxSocket = 255;
+
+} // namespace
 
 NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
                        std::shared_ptr<sdbusplus::asio::connection> conn,
@@ -79,7 +97,10 @@ NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
     }
     catch (const std::exception& e)
     {
-        lg2::error("Failed to recover persisted info files on startup: {E}",
+        // Per-file rejections are handled in loadPersistedInfoFiles; an
+        // error here is unexpected. Log it and continue startup.
+        lg2::error("Unexpected error during persisted-info recovery, "
+                   "continuing startup without it: {E}",
                    "E", e.what());
     }
 
@@ -411,54 +432,114 @@ void NvidiaInfo::createInfoFromJsonString(int32_t processorModuleIndex,
     lg2::info("CreateInfo called for processor module {I} (JSON length {L})",
               "I", processorModuleIndex, "L", jsonStr.size());
 
-    processAndPublish(std::format("ProcessorModule_{}", processorModuleIndex),
-                      jsonStr, processorModuleIndex,
-                      /*persistOnSuccess=*/true, "CreateInfo");
+    try
+    {
+        processAndPublish(processorModuleIndex, jsonStr,
+                          /*persistOnSuccess=*/true, "CreateInfo");
+    }
+    catch (const InfoError& e)
+    {
+        // Log the rejection, then rethrow so the caller still gets the error.
+        lg2::error("CreateInfo rejected for module {I}: {N}: {E}", "I",
+                   processorModuleIndex, "N", e.name(), "E", e.what());
+        throw;
+    }
 }
 
-void NvidiaInfo::processAndPublish(
-    std::string terminusName, std::string rawJson, int32_t moduleIndex,
-    bool persistOnSuccess, std::string_view context)
+std::optional<int32_t> NvidiaInfo::rankWithinModule(int32_t moduleIndex,
+                                                    int32_t socket)
 {
-    TerminusData td;
-    try
+    const int32_t rank = socket - moduleIndex * socketsPerModule;
+    if (rank < 0 || rank >= socketsPerModule)
     {
-        Json doc = Json::parse(rawJson);
-        // Schema enforces structure; validate() does derivation only.
-        validateAgainstSchema(doc);
-        td = doc.get<TerminusData>();
-        validate(td);
+        return std::nullopt;
     }
-    catch (const std::exception& e)
+    return rank;
+}
+
+void NvidiaInfo::assertUniformCounts(int32_t moduleIndex, int32_t socket,
+                                     const TerminusData& td) const
+{
+    for (const auto& [name, entry] : terminusInfos)
     {
-        lg2::critical("{C} rejected for terminus {T}: {E}", "C", context, "T",
-                      terminusName, "E", e.what());
-        clearTerminusInfo(terminusName);
-        persistence::removePersistedFile(persistedDir, moduleIndex);
-        throw sdbusplus::exception::SdBusError(
-            -EINVAL, std::format("{} rejected: {}", context, e.what()).c_str());
+        // Only compare against other sockets of the same module; a socket
+        // replacing itself is fine.
+        if (entry.moduleIndex != moduleIndex || entry.socket == socket)
+        {
+            continue;
+        }
+        const auto& other = entry.terminus;
+        if (other.dimms.size() != td.dimms.size() ||
+            other.pcieSlots.size() != td.pcieSlots.size() ||
+            other.tpms.size() != td.tpms.size())
+        {
+            throw InvalidConfiguration(std::format(
+                "component counts (DIMM/PCIe/TPM = {}/{}/{}) differ from "
+                "socket {} of the same module ({}/{}/{}); rank-based "
+                "numbering requires a uniform count across a module's sockets",
+                td.dimms.size(), td.pcieSlots.size(), td.tpms.size(),
+                entry.socket, other.dimms.size(), other.pcieSlots.size(),
+                other.tpms.size()));
+        }
     }
+}
+
+void NvidiaInfo::processAndPublish(int32_t moduleIndex, std::string rawJson,
+                                   bool persistOnSuccess,
+                                   std::string_view context)
+{
+    // Validation throws SchemaViolation/InvalidConfiguration (D-Bus
+    // exceptions) directly; no translating catch here.
+    TerminusData td = parseAndValidate(rawJson);
+
+    // Identity is the single Processor's socket; the model is one socket per
+    // payload, so reject anything else rather than keying off the first.
+    if (td.cpus.size() != 1)
+    {
+        throw SchemaViolation(std::format(
+            "expected exactly one Processor entry, got {}", td.cpus.size()));
+    }
+    // Re-check the schema's 0..255 Socket range before narrowing so an
+    // out-of-range value can't wrap to a negative socket.
+    const uint32_t rawSocket = td.cpus.front().socketNum;
+    if (rawSocket > maxSocket)
+    {
+        throw SchemaViolation(std::format("socket {} exceeds the maximum of {}",
+                                          rawSocket, maxSocket));
+    }
+    const int32_t socket = static_cast<int32_t>(rawSocket);
+
+    const auto maybeRank = rankWithinModule(moduleIndex, socket);
+    if (!maybeRank)
+    {
+        throw InvalidConfiguration(std::format(
+            "socket {} is inconsistent with module {} for a platform with "
+            "{} socket(s) per module",
+            socket, moduleIndex, socketsPerModule));
+    }
+    const int32_t rank = *maybeRank;
+    assertUniformCounts(moduleIndex, socket, td);
+
+    const std::string terminusName =
+        std::format("ProcessorModule_{}_Socket_{}", moduleIndex, socket);
 
     try
     {
-        updateTerminusInfo(terminusName, moduleIndex, std::move(td));
+        updateTerminusInfo(terminusName, moduleIndex, socket, rank,
+                           std::move(td));
     }
     catch (const std::exception& e)
     {
+        // Roll back the partial publish and rethrow.
         lg2::error("{C}: exception publishing terminus {T}: {E}", "C", context,
                    "T", terminusName, "E", e.what());
-        // Tear down any partial publishers from the failed update so we
-        // don't leave half-registered interfaces on D-Bus. The persisted
-        // file is intentionally left intact: it still reflects the last
-        // known-good state, and recovery on the next boot can retry.
         clearTerminusInfo(terminusName);
-        throw sdbusplus::exception::SdBusError(
-            -EIO,
-            std::format("{} failed to publish: {}", context, e.what()).c_str());
+        throw;
     }
 
+    const persistence::PersistedId id{moduleIndex, socket};
     if (persistOnSuccess &&
-        !persistence::persistInfoJson(persistedDir, moduleIndex, rawJson))
+        !persistence::persistInfoJson(persistedDir, id, rawJson))
     {
         // Roll back the publish so [D-Bus state] still matches
         // [on-disk state] (the previous good file, or none). Caller can
@@ -479,7 +560,8 @@ void NvidiaInfo::clearTerminusInfo(const std::string& terminusName)
 }
 
 void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
-                                    int32_t moduleIndex, TerminusData td)
+                                    int32_t moduleIndex, int32_t socket,
+                                    int32_t rankArg, TerminusData td)
 {
     lg2::info("Updating NVIDIA inventory for terminus {T}", "T", terminusName);
 
@@ -490,15 +572,25 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
     auto& entry = terminusInfos[terminusName];
     entry.terminus = std::move(td);
     entry.moduleIndex = moduleIndex;
+    entry.socket = socket;
     auto& stored = entry.terminus;
 
     const auto moduleIdx = static_cast<uint64_t>(moduleIndex);
-    const auto cpuCount = static_cast<uint64_t>(stored.cpus.size());
+
+    // rank is the per-module offset multiplier; counts are uniform across the
+    // module's sockets (assertUniformCounts), so each socket's block tiles
+    // after the previous rank's.
+    const auto rank = static_cast<uint64_t>(rankArg);
+    const auto dimmStride = static_cast<uint64_t>(stored.dimms.size());
+    const auto pcieStride = static_cast<uint64_t>(stored.pcieSlots.size());
+    const auto tpmStride = static_cast<uint64_t>(stored.tpms.size());
 
     for (std::size_t i = 0; i < stored.cpus.size(); ++i)
     {
+        // CPU path is flat (no module segment), so the index must be
+        // globally unique: use the socket number.
         const uint64_t cpuIndex =
-            moduleIdx * cpuCount + static_cast<uint64_t>(i);
+            static_cast<uint64_t>(stored.cpus[i].socketNum);
 
         const std::string cpuPath =
             std::format("{}/cpu/CPU_{}", inventoryPath, cpuIndex);
@@ -513,9 +605,10 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
 
     for (std::size_t i = 0; i < stored.dimms.size(); ++i)
     {
+        const uint64_t memIndex = rank * dimmStride + static_cast<uint64_t>(i);
         const std::string dimmPath =
             std::format("{}/dimm/ProcessorModule_{}_Memory_{}", inventoryPath,
-                        moduleIdx, i);
+                        moduleIdx, memIndex);
         stored.dimms[i].publish(*objServer, dimmPath);
     }
 
@@ -525,17 +618,19 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         {
             continue;
         }
+        const uint64_t slotIndex = rank * pcieStride + static_cast<uint64_t>(i);
         const std::string pciePath =
             std::format("{}/board/HGX_ProcessorModule_{}/pcieslot{}",
-                        inventoryPath, moduleIdx, i);
+                        inventoryPath, moduleIdx, slotIndex);
         stored.pcieSlots[i].publish(*objServer, pciePath, moduleIdx);
     }
 
     for (std::size_t i = 0; i < stored.tpms.size(); ++i)
     {
+        const uint64_t tpmIndex = rank * tpmStride + static_cast<uint64_t>(i);
         std::string tpmPath =
             std::format("{}/board/HGX_ProcessorModule_{}/tpm{}", inventoryPath,
-                        moduleIdx, i);
+                        moduleIdx, tpmIndex);
         stored.tpms[i].publish(*objServer, tpmPath);
     }
 
@@ -581,9 +676,8 @@ void NvidiaInfo::loadPersistedInfoFiles()
         }
 
         const std::string filename = entry.path().filename().string();
-        const auto moduleIndex =
-            persistence::moduleIndexFromPersistedFilename(filename);
-        if (!moduleIndex)
+        const auto persistedId = persistence::persistedIdFromFilename(filename);
+        if (!persistedId)
         {
             continue;
         }
@@ -610,19 +704,26 @@ void NvidiaInfo::loadPersistedInfoFiles()
             continue;
         }
 
-        lg2::info("Recovery: loading persisted info for module {I} from {F}",
-                  "I", *moduleIndex, "F", path.string());
+        lg2::info("Recovery: loading persisted info for module {I} socket {S} "
+                  "from {F}",
+                  "I", persistedId->processorModuleIndex, "S",
+                  persistedId->socket, "F", path.string());
         try
         {
-            // Already on disk; processAndPublish still removes it on failure.
-            processAndPublish(std::format("ProcessorModule_{}", *moduleIndex),
-                              std::move(rawJson), *moduleIndex,
+            // Already on disk, so no re-persist; drop the file ourselves if
+            // it no longer validates.
+            processAndPublish(persistedId->processorModuleIndex,
+                              std::move(rawJson),
                               /*persistOnSuccess=*/false, "Recovery");
         }
-        catch (const std::exception& e)
+        catch (const InfoError& e)
         {
-            lg2::warning("Recovery: persisted file {F} rejected: {E}", "F",
-                         path.string(), "E", e.what());
+            // Only an expected payload rejection drops the file; anything
+            // unexpected (e.g. bad_alloc) propagates.
+            lg2::warning("Recovery: persisted file {F} rejected: {E}, "
+                         "removing",
+                         "F", path.string(), "E", e.what());
+            persistence::removePersistedFile(persistedDir, *persistedId);
         }
     }
 }

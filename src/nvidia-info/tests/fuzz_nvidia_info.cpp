@@ -49,7 +49,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     {
         nvidia::info::validateAgainstSchema(doc);
     }
-    catch (const std::invalid_argument&)
+    catch (const nvidia::info::SchemaViolation&)
     {
         // Schema rejected the document.  Expected path for most inputs.
         return 0;

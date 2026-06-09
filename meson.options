@@ -107,6 +107,13 @@ option(
     description: 'Enable NVIDIA JSON-based hardware info.',
 )
 option(
+    'nvidia-info-sockets-per-module',
+    type: 'integer',
+    min: 1,
+    value: 1,
+    description: 'Number of CPU sockets per processor module on this platform.',
+)
+option(
     'external',
     type: 'feature',
     value: 'enabled',
