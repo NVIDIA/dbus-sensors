@@ -516,7 +516,7 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         const std::string dimmPath =
             std::format("{}/dimm/ProcessorModule_{}_Memory_{}", inventoryPath,
                         moduleIdx, i);
-        stored.dimms[i].publish(*objServer, dimmPath, i);
+        stored.dimms[i].publish(*objServer, dimmPath);
     }
 
     for (std::size_t i = 0; i < stored.pcieSlots.size(); ++i)
