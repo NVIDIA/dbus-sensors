@@ -1289,6 +1289,85 @@ bool I3CMCTPDDevice::match(const std::set<std::string>& interfaces)
     return interfaces.contains(configInterfaceName(configType));
 }
 
+// Parse the entity-manager "IgnoreMessageTypes" property -- a comma-separated
+// list of MCTP message-type numbers -- into a validated 0-255 byte list.
+// Entries that are out of range or non-numeric are skipped with a warning.
+// Returns std::nullopt when the key is absent, the string is empty, or parsing
+// throws, so callers forward the result straight into the MCTPDDevice ctor
+// (which masks these types in the AssignEndpointStatic call to mctpd). @a
+// context names the device in log lines. Shared by every transport consumer so
+// IgnoreMessageTypes is honoured identically regardless of binding.
+static std::optional<std::vector<std::uint8_t>> parseIgnoreMessageTypes(
+    const SensorBaseConfigMap& iface, const std::string& context)
+{
+    std::optional<std::vector<std::uint8_t>> ignoreMessageTypes{};
+    auto mIgnoreMessageTypes = iface.find("IgnoreMessageTypes");
+    if (mIgnoreMessageTypes == iface.end())
+    {
+        info(
+            "Info: Key 'IgnoreMessageTypes' is not provided for {CONTEXT}; skipping related processing.",
+            "CONTEXT", context);
+        return ignoreMessageTypes;
+    }
+    try
+    {
+        auto ignoreMessageTypesStr =
+            std::visit(VariantToStringVisitor(), mIgnoreMessageTypes->second);
+        if (!ignoreMessageTypesStr.empty())
+        {
+            ignoreMessageTypes = std::vector<std::uint8_t>{};
+            std::stringstream ss(ignoreMessageTypesStr);
+            std::string token;
+            while (std::getline(ss, token, ','))
+            {
+                token.erase(0, token.find_first_not_of(" \t"));
+                token.erase(token.find_last_not_of(" \t") + 1);
+                if (!token.empty())
+                {
+                    try
+                    {
+                        int64_t intVal = std::stoll(token);
+                        if (intVal >= 0 && intVal <= 255)
+                        {
+                            ignoreMessageTypes->push_back(
+                                static_cast<std::uint8_t>(intVal));
+                        }
+                        else
+                        {
+                            warning(
+                                "IgnoreMessageTypes entry out of range (0-255): {MSG_TYPE}",
+                                "MSG_TYPE", intVal);
+                        }
+                    }
+                    catch (const std::exception& e)
+                    {
+                        warning(
+                            "Invalid IgnoreMessageTypes entry: '{VALUE}' - {ERROR}",
+                            "VALUE", token, "ERROR", e.what());
+                    }
+                }
+            }
+            info(
+                "Successfully parsed {COUNT} IgnoreMessageTypes entries for {CONTEXT}",
+                "COUNT", ignoreMessageTypes->size(), "CONTEXT", context);
+        }
+        else
+        {
+            info(
+                "IgnoreMessageTypes string is empty, no entries to parse for {CONTEXT}",
+                "CONTEXT", context);
+            ignoreMessageTypes = std::nullopt;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        warning("Failed to parse IgnoreMessageTypes: {ERROR} for {CONTEXT}",
+                "ERROR", e.what(), "CONTEXT", context);
+        ignoreMessageTypes = std::nullopt;
+    }
+    return ignoreMessageTypes;
+}
+
 std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
     const std::shared_ptr<sdbusplus::asio::connection>& connection,
     const SensorBaseConfigMap& iface)
@@ -1312,7 +1391,6 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
     auto mStaticEndpointID = iface.find("StaticEndpointID");
     auto mbridgePoolStartEid = iface.find("BridgePoolStartEid");
     auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
-    auto mIgnoreMessageTypes = iface.find("IgnoreMessageTypes");
     if (mAddress == iface.end() || mBus == iface.end() || mName == iface.end())
     {
         throw std::invalid_argument(
@@ -1400,75 +1478,9 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
         bridgePoolEndEid = parsedbridgePoolEndEid;
     }
 
-    // Parse IgnoreMessageTypes
-    std::optional<std::vector<std::uint8_t>> ignoreMessageTypes{};
-    if (mIgnoreMessageTypes == iface.end())
-    {
-        info(
-            "Info: Key 'IgnoreMessageTypes' is not provided for I2C device [ bus: {I2C_BUS}, address: {I2C_ADDRESS} ]; skipping related processing.",
-            "I2C_BUS", bus, "I2C_ADDRESS", address);
-    }
-    else
-    {
-        try
-        {
-            auto ignoreMessageTypesStr = std::visit(
-                VariantToStringVisitor(), mIgnoreMessageTypes->second);
-            if (!ignoreMessageTypesStr.empty())
-            {
-                ignoreMessageTypes = std::vector<std::uint8_t>{};
-                std::stringstream ss(ignoreMessageTypesStr);
-                std::string token;
-                while (std::getline(ss, token, ','))
-                {
-                    token.erase(0, token.find_first_not_of(" \t"));
-                    token.erase(token.find_last_not_of(" \t") + 1);
-                    if (!token.empty())
-                    {
-                        try
-                        {
-                            int64_t intVal = std::stoll(token);
-                            if (intVal >= 0 && intVal <= 255)
-                            {
-                                ignoreMessageTypes->push_back(
-                                    static_cast<uint8_t>(intVal));
-                            }
-                            else
-                            {
-                                warning(
-                                    "IgnoreMessageTypes entry out of range (0-255): {MSG_TYPE}",
-                                    "MSG_TYPE", intVal);
-                            }
-                        }
-                        catch (const std::exception& e)
-                        {
-                            warning(
-                                "Invalid IgnoreMessageTypes entry: '{VALUE}' - {ERROR}",
-                                "VALUE", token, "ERROR", e.what());
-                        }
-                    }
-                }
-                info(
-                    "Successfully parsed {COUNT} IgnoreMessageTypes entries for I2C device [ bus: {I2C_BUS}, address: {I2C_ADDRESS} ]",
-                    "COUNT", ignoreMessageTypes->size(), "I2C_BUS", bus,
-                    "I2C_ADDRESS", address);
-            }
-            else
-            {
-                info(
-                    "IgnoreMessageTypes string is empty, no entries to parse for I2C device [ bus: {I2C_BUS}, address: {I2C_ADDRESS} ]",
-                    "I2C_BUS", bus, "I2C_ADDRESS", address);
-                ignoreMessageTypes = std::nullopt;
-            }
-        }
-        catch (const std::exception& e)
-        {
-            warning(
-                "Failed to parse IgnoreMessageTypes: {ERROR} for I2C device [ bus: {I2C_BUS}, address: {I2C_ADDRESS} ]",
-                "ERROR", e.what(), "I2C_BUS", bus, "I2C_ADDRESS", address);
-            ignoreMessageTypes = std::nullopt;
-        }
-    }
+    auto ignoreMessageTypes = parseIgnoreMessageTypes(
+        iface, std::format("I2C device [ bus: {}, address: {} ]", bus,
+                           static_cast<int>(address)));
 
     auto pollingInterval = getPollingInterval(iface);
 
@@ -1768,7 +1780,6 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
         }
     }
 
-<<<<<<< HEAD
     std::optional<std::uint8_t> staticEID{};
     if (mStaticEndpointID == iface.end())
     {
@@ -1996,6 +2007,13 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     }
 
     auto pollingInterval = getPollingInterval(iface);
+
+    // Non-PLDM transport bridges (e.g. the SMA recovery USB endpoints) carry
+    // IgnoreMessageTypes so mctpd does not advertise PLDM/SPDM on them; honour
+    // it here exactly as the I2C consumer does, else pldm fabricates spurious
+    // firmware inventory for an endpoint that only speaks vendor-defined types.
+    auto ignoreMessageTypes = parseIgnoreMessageTypes(
+        iface, std::format("USB device [ interface: {} ]", interface));
 
     try
     {
