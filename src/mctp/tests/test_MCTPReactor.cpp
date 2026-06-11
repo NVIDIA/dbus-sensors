@@ -970,14 +970,14 @@ TEST(MCTPReactor, autoUSBRecoveryToggleReflectsState)
     MockAssociationServer assoc{};
     auto reactor = std::make_shared<MCTPReactor>(assoc);
 
-    // Disabled by default.
-    EXPECT_FALSE(reactor->isAutoUSBRecoveryEnabled());
-
-    EXPECT_TRUE(reactor->setAutoUSBRecoveryEnabled(true));
+    // Enabled by default.
     EXPECT_TRUE(reactor->isAutoUSBRecoveryEnabled());
 
     EXPECT_FALSE(reactor->setAutoUSBRecoveryEnabled(false));
     EXPECT_FALSE(reactor->isAutoUSBRecoveryEnabled());
+
+    EXPECT_TRUE(reactor->setAutoUSBRecoveryEnabled(true));
+    EXPECT_TRUE(reactor->isAutoUSBRecoveryEnabled());
 }
 
 TEST(MCTPReactor, usbRecoveryDisabledWhenRecoveryThresholdZero)
@@ -1012,8 +1012,10 @@ TEST(MCTPReactor, usbRecoverySkippedWhenAutoRecoveryDisabled)
     auto recovery = std::make_unique<MockUSBRecovery>();
     auto* recoveryPtr = recovery.get();
     auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
-    // Auto recovery left disabled (default); threshold is reached but the
-    // runtime switch suppresses the clear-halt call.
+    // Auto recovery is enabled by default; explicitly disable it so the
+    // runtime switch suppresses the clear-halt call even when the threshold
+    // is reached.
+    reactor->setAutoUSBRecoveryEnabled(false);
     auto device = std::make_shared<TestUSBMCTPDDevice>("usb-auto-disabled", 5);
 
     device->setupHandler = [](auto&& added) {
