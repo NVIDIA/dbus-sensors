@@ -4,9 +4,9 @@
 #include "Utils.hpp"
 #include "VariantVisitors.hpp"
 
-#include <bits/fs_dir.h>
 #include <systemd/sd-bus-protocol.h>
 #include <systemd/sd-bus.h>
+
 
 #include <boost/asio/error.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -133,6 +133,13 @@ void MCTPDDevice::onDiscoveryMatchRule()
         return;
     }
 
+    if (this->interface.empty())
+    {
+        debug(
+            "Skipping DiscoveryNotify registration: interface not yet resolved");
+        return;
+    }
+
     std::string interfacePath =
         std::string(mctpdControlPath) + "/interfaces/" + this->interface;
     const auto matchRule =
@@ -140,6 +147,8 @@ void MCTPDDevice::onDiscoveryMatchRule()
         sdbusplus::bus::match::rules::path(interfacePath) +
         sdbusplus::bus::match::rules::interface(mctpdControlInterface) +
         sdbusplus::bus::match::rules::member("DiscoveryNotify");
+    info("DiscoveryNotify match registered for interface {INTERFACE}.",
+         "INTERFACE", this->interface);
 
     discoveryNotifyMatch = std::make_unique<sdbusplus::bus::match_t>(
         *connection, matchRule,
@@ -154,9 +163,6 @@ void MCTPDDevice::onDiscoveryMatchRule()
                     "MCTPDDevice instance destroyed during DiscoveryNotify handling.");
             }
         });
-
-    info("DiscoveryNotify match registered for interface {INTERFACE}.",
-         "INTERFACE", this->interface);
 
     discoveryCheckTimer = std::make_unique<boost::asio::steady_timer>(
         connection->get_io_context());
@@ -1752,6 +1758,8 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     // mirroring I2C/I3C/SPI. A literal "Interface" (netdev name) is still
     // accepted as a backward-compatible override.
     std::string interface;
+    std::string physicalRootHubPath;
+    std::string physicalPort;
     auto mInterface = iface.find("Interface");
     if (mInterface != iface.end())
     {
@@ -1767,20 +1775,28 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
                 "Configuration object violates MCTPUSBDevice schema");
         }
 
-        auto rootHubPath =
+        physicalRootHubPath =
             std::visit(VariantToStringVisitor(), mRootHubPath->second);
-        auto port = std::visit(VariantToStringVisitor(), mPort->second);
+        physicalPort = std::visit(VariantToStringVisitor(), mPort->second);
 
         try
         {
-            interface = interfaceFromRootHubPort(rootHubPath, port);
+            interface =
+                interfaceFromRootHubPort(physicalRootHubPath, physicalPort);
+            info(
+                "USB netdev resolved for"
+                " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ]: {INTERFACE}",
+                "ROOT_HUB", physicalRootHubPath, "PORT", physicalPort,
+                "INTERFACE", interface);
         }
         catch (const MCTPException& ex)
         {
             warning(
-                "Failed to resolve MCTPUSBDevice netdev at [ RootHubPath: {ROOT_HUB}, Port: {PORT} ]: {EXCEPTION}",
-                "ROOT_HUB", rootHubPath, "PORT", port, "EXCEPTION", ex);
-            return {};
+                "USB netdev not yet visible for"
+                " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ],"
+                " will retry via tick: {EXCEPTION}",
+                "ROOT_HUB", physicalRootHubPath, "PORT", physicalPort,
+                "EXCEPTION", ex);
         }
     }
 
@@ -2015,24 +2031,31 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
 
     try
     {
+        std::shared_ptr<USBMCTPDDevice> dev;
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
-            return std::make_shared<USBMCTPDDevice>(
+            dev = std::make_shared<USBMCTPDDevice>(
                 connection, name, interface, address, staticEID.value(),
                 bridgePoolStartEid.value(), bridgePoolEndEid, ignoreEids,
                 ignoreMessageTypes, recoveryThreshold, pollingInterval, names);
         }
-        if (staticEID.has_value())
+        else if (staticEID.has_value())
         {
-            return std::make_shared<USBMCTPDDevice>(
+            dev = std::make_shared<USBMCTPDDevice>(
                 connection, name, interface, address, staticEID.value(),
                 std::nullopt, bridgePoolEndEid, std::nullopt,
                 ignoreMessageTypes, recoveryThreshold, pollingInterval, names);
         }
-        return std::make_shared<USBMCTPDDevice>(
-            connection, name, interface, address, std::nullopt, std::nullopt,
-            bridgePoolEndEid, std::nullopt, ignoreMessageTypes,
-            recoveryThreshold, pollingInterval, names);
+        else
+        {
+            dev = std::make_shared<USBMCTPDDevice>(
+                connection, name, interface, address, std::nullopt,
+                std::nullopt, bridgePoolEndEid, std::nullopt,
+                ignoreMessageTypes, recoveryThreshold, pollingInterval, names);
+        }
+        dev->rootHubPath_ = physicalRootHubPath;
+        dev->port_ = physicalPort;
+        return dev;
     }
     catch (const MCTPException& ex)
     {
@@ -2086,6 +2109,92 @@ std::string USBMCTPDDevice::interfaceFromRootHubPort(
     error("No MCTP netdev under RootHubPath {ROOT_HUB} for Port {PORT}",
           "ROOT_HUB", rootHubPath, "PORT", port);
     throw MCTPException("No matching net device found for USB endpoint");
+}
+
+std::size_t USBMCTPDDevice::id() const
+{
+    if (!rootHubPath_.empty())
+    {
+        std::size_t h1 = std::hash<std::string>{}(rootHubPath_);
+        std::size_t h2 = std::hash<std::string>{}(port_);
+        return h1 ^ (h2 << 1);
+    }
+    return MCTPDDevice::id();
+}
+
+void USBMCTPDDevice::setup(
+    std::function<void(const std::error_code& ec,
+                       const std::shared_ptr<MCTPEndpoint>& ep)>&& added)
+{
+    if (rootHubPath_.empty())
+    {
+        MCTPDDevice::setup(std::move(added));
+        return;
+    }
+
+    // Re-resolve the netdev name on every setup attempt until
+    // AssignEndpointStatic has succeeded at least once. This handles the udev
+    // rename (mctpusb0 → musb1_1_1_1_2): if a previous attempt used the
+    // pre-rename name and failed, the next tick picks up the new name here.
+    // Once confirmed the name is stable and we skip the sysfs walk entirely.
+    if (!interfaceConfirmed_)
+    {
+        std::string resolved;
+        try
+        {
+            resolved = interfaceFromRootHubPort(rootHubPath_, port_);
+        }
+        catch (const MCTPException& ex)
+        {
+            debug(
+                "USB netdev not yet visible for"
+                " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ],"
+                " will retry on next tick: {EXCEPTION}",
+                "ROOT_HUB", rootHubPath_, "PORT", port_, "EXCEPTION", ex);
+            added(std::make_error_code(std::errc::no_such_device), {});
+            return;
+        }
+
+        if (resolved != interface)
+        {
+            if (!interface.empty())
+            {
+                info(
+                    "USB netdev name changed"
+                    " {OLD_INTERFACE} → {NEW_INTERFACE}"
+                    " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ]",
+                    "OLD_INTERFACE", interface, "NEW_INTERFACE", resolved,
+                    "ROOT_HUB", rootHubPath_, "PORT", port_);
+            }
+            else
+            {
+                info(
+                    "USB netdev resolved for"
+                    " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ]: {INTERFACE}",
+                    "ROOT_HUB", rootHubPath_, "PORT", port_, "INTERFACE",
+                    resolved);
+            }
+            interface = resolved;
+            onDiscoveryMatchRule();
+        }
+    }
+
+    MCTPDDevice::setup(
+        [orig = std::move(added),
+         weak = weak_from_this()](const std::error_code& ec,
+                                  const std::shared_ptr<MCTPEndpoint>& ep) mutable {
+            if (auto self = std::dynamic_pointer_cast<USBMCTPDDevice>(
+                    weak.lock()))
+            {
+                if (!ec)
+                {
+                    self->interfaceConfirmed_ = true;
+                }
+                // On failure: do NOT clear interface. The next tick will
+                // re-resolve via sysfs and pick up any udev rename.
+            }
+            orig(ec, ep);
+        });
 }
 
 /* MCTP SPI*/

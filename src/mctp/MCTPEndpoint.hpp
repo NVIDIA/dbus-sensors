@@ -415,7 +415,7 @@ class MCTPDDevice :
     std::shared_ptr<sdbusplus::asio::connection> connection;
     const std::string name;
     const std::vector<std::string> deviceNames;
-    const std::string interface;
+    std::string interface;
     const std::vector<uint8_t> physaddr;
     std::shared_ptr<MCTPDEndpoint> endpoint;
 
@@ -596,9 +596,16 @@ class USBMCTPDDevice : public MCTPDDevice
         return recoveryThreshold;
     }
 
+    std::size_t id() const override;
+    void setup(std::function<void(const std::error_code& ec,
+                                  const std::shared_ptr<MCTPEndpoint>& ep)>&&
+                   added) override;
+
   private:
     static constexpr const char* configType = "MCTPUSBDevice";
     const uint8_t recoveryThreshold;
+    std::string rootHubPath_{};
+    std::string port_{};
 
     /** Resolve the MCTP-over-USB netdev for the device at @a port by walking
      *  the controller tree rooted at @a rootHubPath (both from entity-manager)
@@ -606,8 +613,10 @@ class USBMCTPDDevice : public MCTPDDevice
      *  mirroring I2CMCTPDDevice::interfaceFromBus /
      *  SPIMCTPDDevice::interfaceFromBusCs.
      */
-    static std::string interfaceFromRootHubPort(
-        const std::string& rootHubPath, const std::string& port);
+    static std::string interfaceFromRootHubPort(const std::string& rootHubPath,
+                                                const std::string& port);
+
+    bool interfaceConfirmed_{false};
 };
 
 class SPIMCTPDDevice : public MCTPDDevice

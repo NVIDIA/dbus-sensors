@@ -56,6 +56,11 @@ void MCTPReactor::trackUsbSetupFailure(const std::shared_ptr<MCTPDevice>& dev)
         return;
     }
 
+    if (usbDevice->getInterface().empty())
+    {
+        return;
+    }
+
     const int recoveryThreshold = usbDevice->getRecoveryThreshold();
     if (recoveryThreshold == 0)
     {
