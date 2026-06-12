@@ -14,10 +14,13 @@
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/exception.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <charconv>
 #include <cstdint>
@@ -34,11 +37,26 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
 
 PHOSPHOR_LOG2_USING;
+
+namespace
+{
+bool isSafeGadgetName(const std::string& name)
+{
+    return !name.empty() && name.size() < IFNAMSIZ &&
+           std::ranges::all_of(
+               name,
+               [](const unsigned char ch) {
+                   return std::isalnum(ch) || ch == '_' || ch == '-' ||
+                          ch == '.';
+               });
+}
+} // namespace
 
 static const char* mctpdObjectManagerInterface =
     "org.freedesktop.DBus.ObjectManager";
@@ -63,6 +81,11 @@ USBGadgetMCTPDevice::USBGadgetMCTPDevice(
     connection(connection), gadgetName(gadgetName), localEID(localEID),
     name(name)
 {
+    if (!isSafeGadgetName(gadgetName))
+    {
+        throw std::invalid_argument("Bad USB gadget interface name");
+    }
+
     info("Creating USB Gadget MCTP Device: {GADGET_NAME}, EID: {EID}",
          "GADGET_NAME", gadgetName, "EID", static_cast<int>(localEID));
 }
