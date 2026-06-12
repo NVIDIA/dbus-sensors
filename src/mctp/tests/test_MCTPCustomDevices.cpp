@@ -186,6 +186,16 @@ TEST_F(USBGadgetFromTest, fromValidConfigCreatesDevice)
     EXPECT_EQ(device->network(), 1);
 }
 
+TEST_F(USBGadgetFromTest, fromRejectsCommandInjectionInterface)
+{
+    SensorBaseConfigMap iface{{"Type", std::string("MCTPUSBGadgetTarget")},
+                              {"Name", std::string("usb0")},
+                              {"Interface", std::string("usb0;id")},
+                              {"LocalEID", std::string("10")}};
+
+    EXPECT_THROW(USBGadgetMCTPDevice::from(conn, iface), std::invalid_argument);
+}
+
 TEST_F(USBGadgetFromTest, fromLocalEidAsUint64CreatesDevice)
 {
     SensorBaseConfigMap iface{{"Type", std::string("MCTPUSBGadgetTarget")},
@@ -1841,13 +1851,13 @@ TEST_F(USBGadgetSocketMockTest, sendDiscoveryNotifyIfIndexZeroClosesSocket)
 }
 
 // sendDiscoveryNotify: sendto returns -1 (failure) for a device with
-// a long gadget name — exercises the error logging with name substitution.
-TEST_F(USBGadgetSocketMockTest, sendDiscoveryNotifySendtoFailLongGadgetName)
+// a valid gadget name — exercises the error logging with name substitution.
+TEST_F(USBGadgetSocketMockTest, sendDiscoveryNotifySendtoFailGadgetName)
 {
     refreshMockFd();
     gSendtoRetval = -1;
-    auto dev = std::make_shared<USBGadgetMCTPDevice>(
-        nullptr, "mctpusb_gadget_with_long_name", 100);
+    auto dev =
+        std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb_gdgt", 100);
     EXPECT_NO_THROW(dev->sendDiscoveryNotify());
 }
 
@@ -2545,7 +2555,7 @@ TEST_F(USBGadgetSocketMockTest,
     gSetsockoptFailOnCall = -1; // always fail
     gSetsockoptCallCount = 0;
     auto dev =
-        std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb_secondary", 50);
+        std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb_second", 50);
     EXPECT_NO_THROW(dev->sendDiscoveryNotify());
     gSetsockoptFail = false;
     gSetsockoptFailOnCall = -1;
@@ -3167,6 +3177,13 @@ TEST(USBGadgetMCTPDevice, describeEID16PrintsDecimal)
     EXPECT_EQ(desc.find("0x10"), std::string::npos);
 }
 
+TEST(USBGadgetMCTPDevice, constructorRejectsShellMetacharacters)
+{
+    EXPECT_THROW(
+        (void)std::make_shared<USBGadgetMCTPDevice>(nullptr, "usb0;id", 16),
+        std::invalid_argument);
+}
+
 // ===========================================================================
 // setup() — verify that all three std::system() calls are made when the
 // first two succeed and the third fails.  This requires gMockSystem to succeed
@@ -3278,13 +3295,13 @@ TEST_F(USBGadgetFromTest, fromCreatedDeviceDescribeUsesInterfaceField)
 {
     SensorBaseConfigMap iface{{"Type", std::string("MCTPUSBGadgetTarget")},
                               {"Name", std::string("my-gadget-name")},
-                              {"Interface", std::string("mctpusb_interface")},
+                              {"Interface", std::string("mctpusb_iface")},
                               {"LocalEID", std::string("50")}};
     auto dev = USBGadgetMCTPDevice::from(conn, iface);
     ASSERT_NE(dev, nullptr);
     std::string desc = dev->describe();
-    // The Interface field ("mctpusb_interface") is used as gadgetName
-    EXPECT_NE(desc.find("mctpusb_interface"), std::string::npos);
+    // The Interface field ("mctpusb_iface") is used as gadgetName
+    EXPECT_NE(desc.find("mctpusb_iface"), std::string::npos);
     // The Name field should NOT appear in describe()
     EXPECT_EQ(desc.find("my-gadget-name"), std::string::npos);
     EXPECT_NE(desc.find("50"), std::string::npos);
