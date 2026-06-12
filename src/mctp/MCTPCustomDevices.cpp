@@ -721,8 +721,26 @@ void USBGadgetMCTPDevice::sendDiscoveryNotify()
 
 void USBGadgetMCTPDevice::onEndpointAdded(sdbusplus::message_t& msg)
 {
-    auto [path, interfaces] =
-        msg.unpack<sdbusplus::message::object_path, SensorData>();
+    sdbusplus::message::object_path path;
+    SensorData interfaces;
+    try
+    {
+        std::tie(path, interfaces) =
+            msg.unpack<sdbusplus::message::object_path, SensorData>();
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Malformed endpoint-added signal for {GADGET_NAME}: {ERROR}",
+              "GADGET_NAME", gadgetName, "ERROR", e.what());
+        return;
+    }
+    catch (const std::exception& e)
+    {
+        error(
+            "Failed to process endpoint-added signal for {GADGET_NAME}: {ERROR}",
+            "GADGET_NAME", gadgetName, "ERROR", e.what());
+        return;
+    }
 
     if (interfaces.find(mctpdEndpointControlInterface) == interfaces.end())
     {
@@ -739,8 +757,26 @@ void USBGadgetMCTPDevice::onEndpointAdded(sdbusplus::message_t& msg)
 
 void USBGadgetMCTPDevice::onEndpointRemoved(sdbusplus::message_t& msg)
 {
-    auto [path, interfaces] =
-        msg.unpack<sdbusplus::message::object_path, std::set<std::string>>();
+    sdbusplus::message::object_path path;
+    std::set<std::string> interfaces;
+    try
+    {
+        std::tie(path, interfaces) = msg.unpack<
+            sdbusplus::message::object_path, std::set<std::string>>();
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Malformed endpoint-removed signal for {GADGET_NAME}: {ERROR}",
+              "GADGET_NAME", gadgetName, "ERROR", e.what());
+        return;
+    }
+    catch (const std::exception& e)
+    {
+        error(
+            "Failed to process endpoint-removed signal for {GADGET_NAME}: {ERROR}",
+            "GADGET_NAME", gadgetName, "ERROR", e.what());
+        return;
+    }
 
     if (!interfaces.contains(mctpdEndpointControlInterface))
     {
