@@ -17,6 +17,7 @@
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/exception.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
 
@@ -344,26 +345,44 @@ static void handleTransportError(const std::shared_ptr<MCTPReactor>& reactor,
 static void handleTransportErrorSignal(
     const std::shared_ptr<MCTPReactor>& reactor, sdbusplus::message_t& msg)
 {
-    TransportErrorInfo error;
+    TransportErrorInfo transportError;
 
-    msg.read(error.errorCode, error.direction, error.binding, error.srcEid,
-             error.destEid, error.tag, error.msgType, error.commandCode,
-             error.interface);
+    try
+    {
+        msg.read(transportError.errorCode, transportError.direction,
+                 transportError.binding, transportError.srcEid,
+                 transportError.destEid, transportError.tag,
+                 transportError.msgType, transportError.commandCode,
+                 transportError.interface);
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Ignoring malformed TransportError signal: {ERROR}", "ERROR",
+              e.what());
+        return;
+    }
+    catch (const std::exception& e)
+    {
+        error("Ignoring invalid TransportError signal: {ERROR}", "ERROR",
+              e.what());
+        return;
+    }
 
     // Edge case: If mctpd sends destEid as 0 (broadcast/early setup),
     // try to infer the correct EID from the interface name
-    if (error.destEid == 0)
+    if (transportError.destEid == 0)
     {
-        auto staticEid = reactor->getStaticEidFromInterface(error.interface);
+        auto staticEid =
+            reactor->getStaticEidFromInterface(transportError.interface);
         if (staticEid)
         {
-            error.destEid = *staticEid;
+            transportError.destEid = *staticEid;
         }
     }
 
     // Suppress logs for EIDs currently undergoing health checks (pings 1 & 2).
     // The 3rd ping failure will remove the EID from this set, allowing the log.
-    if (suppressedHealthCheckEids.contains(error.destEid))
+    if (suppressedHealthCheckEids.contains(transportError.destEid))
     {
         // Suppress ALL transport errors (TX and RX) while EID is suppressed
         return;
@@ -371,20 +390,21 @@ static void handleTransportErrorSignal(
 
     // Suppress logs if this specific EID's device is retrying setup
     // This allows other unrelated devices to still log their errors
-    if (reactor->isRetrying(error.destEid))
+    if (reactor->isRetrying(transportError.destEid))
     {
         return;
     }
 
     // Dispatch to appropriate handler based on error type
-    if (error.errorCode == ETIMEDOUT && error.direction == MCTP_DIR_RX &&
-        error.msgType == MCTP_CTRL_HDR_MSG_TYPE)
+    if (transportError.errorCode == ETIMEDOUT &&
+        transportError.direction == MCTP_DIR_RX &&
+        transportError.msgType == MCTP_CTRL_HDR_MSG_TYPE)
     {
-        handleApplicationTimeout(reactor, error);
+        handleApplicationTimeout(reactor, transportError);
     }
     else
     {
-        handleTransportError(reactor, error);
+        handleTransportError(reactor, transportError);
     }
 }
 
@@ -392,16 +412,32 @@ static void handleGeneralErrorSignal(
     const std::shared_ptr<sdbusplus::asio::connection>& connection,
     const std::shared_ptr<MCTPReactor>& reactor, sdbusplus::message_t& msg)
 {
-    GeneralErrorInfo error;
-    msg.read(error.eid, error.errorMessage, error.resolution);
+    GeneralErrorInfo generalError;
+    try
+    {
+        msg.read(generalError.eid, generalError.errorMessage,
+                 generalError.resolution);
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Ignoring malformed GeneralError signal: {ERROR}", "ERROR",
+              e.what());
+        return;
+    }
+    catch (const std::exception& e)
+    {
+        error("Ignoring invalid GeneralError signal: {ERROR}", "ERROR",
+              e.what());
+        return;
+    }
 
     // Get device name from reactor
-    auto deviceNameOpt = reactor->getDeviceName(error.eid);
+    auto deviceNameOpt = reactor->getDeviceName(generalError.eid);
     std::string deviceName =
-        deviceNameOpt.value_or("EID_" + std::to_string(error.eid));
+        deviceNameOpt.value_or("EID_" + std::to_string(generalError.eid));
 
     createMCTPLogEntry(connection, deviceName, hmcBridgeError,
-                       error.errorMessage, error.resolution);
+                       generalError.errorMessage, generalError.resolution);
 }
 
 constexpr const char* mctpReactorDebugPath =
@@ -410,6 +446,17 @@ constexpr const char* mctpReactorDebugInterface =
     "xyz.openbmc_project.MCTPReactor.Debug";
 constexpr const char* forceUSBRecoveryMethod = "ForceUSBRecovery";
 constexpr const char* autoUSBRecoveryEnabledProperty = "AutoUSBRecoveryEnabled";
+
+static std::string buildGeneralErrorMatchSpec()
+{
+    return sdbusplus::bus::match::rules::type::signal() +
+           sdbusplus::bus::match::rules::sender("au.com.codeconstruct.MCTP1") +
+           sdbusplus::bus::match::rules::interface(
+               "au.com.codeconstruct.MCTP.BusOwner1") +
+           sdbusplus::bus::match::rules::member("GeneralError") +
+           sdbusplus::bus::match::rules::path(
+               "/au/com/codeconstruct/mctp1/interfaces");
+}
 
 int main()
 {
@@ -529,11 +576,7 @@ int main()
         static_cast<sdbusplus::bus_t&>(*systemBus), transportErrorMatchSpec,
         std::bind_front(handleTransportErrorSignal, reactor));
 
-    const std::string generalErrorMatchSpec =
-        rules::type::signal() +
-        rules::interface("au.com.codeconstruct.MCTP.BusOwner1") +
-        rules::member("GeneralError") +
-        rules::path("/au/com/codeconstruct/mctp1/interfaces");
+    const std::string generalErrorMatchSpec = buildGeneralErrorMatchSpec();
 
     info("Setting up GeneralError signal match: {MATCH}", "MATCH",
          generalErrorMatchSpec);

@@ -264,13 +264,20 @@ TEST(ReactorMainHandlers, exitReactorMalformedMessageThrows)
     EXPECT_THROW(static_cast<void>(exitReactor(&io, msg)), std::exception);
 }
 
-TEST(ReactorMainHandlers, handleTransportErrorSignalMalformedMessageThrows)
+TEST(ReactorMainHandlers, handleTransportErrorSignalMalformedMessageIsIgnored)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(static_cast<void>(handleTransportErrorSignal(reactor, msg)),
-                 std::exception);
+    EXPECT_NO_THROW(handleTransportErrorSignal(reactor, msg));
+}
+
+TEST(ReactorMainHandlers, generalErrorMatchSpecPinsMctpdSender)
+{
+    const std::string matchSpec = buildGeneralErrorMatchSpec();
+    EXPECT_NE(matchSpec.find("sender='au.com.codeconstruct.MCTP1'"),
+              std::string::npos);
+    EXPECT_NE(matchSpec.find("member='GeneralError'"), std::string::npos);
 }
 
 TEST(ReactorMainHandlers, addInventoryMalformedMessageThrows)
@@ -3806,17 +3813,14 @@ TEST_F(FakeConnReactorWithTestSdBusFixture,
 // suite.
 // ===========================================================================
 
-// Malformed message (nullptr) → msg.read throws → function body entered →
-// handleGeneralErrorSignal counted as covered by gcovr.
-TEST(ReactorMainHandlers, handleGeneralErrorSignalNullMsgThrows)
+// Malformed message (nullptr) is ignored after the guarded read.
+TEST(ReactorMainHandlers, handleGeneralErrorSignalNullMsgIsIgnored)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(
-        static_cast<void>(handleGeneralErrorSignal(conn, reactor, msg)),
-        std::exception);
+    EXPECT_NO_THROW(handleGeneralErrorSignal(conn, reactor, msg));
 }
 
 // Proper "yss" message + non-null FakeConnReactorFixture connection.
