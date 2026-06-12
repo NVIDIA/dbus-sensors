@@ -12619,6 +12619,37 @@ TEST_F(AsyncFixture,
     gPendingAsyncCalls.clear();
 }
 
+TEST_F(AsyncFixture,
+       securityMalformedLearnEndpointReplyIsIgnoredWithoutSetupCallback)
+{
+    gMockSdBusCallSuccess = false; // hasBridgeInterface fails → LearnEndpoint
+
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-sec-learn-malformed", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+
+    bool callbackFired = false;
+    dev->requestSetupCallback =
+        [&callbackFired](const std::shared_ptr<MCTPDDevice>&) {
+            callbackFired = true;
+        };
+
+    dev->performDiscovery();
+    ASSERT_FALSE(gPendingAsyncCalls.empty());
+
+    // Empty success reply used to throw from the manual LearnEndpoint unpack.
+    EXPECT_NO_THROW(driveAsyncCallSuccess());
+    EXPECT_FALSE(callbackFired);
+    gPendingAsyncCalls.clear();
+    gMockSdBusCallSuccess = true;
+}
+
 // G353: performDiscovery callback success — LearnEndpoint returns valid
 // eid (non-zero) — `if (eid==0 && !allocated && objpath.empty())` FALSE path.
 // Source: MCTPEndpoint.cpp callback line 258 FALSE.

@@ -39,6 +39,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -366,8 +367,29 @@ void MCTPDDevice::performDiscovery()
 
                 if (dbusMethod == "LearnEndpoint")
                 {
-                    auto [eid, network, objpath, allocated] =
-                        msg.unpack<uint8_t, int32_t, std::string, bool>();
+                    uint8_t eid = 0;
+                    int32_t network = 0;
+                    std::string objpath;
+                    bool allocated = false;
+                    try
+                    {
+                        std::tie(eid, network, objpath, allocated) =
+                            msg.unpack<uint8_t, int32_t, std::string, bool>();
+                    }
+                    catch (const sdbusplus::exception_t& e)
+                    {
+                        error(
+                            "Malformed LearnEndpoint reply for {INTERFACE}: {ERROR}",
+                            "INTERFACE", self->interface, "ERROR", e.what());
+                        return;
+                    }
+                    catch (const std::exception& e)
+                    {
+                        error(
+                            "Failed to process LearnEndpoint reply for {INTERFACE}: {ERROR}",
+                            "INTERFACE", self->interface, "ERROR", e.what());
+                        return;
+                    }
                     info(
                         "LearnEndpoint returned eid: {EID}, network: {NETWORK}, objpath: {OBJPATH}, allocated: {ALLOCATED}",
                         "EID", eid, "NETWORK", network, "OBJPATH", objpath,
