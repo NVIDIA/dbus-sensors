@@ -168,48 +168,63 @@ static void addInventory(
     const std::shared_ptr<sdbusplus::asio::connection>& connection,
     const std::shared_ptr<MCTPReactor>& reactor, sdbusplus::message_t& msg)
 {
-    auto [path,
-          exposed] = msg.unpack<sdbusplus::message::object_path, SensorData>();
+    std::string inventoryPath = "<unavailable>";
     try
     {
+        auto [path, exposed] =
+            msg.unpack<sdbusplus::message::object_path, SensorData>();
+        inventoryPath = path.str;
         reactor->manageMCTPDevice(path, deviceFromConfig(connection, exposed));
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Ignoring malformed InterfacesAdded inventory signal: {ERROR}",
+              "ERROR", e.what());
     }
     catch (const std::logic_error& e)
     {
         error(
             "Addition of inventory at '{INVENTORY_PATH}' caused an invalid program state: {EXCEPTION}",
-            "INVENTORY_PATH", path, "EXCEPTION", e);
+            "INVENTORY_PATH", inventoryPath, "EXCEPTION", e);
     }
     catch (const std::system_error& e)
     {
         error(
             "Failed to manage device described by inventory at '{INVENTORY_PATH}: {EXCEPTION}'",
-            "INVENTORY_PATH", path, "EXCEPTION", e);
+            "INVENTORY_PATH", inventoryPath, "EXCEPTION", e);
+    }
+    catch (const std::exception& e)
+    {
+        error("Ignoring invalid InterfacesAdded inventory signal: {ERROR}",
+              "ERROR", e.what());
     }
 }
 
 static void removeInventory(const std::shared_ptr<MCTPReactor>& reactor,
                             sdbusplus::message_t& msg)
 {
-    auto [path, removed] =
-        msg.unpack<sdbusplus::message::object_path, std::set<std::string>>();
-    std::string removedInterfaces;
-    bool first = true;
-    for (const auto& iface : removed)
-    {
-        if (!first)
-        {
-            removedInterfaces.append(", ");
-        }
-        removedInterfaces.append(iface);
-        first = false;
-    }
-
-    info(
-        "InterfacesRemoved received for inventory path '{INVENTORY_PATH}' with interfaces [{REMOVED_INTERFACES}]",
-        "INVENTORY_PATH", path, "REMOVED_INTERFACES", removedInterfaces);
+    std::string inventoryPath = "<unavailable>";
     try
     {
+        auto [path, removed] = msg.unpack<sdbusplus::message::object_path,
+                                          std::set<std::string>>();
+        inventoryPath = path.str;
+        std::string removedInterfaces;
+        bool first = true;
+        for (const auto& iface : removed)
+        {
+            if (!first)
+            {
+                removedInterfaces.append(", ");
+            }
+            removedInterfaces.append(iface);
+            first = false;
+        }
+
+        info(
+            "InterfacesRemoved received for inventory path '{INVENTORY_PATH}' with interfaces [{REMOVED_INTERFACES}]",
+            "INVENTORY_PATH", path, "REMOVED_INTERFACES", removedInterfaces);
+
         bool mctpConfigRemoved =
             I2CMCTPDDevice::match(removed) || I3CMCTPDDevice::match(removed) ||
             USBMCTPDDevice::match(removed) || SPIMCTPDDevice::match(removed) ||
@@ -230,17 +245,27 @@ static void removeInventory(const std::shared_ptr<MCTPReactor>& reactor,
                 "INVENTORY_PATH", path);
         }
     }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Ignoring malformed InterfacesRemoved inventory signal: {ERROR}",
+              "ERROR", e.what());
+    }
     catch (const std::logic_error& e)
     {
         error(
             "Removal of inventory at '{INVENTORY_PATH}' caused an invalid program state: {EXCEPTION}",
-            "INVENTORY_PATH", path, "EXCEPTION", e);
+            "INVENTORY_PATH", inventoryPath, "EXCEPTION", e);
     }
     catch (const std::system_error& e)
     {
         error(
             "Failed to unmanage device described by inventory at '{INVENTORY_PATH}: {EXCEPTION}'",
-            "INVENTORY_PATH", path, "EXCEPTION", e);
+            "INVENTORY_PATH", inventoryPath, "EXCEPTION", e);
+    }
+    catch (const std::exception& e)
+    {
+        error("Ignoring invalid InterfacesRemoved inventory signal: {ERROR}",
+              "ERROR", e.what());
     }
 }
 
