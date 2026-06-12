@@ -2842,14 +2842,14 @@ TEST_F(FakeConnFixture, removeCallsAsyncAndFiresLambda)
     EXPECT_NO_THROW(ep->remove());
 }
 
-// 12. MCTPDDevice::onEndpointInterfacesRemoved() (static, private) — null msg
-//     causes msg.unpack to throw; exercises the function body.
-TEST_F(FakeConnFixture, onEndpointInterfacesRemovedThrowsOnNullMsg)
+// 12. MCTPDDevice::onEndpointInterfacesRemoved() ignores malformed messages.
+TEST(MCTPDDeviceSecurity, onEndpointInterfacesRemovedIgnoresNullMsg)
 {
+    std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-ep-removed", "usb0", std::vector<uint8_t>{0x20});
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(MCTPDDevice::onEndpointInterfacesRemoved(
+    EXPECT_NO_THROW(MCTPDDevice::onEndpointInterfacesRemoved(
         dev->weak_from_this(),
         "/au/com/codeconstruct/mctp1/networks/1/endpoints/9", msg));
 }

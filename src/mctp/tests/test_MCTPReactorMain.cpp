@@ -6,6 +6,7 @@
 #include <systemd/sd-bus.h>
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -27,6 +28,43 @@ class MockAssocServer : public AssociationServer
                 (override));
     MOCK_METHOD(void, disassociate, (const std::string& path), (override));
 };
+
+class SecurityMockMCTPDevice : public MCTPDevice
+{
+  public:
+    ~SecurityMockMCTPDevice() override = default;
+
+    MOCK_METHOD(void, setup,
+                (std::function<void(const std::error_code& ec,
+                                    const std::shared_ptr<MCTPEndpoint>& ep)> &&
+                 added),
+                (override));
+    MOCK_METHOD(void, remove, (), (override));
+    MOCK_METHOD(std::string, describe, (), (const, override));
+    MOCK_METHOD(std::size_t, id, (), (const, override));
+};
+
+class SecurityMockMCTPEndpoint : public MCTPEndpoint
+{
+  public:
+    ~SecurityMockMCTPEndpoint() override = default;
+
+    MOCK_METHOD(int, network, (), (const, override));
+    MOCK_METHOD(uint8_t, eid, (), (const, override));
+    MOCK_METHOD(void, subscribe,
+                (Event && degraded, Event&& available, Event&& removed),
+                (override));
+    MOCK_METHOD(void, remove, (), (override));
+    MOCK_METHOD(std::string, describe, (), (const, override));
+    MOCK_METHOD(std::shared_ptr<MCTPDevice>, device, (), (const, override));
+};
+
+bool __attribute__((weak)) LibusbUSBRecovery::clearBulkOutHalt(
+    const std::string&, std::string& status)
+{
+    status = "USB recovery unavailable in this unit test";
+    return false;
+}
 
 TEST(DeviceFromConfig, emptyConfigReturnsNull)
 {
@@ -2927,6 +2965,68 @@ TEST(MCTPDeviceRepository, removeKnownDeviceSucceeds)
     // remove() should succeed without throwing
     EXPECT_NO_THROW(reactor->devices.remove(device));
     EXPECT_FALSE(reactor->devices.contains(device));
+}
+
+TEST(MCTPDeviceRepository, removeUnknownDeviceThrowsNoSuchDevice)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto device = std::make_shared<MCTPDDevice>(
+        nullptr, "AbsentDevice", "mctpabsentremove", std::vector<uint8_t>{0x31},
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
+
+    EXPECT_FALSE(reactor->devices.contains(device));
+    try
+    {
+        reactor->devices.remove(device);
+        FAIL() << "Removing an unknown device did not throw";
+    }
+    catch (const std::system_error& error)
+    {
+        EXPECT_EQ(error.code(),
+                  std::make_error_code(std::errc::no_such_device));
+    }
+}
+
+TEST(MCTPReactorSecurity, staleQuarantineRemovalDoesNotThrow)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> removeHandler;
+
+    std::vector<Association> requiredAssociation{
+        {"configured_by", "configures", "/test/security-quarantine"}};
+    EXPECT_CALL(server,
+                associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
+                          requiredAssociation))
+        .Times(1);
+    EXPECT_CALL(server, disassociate(testing::_)).Times(0);
+
+    auto ep = std::make_shared<SecurityMockMCTPEndpoint>();
+    auto dev = std::make_shared<SecurityMockMCTPDevice>();
+    EXPECT_CALL(*dev, id()).WillRepeatedly(testing::Return(77U));
+    EXPECT_CALL(*dev, describe())
+        .WillRepeatedly(testing::Return("security-quarantine-device"));
+    EXPECT_CALL(*ep, device()).WillRepeatedly(testing::Return(dev));
+    EXPECT_CALL(*ep, describe()).WillRepeatedly(testing::Return("security-ep"));
+    EXPECT_CALL(*ep, eid()).WillRepeatedly(testing::Return(9));
+    EXPECT_CALL(*ep, network()).WillRepeatedly(testing::Return(1));
+    EXPECT_CALL(*ep, subscribe(testing::_, testing::_, testing::_))
+        .WillOnce(testing::SaveArg<2>(&removeHandler));
+    EXPECT_CALL(*dev, setup(testing::_))
+        .WillOnce(testing::InvokeArgument<0>(std::error_code(), ep));
+
+    reactor->manageMCTPDevice("/test/security-quarantine", dev);
+    ASSERT_TRUE(static_cast<bool>(removeHandler));
+
+    reactor->states[dev->id()] = MCTPDeviceState::Quarantine;
+    reactor->devices.devices.clear();
+    EXPECT_FALSE(reactor->devices.contains(dev));
+
+    EXPECT_NO_THROW(removeHandler(ep));
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(dev.get()));
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(ep.get()));
 }
 
 // ---------------------------------------------------------------------------

@@ -162,7 +162,10 @@ void MCTPReactor::trackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep)
                         self->next(dev, MCTPDeviceState::Lost);
                         break;
                     case MCTPDeviceState::Quarantine:
-                        self->terminate(dev);
+                        if (self->devices.contains(dev))
+                        {
+                            self->terminate(dev);
+                        }
                         break;
                     case MCTPDeviceState::Lost:
                     case MCTPDeviceState::Recovering:
