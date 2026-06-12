@@ -280,23 +280,21 @@ TEST(ReactorMainHandlers, generalErrorMatchSpecPinsMctpdSender)
     EXPECT_NE(matchSpec.find("member='GeneralError'"), std::string::npos);
 }
 
-TEST(ReactorMainHandlers, addInventoryMalformedMessageThrows)
+TEST(ReactorMainHandlers, addInventoryMalformedMessageIsIgnored)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(static_cast<void>(addInventory(conn, reactor, msg)),
-                 std::exception);
+    EXPECT_NO_THROW(addInventory(conn, reactor, msg));
 }
 
-TEST(ReactorMainHandlers, removeInventoryMalformedMessageThrows)
+TEST(ReactorMainHandlers, removeInventoryMalformedMessageIsIgnored)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(static_cast<void>(removeInventory(reactor, msg)),
-                 std::exception);
+    EXPECT_NO_THROW(removeInventory(reactor, msg));
 }
 
 // NOTE: NoOpLogGuard/CaptureLogGuard/CaptureEventGuard originally used
