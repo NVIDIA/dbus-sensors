@@ -495,20 +495,20 @@ TEST_F(USBGadgetFakeConnTest,
     }
 }
 
-// 6. onEndpointAdded() (private) — null msg → msg.unpack throws.
-TEST_F(USBGadgetFakeConnTest, onEndpointAddedWithNullMsgThrows)
+// 6. onEndpointAdded() (private) — null msg is ignored.
+TEST(USBGadgetMCTPDevice, onEndpointAddedWithNullMsgIsIgnored)
 {
-    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb0", 10);
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(dev->onEndpointAdded(msg));
+    EXPECT_NO_THROW(dev->onEndpointAdded(msg));
 }
 
-// 7. onEndpointRemoved() (private) — null msg → msg.unpack throws.
-TEST_F(USBGadgetFakeConnTest, onEndpointRemovedWithNullMsgThrows)
+// 7. onEndpointRemoved() (private) — null msg is ignored.
+TEST(USBGadgetMCTPDevice, onEndpointRemovedWithNullMsgIsIgnored)
 {
-    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb0", 10);
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(dev->onEndpointRemoved(msg));
+    EXPECT_NO_THROW(dev->onEndpointRemoved(msg));
 }
 
 // ===========================================================================
@@ -5213,6 +5213,13 @@ TEST_F(USBGadgetSocketMockTest,
     EXPECT_EQ(gSendtoCallCount, 0);
 }
 
+TEST(USBGadgetMCTPDevice, onEndpointAddedMalformedMessageIsIgnored)
+{
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb0", 10);
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW(dev->onEndpointAdded(msg));
+}
+
 // ===========================================================================
 // G288 — onEndpointRemoved(): empty InterfacesRemoved message (empty string
 // array) → mctpdEndpointControlInterface not present → returns early.
@@ -5240,6 +5247,13 @@ TEST_F(USBGadgetSocketMockTest,
         EXPECT_NO_THROW(dev->onEndpointRemoved(msg));
     }
     EXPECT_EQ(gSendtoCallCount, 0);
+}
+
+TEST(USBGadgetMCTPDevice, onEndpointRemovedMalformedMessageIsIgnored)
+{
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb0", 10);
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW(dev->onEndpointRemoved(msg));
 }
 
 // ===========================================================================
