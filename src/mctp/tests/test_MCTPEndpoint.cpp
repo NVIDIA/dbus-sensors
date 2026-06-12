@@ -2854,9 +2854,10 @@ TEST_F(FakeConnFixture, onEndpointInterfacesRemovedThrowsOnNullMsg)
         "/au/com/codeconstruct/mctp1/networks/1/endpoints/9", msg));
 }
 
-// 13. MCTPDEndpoint::onMctpEndpointChange() (private) — null msg throws.
-TEST_F(FakeConnFixture, onMctpEndpointChangeThrowsOnNullMsg)
+// 13. MCTPDEndpoint::onMctpEndpointChange() ignores malformed messages.
+TEST(MCTPDEndpointSecurity, onMctpEndpointChangeIgnoresNullMsg)
 {
+    std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-ep-change", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
@@ -2865,7 +2866,7 @@ TEST_F(FakeConnFixture, onMctpEndpointChangeThrowsOnNullMsg)
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(ep->onMctpEndpointChange(msg));
+    EXPECT_NO_THROW(ep->onMctpEndpointChange(msg));
 }
 
 // 14. MCTPDEndpoint accessor methods: network(), eid(), device(), describe()
@@ -3991,11 +3992,12 @@ TEST_F(FakeConnFixture, setupWithoutStaticEidCoversAssignEndpointBranch)
 }
 
 // ===========================================================================
-// Group 12: onMctpEndpointChange — null msg always throws
+// Group 12: onMctpEndpointChange — null msg is ignored
 // ===========================================================================
 
-TEST_F(FakeConnFixture, onMctpEndpointChangeWithNullMsgBodyEntered)
+TEST(MCTPDEndpointSecurity, onMctpEndpointChangeWithNullMsgIsIgnored)
 {
+    std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-ep-change2", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
@@ -4004,7 +4006,7 @@ TEST_F(FakeConnFixture, onMctpEndpointChangeWithNullMsgBodyEntered)
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(ep->onMctpEndpointChange(msg));
+    EXPECT_NO_THROW(ep->onMctpEndpointChange(msg));
 }
 
 // ===========================================================================
@@ -13183,6 +13185,41 @@ static sd_bus_message* buildPropertiesChangedMsg(const char* ifaceName,
     return msg;
 }
 
+static sd_bus_message* buildPropertiesChangedMsgInt32(const char* ifaceName,
+                                                      int32_t connectivityValue)
+{
+    sd_bus* bus = nullptr;
+    (void)sd_bus_new(&bus);
+    (void)sd_bus_set_address(bus,
+                             "unix:abstract=dbus-sensors-props-changed-test");
+    (void)sd_bus_start(bus);
+
+    sd_bus_message* msg = nullptr;
+    (void)sd_bus_message_new_signal(
+        bus, &msg, "/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
+        "org.freedesktop.DBus.Properties", "PropertiesChanged");
+
+    (void)sd_bus_message_append_basic(msg, 's', ifaceName);
+
+    (void)sd_bus_message_open_container(msg, 'a', "{sv}");
+    (void)sd_bus_message_open_container(msg, 'e', "sv");
+    (void)sd_bus_message_append_basic(msg, 's', "Connectivity");
+    (void)sd_bus_message_open_container(msg, 'v', "i");
+    (void)sd_bus_message_append_basic(msg, 'i', &connectivityValue);
+    (void)sd_bus_message_close_container(msg);
+    (void)sd_bus_message_close_container(msg);
+    (void)sd_bus_message_close_container(msg);
+
+    (void)sd_bus_message_open_container(msg, 'a', "s");
+    (void)sd_bus_message_close_container(msg);
+
+    (void)sd_bus_message_seal(msg, 1, 0);
+    (void)sd_bus_message_rewind(msg, 1);
+
+    sd_bus_unref(bus);
+    return msg;
+}
+
 // G362: onMctpEndpointChange — wrong interface → early return (line 733 TRUE).
 // subscribe() throws in FakeConnFixture, so set callbacks via direct member
 // access (allowed by -fno-access-control).
@@ -13271,6 +13308,32 @@ TEST_F(FakeConnFixture, G364_onMctpEndpointChangeConnectivityDegraded)
     // → notifyDegraded fired.
     EXPECT_NO_THROW(ep->onMctpEndpointChange(msg));
     EXPECT_TRUE(degradedCalled);
+}
+
+TEST(MCTPDEndpointSecurity, securityOnMctpEndpointChangeNonStringConnectivity)
+{
+    std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-sec-connectivity", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::message::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+
+    bool degradedCalled = false;
+    ep->notifyDegraded =
+        [&degradedCalled](const std::shared_ptr<MCTPEndpoint>&) {
+            degradedCalled = true;
+        };
+
+    sd_bus_message* raw =
+        buildPropertiesChangedMsgInt32(kMctpdEndpointControlIface, 1);
+    sdbusplus::message_t msg(raw, std::false_type{});
+
+    EXPECT_NO_THROW(ep->onMctpEndpointChange(msg));
+    EXPECT_FALSE(degradedCalled);
 }
 
 // ===========================================================================

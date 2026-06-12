@@ -1101,9 +1101,29 @@ std::string MCTPDEndpoint::path(const std::shared_ptr<MCTPEndpoint>& ep)
 
 void MCTPDEndpoint::onMctpEndpointChange(sdbusplus::message_t& msg)
 {
-    auto [iface, changed, _] =
-        msg.unpack<std::string, std::map<std::string, BasicVariantType>,
-                   std::vector<std::string>>();
+    std::string iface;
+    std::map<std::string, BasicVariantType> changed;
+    std::vector<std::string> invalidated;
+    try
+    {
+        std::tie(iface, changed, invalidated) =
+            msg.unpack<std::string, std::map<std::string, BasicVariantType>,
+                       std::vector<std::string>>();
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Malformed endpoint PropertiesChanged signal for {PATH}: {ERROR}",
+              "PATH", objpath.str, "ERROR", e.what());
+        return;
+    }
+    catch (const std::exception& e)
+    {
+        error(
+            "Failed to process endpoint PropertiesChanged signal for {PATH}: {ERROR}",
+            "PATH", objpath.str, "ERROR", e.what());
+        return;
+    }
+
     if (iface != mctpdEndpointControlInterface)
     {
         return;
@@ -1115,7 +1135,15 @@ void MCTPDEndpoint::onMctpEndpointChange(sdbusplus::message_t& msg)
         return;
     }
 
-    updateEndpointConnectivity(std::get<std::string>(it->second));
+    const auto* connectivity = std::get_if<std::string>(&it->second);
+    if (connectivity == nullptr)
+    {
+        warning("Ignoring non-string Connectivity update for {PATH}", "PATH",
+                objpath.str);
+        return;
+    }
+
+    updateEndpointConnectivity(*connectivity);
 }
 
 void MCTPDEndpoint::updateEndpointConnectivity(const std::string& connectivity)
