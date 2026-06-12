@@ -2011,20 +2011,7 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     }
 
     auto pollingInterval = getPollingInterval(iface);
-
-    // USB entries carry two optional byte lists that must reach mctpd's
-    // AssignEndpointStatic. IgnoreMessageTypes suppresses advertised types on
-    // non-PLDM transport bridges (e.g. the SMA recovery endpoints), else pldm
-    // fabricates firmware inventory for endpoints that only speak
-    // vendor-defined types. IgnoreEIDs marks bridge pool slots that never
-    // answer; without it mctpd polls every slot in order and a downstream
-    // device spanning two slots claims the wrong EID, so its
-    // MCTPBridgePoolDevice anchor never binds.
-    const auto usbContext =
-        std::format("USB device [ interface: {} ]", interface);
-    auto ignoreMessageTypes =
-        parseByteList(iface, "IgnoreMessageTypes", usbContext);
-    auto ignoreEids = parseByteList(iface, "IgnoreEIDs", usbContext);
+    std::vector<std::string> names = getDeviceNames(iface);
 
     try
     {
