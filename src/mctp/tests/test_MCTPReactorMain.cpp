@@ -2737,6 +2737,28 @@ TEST(MCTPDeviceRepository, removeKnownDeviceSucceeds)
     EXPECT_FALSE(reactor->devices.contains(device));
 }
 
+TEST(MCTPDeviceRepository, removeUnknownDeviceThrowsNoSuchDevice)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto device = std::make_shared<MCTPDDevice>(
+        nullptr, "AbsentDevice", "mctpabsentremove", std::vector<uint8_t>{0x31},
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
+
+    EXPECT_FALSE(reactor->devices.contains(device));
+    try
+    {
+        reactor->devices.remove(device);
+        FAIL() << "Removing an unknown device did not throw";
+    }
+    catch (const std::system_error& error)
+    {
+        EXPECT_EQ(error.code(),
+                  std::make_error_code(std::errc::no_such_device));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // MCTPReactor::tick — with deferred devices
 //

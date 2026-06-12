@@ -468,10 +468,28 @@ void MCTPDDevice::onEndpointInterfacesRemoved(
     const std::weak_ptr<MCTPDDevice>& weak, const std::string& objpath,
     sdbusplus::message_t& msg)
 {
-    auto path = msg.unpack<sdbusplus::message::object_path>();
+    sdbusplus::message::object_path path;
+    std::set<std::string> removedIfaces;
+    try
+    {
+        path = msg.unpack<sdbusplus::message::object_path>();
+        removedIfaces = msg.unpack<std::set<std::string>>();
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Malformed endpoint InterfacesRemoved signal for {PATH}: {ERROR}",
+              "PATH", objpath, "ERROR", e.what());
+        return;
+    }
+    catch (const std::exception& e)
+    {
+        error(
+            "Failed to process endpoint InterfacesRemoved signal for {PATH}: {ERROR}",
+            "PATH", objpath, "ERROR", e.what());
+        return;
+    }
     assert(path.str == objpath);
 
-    auto removedIfaces = msg.unpack<std::set<std::string>>();
     if (!removedIfaces.contains(mctpdEndpointControlInterface))
     {
         return;
