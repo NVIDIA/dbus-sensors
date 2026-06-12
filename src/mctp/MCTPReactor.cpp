@@ -142,35 +142,44 @@ void MCTPReactor::trackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep)
                  "MCTP_ENDPOINT", ep->describe());
             if (auto self = weak.lock())
             {
+                auto dev = ep->device();
+                if (!dev || !self->devices.contains(dev))
+                {
+                    info(
+                        "Ignoring stale endpoint removal for untracked device: [ {MCTP_ENDPOINT} ]",
+                        "MCTP_ENDPOINT", ep->describe());
+                    return;
+                }
+
                 self->untrackEndpoint(ep);
-                switch (self->states[ep->device()->id()])
+                switch (self->states[dev->id()])
                 {
                     case MCTPDeviceState::Unmanaged:
                     case MCTPDeviceState::Assigning:
                     case MCTPDeviceState::Unassigned:
                         break;
                     case MCTPDeviceState::Assigned:
-                        self->next(ep->device(), MCTPDeviceState::Lost);
+                        self->next(dev, MCTPDeviceState::Lost);
                         break;
                     case MCTPDeviceState::Quarantine:
-                        self->terminate(ep->device());
+                        self->terminate(dev);
                         break;
                     case MCTPDeviceState::Lost:
                     case MCTPDeviceState::Recovering:
                         break;
                     case MCTPDeviceState::Recovered:
-                        self->next(ep->device(), MCTPDeviceState::Lost);
+                        self->next(dev, MCTPDeviceState::Lost);
                         break;
                     case MCTPDeviceState::Removing:
                         // If the configuration has been replaced then we've
                         // already terminated the state tracking
-                        if (self->devices.contains(ep->device()))
+                        if (self->devices.contains(dev))
                         {
-                            self->terminate(ep->device());
+                            self->terminate(dev);
                         }
                         break;
                     case MCTPDeviceState::Pending:
-                        self->next(ep->device(), MCTPDeviceState::Unassigned);
+                        self->next(dev, MCTPDeviceState::Unassigned);
                         break;
                 }
             }

@@ -211,6 +211,13 @@ class CountingMCTPEndpoint : public MCTPEndpoint
     std::shared_ptr<MCTPDevice> owner;
 };
 
+bool __attribute__((weak)) LibusbUSBRecovery::clearBulkOutHalt(
+    const std::string&, std::string& status)
+{
+    status = "USB recovery unavailable in this unit test";
+    return false;
+}
+
 namespace
 {
 constexpr const char* kMctpdEndpointControlIface =
@@ -517,10 +524,7 @@ TEST_F(MCTPReactorFixture, manageMockDevice)
     EXPECT_CALL(assoc,
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation));
-    EXPECT_CALL(
-        assoc,
-        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
-        .Times(1);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
 
     EXPECT_CALL(*endpoint, remove()).WillOnce([&]() {
         removeHandler(endpoint);
@@ -545,10 +549,7 @@ TEST_F(MCTPReactorFixture, manageMockDeviceDeferredSetup)
     EXPECT_CALL(assoc,
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation));
-    EXPECT_CALL(
-        assoc,
-        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
-        .Times(1);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
 
     EXPECT_CALL(*endpoint, remove()).WillOnce([&]() {
         removeHandler(endpoint);
@@ -580,10 +581,7 @@ TEST_F(MCTPReactorFixture, manageMockDeviceRemoved)
 
     // state is Recovered — unmanageMCTPDevice is a no-op (no second
     // disassociate).
-    EXPECT_CALL(
-        assoc,
-        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
-        .Times(1);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
 
     EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_))
         .Times(2)
@@ -645,10 +643,7 @@ TEST_F(MCTPReactorFixture, removedCallbackForForeignDeviceDoesNotDeferSetup)
     EXPECT_CALL(assoc,
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation));
-    EXPECT_CALL(
-        assoc,
-        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
-        .Times(1);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
 
     // Fixture's device() is registered first; gmock uses the first matching
     // expectation, so we must clear and re-establish before a custom action.
@@ -724,10 +719,7 @@ TEST_F(MCTPReactorFixture, removedCallbackAfterUnmanageDoesNotRequeueSetup)
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation))
         .Times(1);
-    EXPECT_CALL(
-        assoc,
-        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
-        .Times(1);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
 
     EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_))
         .WillOnce(testing::SaveArg<2>(&removeHandler));
@@ -3360,10 +3352,7 @@ TEST_F(MCTPReactorFixture, G213trackEndpointRemovedDeviceNotInRepoNoDeferSetup)
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation))
         .Times(1);
-    EXPECT_CALL(
-        assoc,
-        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
-        .Times(1);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
 
     // Replace the fixture's endpoint->device() expectation: trackEndpoint
     // calls ep->device() multiple times (states lookup, next(), inventoryFor)
@@ -3394,8 +3383,8 @@ TEST_F(MCTPReactorFixture, G213trackEndpointRemovedDeviceNotInRepoNoDeferSetup)
     reactor->manageMCTPDevice("/test/g213", device);
     ASSERT_TRUE(static_cast<bool>(removeHandler));
 
-    // Fire removed callback: ep->device() returns foreignDevice, whose state
-    // slot is Unmanaged → no deferSetup, no state mutation on managed device.
+    // Fire removed callback: ep->device() returns foreignDevice, which is not
+    // in the repository, so the stale callback is ignored before untrack.
     removeHandler(endpoint);
 
     // tick() must NOT call setup again (nothing was deferred).
@@ -3448,6 +3437,67 @@ TEST_F(MCTPReactorFixture, G214trackEndpointRemovedDeviceInRepoCausesDeferSetup)
 
     // unmanage from Recovered is a no-op (no device->remove, no disassociate).
     reactor->unmanageMCTPDevice("/test/g214");
+}
+
+TEST(MCTPReactor, securityStaleRemovedCallbackDoesNotDemoteReplacement)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> oldRemove;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> newRemove;
+
+    std::vector<Association> requiredAssociation{
+        {"configured_by", "configures", "/test/security-replace"}};
+    EXPECT_CALL(assoc,
+                associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
+                          requiredAssociation))
+        .Times(2);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+
+    auto oldEp = std::make_shared<MockMCTPEndpoint>();
+    EXPECT_CALL(*oldEp, describe()).WillRepeatedly(testing::Return("old-ep"));
+    EXPECT_CALL(*oldEp, eid()).WillRepeatedly(testing::Return(9));
+    EXPECT_CALL(*oldEp, network()).WillRepeatedly(testing::Return(1));
+    EXPECT_CALL(*oldEp, subscribe(testing::_, testing::_, testing::_))
+        .WillOnce(testing::SaveArg<2>(&oldRemove));
+
+    auto newEp = std::make_shared<MockMCTPEndpoint>();
+    EXPECT_CALL(*newEp, describe()).WillRepeatedly(testing::Return("new-ep"));
+    EXPECT_CALL(*newEp, eid()).WillRepeatedly(testing::Return(9));
+    EXPECT_CALL(*newEp, network()).WillRepeatedly(testing::Return(1));
+    EXPECT_CALL(*newEp, subscribe(testing::_, testing::_, testing::_))
+        .WillOnce(testing::SaveArg<2>(&newRemove));
+
+    auto initial = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*initial, id()).WillRepeatedly(testing::Return(42U));
+    EXPECT_CALL(*initial, describe())
+        .WillRepeatedly(testing::Return("security-initial"));
+    EXPECT_CALL(*oldEp, device()).WillRepeatedly(testing::Return(initial));
+    EXPECT_CALL(*initial, setup(testing::_))
+        .WillOnce(testing::InvokeArgument<0>(std::error_code(), oldEp));
+    EXPECT_CALL(*initial, remove()).Times(1);
+
+    auto replacement = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*replacement, id()).WillRepeatedly(testing::Return(42U));
+    EXPECT_CALL(*replacement, describe())
+        .WillRepeatedly(testing::Return("security-replacement"));
+    EXPECT_CALL(*newEp, device()).WillRepeatedly(testing::Return(replacement));
+    EXPECT_CALL(*replacement, setup(testing::_))
+        .Times(1)
+        .WillOnce(testing::InvokeArgument<0>(std::error_code(), newEp));
+
+    reactor->manageMCTPDevice("/test/security-replace", initial);
+    reactor->manageMCTPDevice("/test/security-replace", replacement);
+    ASSERT_TRUE(static_cast<bool>(oldRemove));
+
+    oldRemove(oldEp);
+    reactor->tick();
+
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(replacement.get()));
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(oldEp.get()));
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(newEp.get()));
 }
 
 // G215: setupEndpoint — weak_ptr to reactor has expired before the setup
