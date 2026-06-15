@@ -1760,6 +1760,8 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     std::string interface;
     std::string physicalRootHubPath;
     std::string physicalPort;
+    uint8_t physicalConfiguration{};
+    uint8_t physicalInterfaceNum{};
     auto mInterface = iface.find("Interface");
     if (mInterface != iface.end())
     {
@@ -1769,33 +1771,50 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     {
         auto mRootHubPath = iface.find("RootHubPath");
         auto mPort = iface.find("Port");
-        if (mRootHubPath == iface.end() || mPort == iface.end())
+        auto mConfiguration = iface.find("Configuration");
+        auto mInterfaceNum = iface.find("InterfaceNum");
+        if (mRootHubPath == iface.end() || mPort == iface.end() ||
+            mConfiguration == iface.end() || mInterfaceNum == iface.end())
         {
             throw std::invalid_argument(
-                "Configuration object violates MCTPUSBDevice schema");
+                "Configuration object violates MCTPUSBDevice schema:"
+                " RootHubPath, Port, Configuration, and InterfaceNum"
+                " are all required");
         }
 
         physicalRootHubPath =
             std::visit(VariantToStringVisitor(), mRootHubPath->second);
         physicalPort = std::visit(VariantToStringVisitor(), mPort->second);
+        physicalConfiguration = static_cast<uint8_t>(
+            std::visit(VariantToIntVisitor(), mConfiguration->second));
+        physicalInterfaceNum = static_cast<uint8_t>(
+            std::visit(VariantToIntVisitor(), mInterfaceNum->second));
 
         try
         {
-            interface =
-                interfaceFromRootHubPort(physicalRootHubPath, physicalPort);
+            interface = interfaceFromRootHubPort(physicalRootHubPath,
+                                                 physicalPort,
+                                                 physicalConfiguration,
+                                                 physicalInterfaceNum);
             info(
                 "USB netdev resolved for"
-                " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ]: {INTERFACE}",
+                " [ RootHubPath: {ROOT_HUB}, Port: {PORT},"
+                " Config: {CONFIG}, IfaceNum: {IFACE_NUM} ]: {INTERFACE}",
                 "ROOT_HUB", physicalRootHubPath, "PORT", physicalPort,
+                "CONFIG", static_cast<unsigned>(physicalConfiguration),
+                "IFACE_NUM", static_cast<unsigned>(physicalInterfaceNum),
                 "INTERFACE", interface);
         }
         catch (const MCTPException& ex)
         {
             warning(
                 "USB netdev not yet visible for"
-                " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ],"
+                " [ RootHubPath: {ROOT_HUB}, Port: {PORT},"
+                " Config: {CONFIG}, IfaceNum: {IFACE_NUM} ],"
                 " will retry via tick: {EXCEPTION}",
                 "ROOT_HUB", physicalRootHubPath, "PORT", physicalPort,
+                "CONFIG", static_cast<unsigned>(physicalConfiguration),
+                "IFACE_NUM", static_cast<unsigned>(physicalInterfaceNum),
                 "EXCEPTION", ex);
         }
     }
@@ -2055,6 +2074,8 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
         }
         dev->rootHubPath_ = physicalRootHubPath;
         dev->port_ = physicalPort;
+        dev->configuration_ = physicalConfiguration;
+        dev->interfaceNum_ = physicalInterfaceNum;
         return dev;
     }
     catch (const MCTPException& ex)
@@ -2067,43 +2088,58 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
 }
 
 std::string USBMCTPDDevice::interfaceFromRootHubPort(
-    const std::string& rootHubPath, const std::string& port)
+    const std::string& rootHubPath, const std::string& port,
+    uint8_t configuration, uint8_t interfaceNum)
 {
-    // The MCTP netdev is exposed by the one USB interface of the device at this
-    // physical port that owns a net/ directory. Walk the controller's device
-    // tree from the configured RootHubPath -- no USB bus number is assumed and
-    // no parallel sysfs base path is hardcoded -- find the interface for this
-    // port and return its netdev. USB interface directories are named
-    // "<bus>-<port>:<config>.<altsetting>"; the trailing ':' in portTag anchors
-    // the match so a child port ("<port>.N") cannot match.
-    const std::string portTag = std::format("-{}:", port);
-
+    // USB interface sysfs directories are named "<bus>-<port>:<config>.<alt>".
+    // Build the exact suffix so the walk matches only the intended interface —
+    // no net/ tiebreaker needed when configuration and interfaceNum are known.
+    // Locate the usb<N> root-hub directory that is a direct child of the
+    // controller path; its name gives us the kernel-assigned bus number.
+    int busNum = -1;
     std::error_code ec;
-    std::filesystem::recursive_directory_iterator walk(
-        rootHubPath, std::filesystem::directory_options::skip_permission_denied,
-        ec);
-    if (ec)
+    for (const auto& entry :
+         std::filesystem::directory_iterator(rootHubPath, ec))
     {
-        error("Cannot traverse RootHubPath {ROOT_HUB}: {ERROR}", "ROOT_HUB",
-              rootHubPath, "ERROR", ec.message());
-        throw MCTPException("Cannot traverse RootHubPath");
+        const std::string fname = entry.path().filename().string();
+        if (fname.size() > 3 && fname.starts_with("usb"))
+        {
+            auto [ptr, err] = std::from_chars(
+                fname.data() + 3, fname.data() + fname.size(), busNum);
+            if (err == std::errc{} && ptr == fname.data() + fname.size())
+            {
+                break;
+            }
+            busNum = -1;
+        }
+    }
+    if (ec || busNum < 0)
+    {
+        error("Cannot find USB root hub under RootHubPath {ROOT_HUB}",
+              "ROOT_HUB", rootHubPath);
+        throw MCTPException("Cannot find USB root hub under RootHubPath");
     }
 
-    for (const auto& entry : walk)
-    {
-        std::error_code dec;
-        if (!entry.is_directory(dec) ||
-            entry.path().filename().string().find(portTag) ==
-                std::string::npos)
-        {
-            continue;
-        }
+    // Navigate directly to the USB interface directory. Port "1.1.1.1" nests
+    // as usb1/1-1/1-1.1/1-1.1.1/1-1.1.1.1/ under the root hub; each dot-
+    // separated segment adds one level. No walk or scan needed.
+    std::filesystem::path dir(rootHubPath);
+    dir /= std::format("usb{}", busNum);
 
-        std::filesystem::directory_iterator nets(entry.path() / "net", dec);
-        if (!dec && nets != std::filesystem::end(nets))
-        {
-            return nets->path().filename();
-        }
+    std::string prefix;
+    std::stringstream ss(port);
+    std::string segment;
+    while (std::getline(ss, segment, '.'))
+    {
+        prefix = prefix.empty() ? segment : prefix + "." + segment;
+        dir /= std::format("{}-{}", busNum, prefix);
+    }
+    dir /= std::format("{}-{}:{}.{}", busNum, port, configuration, interfaceNum);
+
+    std::filesystem::directory_iterator nets(dir / "net", ec);
+    if (!ec && nets != std::filesystem::end(nets))
+    {
+        return nets->path().filename();
     }
 
     error("No MCTP netdev under RootHubPath {ROOT_HUB} for Port {PORT}",
@@ -2142,15 +2178,21 @@ void USBMCTPDDevice::setup(
         std::string resolved;
         try
         {
-            resolved = interfaceFromRootHubPort(rootHubPath_, port_);
+            resolved = interfaceFromRootHubPort(rootHubPath_, port_,
+                                                    configuration_,
+                                                    interfaceNum_);
         }
         catch (const MCTPException& ex)
         {
             debug(
                 "USB netdev not yet visible for"
-                " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ],"
+                " [ RootHubPath: {ROOT_HUB}, Port: {PORT},"
+                " Config: {CONFIG}, IfaceNum: {IFACE_NUM} ],"
                 " will retry on next tick: {EXCEPTION}",
-                "ROOT_HUB", rootHubPath_, "PORT", port_, "EXCEPTION", ex);
+                "ROOT_HUB", rootHubPath_, "PORT", port_,
+                "CONFIG", static_cast<unsigned>(configuration_),
+                "IFACE_NUM", static_cast<unsigned>(interfaceNum_),
+                "EXCEPTION", ex);
             added(std::make_error_code(std::errc::no_such_device), {});
             return;
         }

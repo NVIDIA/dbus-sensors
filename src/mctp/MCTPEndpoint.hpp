@@ -606,15 +606,18 @@ class USBMCTPDDevice : public MCTPDDevice
     const uint8_t recoveryThreshold;
     std::string rootHubPath_{};
     std::string port_{};
+    uint8_t configuration_{1};
+    uint8_t interfaceNum_{0};
 
-    /** Resolve the MCTP-over-USB netdev for the device at @a port by walking
-     *  the controller tree rooted at @a rootHubPath (both from entity-manager)
-     *  and returning the netdev of the interface that owns a net/ directory,
-     *  mirroring I2CMCTPDDevice::interfaceFromBus /
-     *  SPIMCTPDDevice::interfaceFromBusCs.
+    /** Resolve the MCTP-over-USB netdev by walking the sysfs controller tree
+     *  rooted at @a rootHubPath and finding the USB interface directory for
+     *  the given port/configuration/interfaceNum, then returning its netdev
+     *  name from the net/ subdirectory.
      */
     static std::string interfaceFromRootHubPort(const std::string& rootHubPath,
-                                                const std::string& port);
+                                                const std::string& port,
+                                                uint8_t configuration,
+                                                uint8_t interfaceNum);
 
     bool interfaceConfirmed_{false};
 };
