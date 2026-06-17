@@ -181,7 +181,12 @@ void from_json(const Json& j, TerminusData& t)
     j.at("Processor").get_to(t.cpus);
     j.at("Memory").get_to(t.dimms);
     j.at("PCIeSlots").get_to(t.pcieSlots);
-    j.at("TPM").get_to(t.tpms);
+    // TPM is optional: the SatMC/MB2 no longer sends it. Leave tpms empty
+    // when absent rather than letting at() throw out_of_range.
+    if (auto it = j.find("TPM"); it != j.end())
+    {
+        it->get_to(t.tpms);
+    }
 }
 
 namespace

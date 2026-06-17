@@ -216,13 +216,28 @@ TEST(SchemaGate, AcceptsMultiInstancePerSection)
 
 TEST(SchemaGate, RejectsMissingTopLevel)
 {
-    for (const char* key : {"Processor", "Memory", "PCIeSlots", "TPM"})
+    for (const char* key : {"Processor", "Memory", "PCIeSlots"})
     {
         Json j = validBase();
         j.erase(key);
         EXPECT_THROW(nvi::validateAgainstSchema(j), std::invalid_argument)
             << "schema must require top-level " << key;
     }
+}
+
+TEST(SchemaGate, AcceptsMissingTpm)
+{
+    // TPM is optional: the SatMC/MB2 no longer sends it. A payload without
+    // the TPM key must pass schema validation, parse, and derive cleanly
+    // (leaving tpms empty) rather than throwing out_of_range in from_json.
+    Json j = validBase();
+    j.erase("TPM");
+    EXPECT_NO_THROW(parseAndDerive(j));
+
+    nvi::validateAgainstSchema(j);
+    nvi::TerminusData td;
+    nvi::from_json(j, td);
+    EXPECT_TRUE(td.tpms.empty());
 }
 
 TEST(SchemaGate, RejectsMissingPerSectionRequired)
