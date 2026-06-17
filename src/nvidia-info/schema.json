@@ -22,7 +22,7 @@
             "items": { "$ref": "#/$defs/TPM" }
         }
     },
-    "required": ["Processor", "Memory", "PCIeSlots", "TPM"],
+    "required": ["Processor", "Memory", "PCIeSlots"],
     "$defs": {
         "Processor": {
             "type": "object",
