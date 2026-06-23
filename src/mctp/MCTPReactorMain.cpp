@@ -190,7 +190,7 @@ static void removeInventory(const std::shared_ptr<MCTPReactor>& reactor,
                             sdbusplus::message_t& msg)
 {
     auto [path, removed] =
-        msg.unpack<sdbusplus::message::object_path, std::set<std::string>>();
+        msg.unpack<sdbusplus::object_path, std::set<std::string>>();
     std::string removedInterfaces;
     bool first = true;
     for (const auto& iface : removed)

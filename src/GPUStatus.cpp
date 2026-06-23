@@ -31,7 +31,7 @@ GPUStatus::GPUStatus(
     const std::string& gpuProperty, int totalGPU,
     const std::string& sensorConfiguration) :
     AssocInterface(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+        static_cast<sdbusplus::bus_t&>(*conn),
         ("/xyz/openbmc_project/sensors/GPU/" + escapeName(sensorName)).c_str(),
         AssocInterface::action::defer_emit),
     name(sensorName), totalGPU(totalGPU), objServer(objectServer)
@@ -52,14 +52,14 @@ GPUStatus::GPUStatus(
     {
         std::variant<bool> value;
         std::string objPath = gpuObject + std::to_string(i);
-        auto method = static_cast<sdbusplus::bus::bus&>(*conn).new_method_call(
+        auto method = static_cast<sdbusplus::bus_t&>(*conn).new_method_call(
             gpuService.c_str(), objPath.c_str(),
             "org.freedesktop.DBus.Properties", "Get");
 
         method.append(gpuInterface, gpuProperty);
         try
         {
-            auto reply = static_cast<sdbusplus::bus::bus&>(*conn).call(method);
+            auto reply = static_cast<sdbusplus::bus_t&>(*conn).call(method);
             reply.read(value);
         }
         catch (const sdbusplus::exception_t&)
@@ -123,8 +123,8 @@ GPUStatus::GPUStatus(
     }
     std::string gpuBase = gpuObject.substr(0, indexLast);
 
-    gpuEventMatcher = std::make_shared<sdbusplus::bus::match::match>(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+    gpuEventMatcher = std::make_shared<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*conn),
         "type='signal',interface='org.freedesktop.DBus.Properties',member='"
         "PropertiesChanged',"
         "path_namespace='" +

@@ -553,8 +553,8 @@ void USBGadgetMCTPDevice::subscribe([[maybe_unused]] Event&& degraded,
                     return;
                 }
 
-                auto networkIt = objects.find(
-                    sdbusplus::message::object_path(mctpdNetwork1Path));
+                auto networkIt =
+                    objects.find(sdbusplus::object_path(mctpdNetwork1Path));
                 if (networkIt != objects.end())
                 {
                     const auto& interfaces = networkIt->second;
@@ -652,8 +652,7 @@ void USBGadgetMCTPDevice::sendDiscoveryNotify()
 
 void USBGadgetMCTPDevice::onEndpointAdded(sdbusplus::message_t& msg)
 {
-    auto [path, interfaces] =
-        msg.unpack<sdbusplus::message::object_path, SensorData>();
+    auto [path, interfaces] = msg.unpack<sdbusplus::object_path, SensorData>();
 
     if (interfaces.find(mctpdEndpointControlInterface) == interfaces.end())
     {
@@ -671,7 +670,7 @@ void USBGadgetMCTPDevice::onEndpointAdded(sdbusplus::message_t& msg)
 void USBGadgetMCTPDevice::onEndpointRemoved(sdbusplus::message_t& msg)
 {
     auto [path, interfaces] =
-        msg.unpack<sdbusplus::message::object_path, std::set<std::string>>();
+        msg.unpack<sdbusplus::object_path, std::set<std::string>>();
 
     if (!interfaces.contains(mctpdEndpointControlInterface))
     {

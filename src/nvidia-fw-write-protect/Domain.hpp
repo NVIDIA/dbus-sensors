@@ -52,15 +52,15 @@ class Domain : public DomainIntf
      *                          domain.
      */
     explicit Domain(sdbusplus::async::context& ctx,
-                    const sdbusplus::message::object_path& path,
-                    DomainManager* manager, SourceNodeId settableSource = {},
-                    const sdbusplus::message::object_path& chassisPath = {});
+                    const sdbusplus::object_path& path, DomainManager* manager,
+                    SourceNodeId settableSource = {},
+                    const sdbusplus::object_path& chassisPath = {});
 
     auto method_call(set_write_protected_t, bool wp)
         -> sdbusplus::async::task<>;
 
   private:
-    sdbusplus::message::object_path path;
+    sdbusplus::object_path path;
     DomainManager* manager;
     SourceNodeId settableSource;
 };

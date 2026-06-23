@@ -153,7 +153,7 @@ static struct SensorParams getSensorParameters(
 
     // Set the chassis (used for nvshmem)
     tmpSensorParameters.inventoryChassis =
-        sdbusplus::message::object_path(interfacePath).parent_path();
+        sdbusplus::object_path(interfacePath).parent_path();
     // Check to log error only once during init, if inventoryChassis is empty.
     // inventoryChassis endpoint requried for shared memory update
     if (tmpSensorParameters.inventoryChassis.empty())

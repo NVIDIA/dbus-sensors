@@ -782,14 +782,14 @@ int main(int argc, char* argv[])
             rules::interfacesAddedAtPath(path);
 
         // Fix the match object creation - update to use gIo instead of io
-        auto interfacesAddedMatch = match(
+        auto interfacesAddedMatch = sdbusplus::bus::match_t(
             *systemBus, interfacesAddedMatchSpec, [systemBus, eid](auto&) {
                 lg2::info("interfacesAddedMatch for SPI endpoint {EID}", "EID",
                           eid);
                 addedSPIEndpoint(systemBus, eid, gIo);
             });
-        auto interfacesRemovedMatch =
-            match(*systemBus, interfacesRemovedMatchSpec, [](auto&) {
+        auto interfacesRemovedMatch = sdbusplus::bus::match_t(
+            *systemBus, interfacesRemovedMatchSpec, [](auto&) {
                 lg2::info("interfacesRemovedMatch for SPI endpoint");
                 if (gHeartbeatService)
                 {

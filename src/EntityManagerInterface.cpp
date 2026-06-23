@@ -39,15 +39,15 @@ auto EntityManagerInterface::handleInventoryGet() -> sdbusplus::async::task<>
     using InventoryIntf =
         sdbusplus::client::xyz::openbmc_project::inventory::Item<>;
 
-    constexpr auto entityManager =
-        sdbusplus::async::proxy()
-            .service(serviceName)
-            .path(InventoryIntf::namespace_path)
-            .interface("org.freedesktop.DBus.ObjectManager");
+    auto entityManager = sdbusplus::async::proxy()
+                             .service(serviceName)
+                             .path(InventoryIntf::namespace_path)
+                             .interface("org.freedesktop.DBus.ObjectManager");
 
-    for (const auto& [objectPath, detectorConfig] :
-         co_await entityManager.call<ManagedObjectType>(ctx,
-                                                        "GetManagedObjects"))
+    auto managedObjects = co_await entityManager.call<ManagedObjectType>(
+        ctx, "GetManagedObjects");
+
+    for (const auto& [objectPath, detectorConfig] : managedObjects)
     {
         for (const auto& interfaceName : interfaceNames)
         {

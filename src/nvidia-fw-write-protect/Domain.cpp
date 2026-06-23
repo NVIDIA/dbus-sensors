@@ -9,9 +9,9 @@ namespace nvidia::write_protect
 {
 
 Domain::Domain(sdbusplus::async::context& ctx,
-               const sdbusplus::message::object_path& path,
-               DomainManager* manager, SourceNodeId settableSource,
-               const sdbusplus::message::object_path& chassisPath) :
+               const sdbusplus::object_path& path, DomainManager* manager,
+               SourceNodeId settableSource,
+               const sdbusplus::object_path& chassisPath) :
     DomainIntf(ctx, path.str.c_str()), path(path), manager(manager),
     settableSource(settableSource)
 {

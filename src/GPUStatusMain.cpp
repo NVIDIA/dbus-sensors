@@ -48,8 +48,8 @@ void createSensors(
             const std::pair<std::string, boost::container::flat_map<
                                              std::string, BasicVariantType>>*
                 baseConfiguration = nullptr;
-            for (const std::pair<sdbusplus::message::object_path, SensorData>&
-                     sensor : sensorConfigurations)
+            for (const std::pair<sdbusplus::object_path, SensorData>& sensor :
+                 sensorConfigurations)
             {
                 // clear it out each loop
                 baseConfiguration = nullptr;
@@ -194,7 +194,7 @@ int main()
     systemBus->request_name("xyz.openbmc_project.gpustatus");
     sdbusplus::asio::object_server objectServer(systemBus);
     boost::container::flat_map<std::string, std::shared_ptr<GPUStatus>> sensors;
-    std::vector<std::unique_ptr<sdbusplus::bus::match::match>> matches;
+    std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches;
     auto sensorsChanged =
         std::make_shared<boost::container::flat_set<std::string>>();
 
@@ -232,8 +232,8 @@ int main()
 
     for (const char* type : sensorTypes)
     {
-        auto match = std::make_unique<sdbusplus::bus::match::match>(
-            static_cast<sdbusplus::bus::bus&>(*systemBus),
+        auto match = std::make_unique<sdbusplus::bus::match_t>(
+            static_cast<sdbusplus::bus_t&>(*systemBus),
             "type='signal',member='PropertiesChanged',path_namespace='" +
                 std::string(inventoryPath) + "',arg0namespace='" + type + "'",
             eventHandler);

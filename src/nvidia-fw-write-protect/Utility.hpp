@@ -38,8 +38,7 @@ void emitAdded(T& server)
  * @param name Software inventory identifier.
  * @return The object path "/xyz/openbmc_project/software/<name>".
  */
-inline sdbusplus::message::object_path softwarePath(std::string_view name)
+inline sdbusplus::object_path softwarePath(std::string_view name)
 {
-    return sdbusplus::message::object_path("/xyz/openbmc_project/software") /
-           name;
+    return sdbusplus::object_path("/xyz/openbmc_project/software") / name;
 }

@@ -38,8 +38,8 @@
 
 namespace write_protect
 {
-std::unique_ptr<sdbusplus::bus::match::match> ifcAdded;
-std::unique_ptr<sdbusplus::bus::match::match> ifcRemoved;
+std::unique_ptr<sdbusplus::bus::match_t> ifcAdded;
+std::unique_ptr<sdbusplus::bus::match_t> ifcRemoved;
 using OnInterfaceAddedCallback = std::function<void(const Config&)>;
 using OnInterfaceRemovedCallback = std::function<void(std::string_view)>;
 
@@ -90,7 +90,7 @@ void getEmWriteProtectIf(const ManagedObjectType& managedObjs,
 template <typename Callback>
 void catchSignal(sdbusplus::message::message& msg, Callback&& callback)
 {
-    sdbusplus::message::object_path objPath;
+    sdbusplus::object_path objPath;
     SensorData ifcAndProperties;
     msg.read(objPath, ifcAndProperties);
     auto found = ifcAndProperties.find(interfaces::emWriteProtectIfc);
@@ -141,8 +141,8 @@ void setupInterfaceAdded(sdbusplus::asio::connection* conn,
         "xyz.openbmc_project.EntityManager", "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 
-    ifcAdded = std::make_unique<sdbusplus::bus::match::match>(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+    ifcAdded = std::make_unique<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*conn),
         sdbusplus::bus::match::rules::interfacesAdded() +
             sdbusplus::bus::match::rules::sender(
                 "xyz.openbmc_project.EntityManager"),
@@ -159,7 +159,7 @@ void setupInterfaceRemoved(sdbusplus::asio::connection* conn,
 
     std::function<void(sdbusplus::message::message & msg)> handler =
         [callback{std::move(callbackIn)}](sdbusplus::message::message msg) {
-            sdbusplus::message::object_path objPath;
+            sdbusplus::object_path objPath;
             std::vector<std::string> interfaces;
             msg.read(objPath, interfaces);
 
@@ -174,8 +174,8 @@ void setupInterfaceRemoved(sdbusplus::asio::connection* conn,
             }
         };
 
-    ifcRemoved = std::make_unique<sdbusplus::bus::match::match>(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+    ifcRemoved = std::make_unique<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*conn),
         sdbusplus::bus::match::rules::interfacesRemoved() +
             sdbusplus::bus::match::rules::sender(
                 "xyz.openbmc_project.EntityManager"),

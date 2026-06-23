@@ -27,7 +27,7 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
                              int redundantPSUCount, int sufficientPSUCount,
                              const std::string& sensorConfiguration) :
     AssocInterface(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+        static_cast<sdbusplus::bus_t&>(*conn),
         ("/xyz/openbmc_project/sensors/PSU/" + escapeName(sensorName)).c_str(),
         AssocInterface::action::defer_emit),
     name(sensorName), totalPSU(totalPSUCount), redundantPSU(redundantPSUCount),
@@ -71,13 +71,13 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
     {
         std::variant<bool> value;
         std::string objPath = psuObj + std::to_string(i);
-        auto method = static_cast<sdbusplus::bus::bus&>(*conn).new_method_call(
+        auto method = static_cast<sdbusplus::bus_t&>(*conn).new_method_call(
             psuService, objPath.c_str(), "org.freedesktop.DBus.Properties",
             "Get");
 
         method.append(operationalStateIface, "Functional");
 
-        auto reply = static_cast<sdbusplus::bus::bus&>(*conn).call(method);
+        auto reply = static_cast<sdbusplus::bus_t&>(*conn).call(method);
 
         if (reply.is_method_error())
         {
@@ -130,8 +130,8 @@ PSURedundancy::PSURedundancy(sdbusplus::asio::object_server& objectServer,
         };
 
     /* create properties changed signal handler for the status change*/
-    psuEventMatcher = std::make_shared<sdbusplus::bus::match::match>(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+    psuEventMatcher = std::make_shared<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*conn),
         "type='signal',member='PropertiesChanged',path_namespace='" +
             std::string(psuBaseObj) + "',arg0namespace='" +
             std::string(operationalStateIface) + "'",

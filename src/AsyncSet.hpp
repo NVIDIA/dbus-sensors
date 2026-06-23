@@ -67,7 +67,7 @@ using Status = StatusIntf::AsyncOperationStatus;
  * operation failed.
  */
 auto set(sdbusplus::async::context& ctx, std::string service,
-         sdbusplus::message::object_path path, std::string interface,
+         sdbusplus::object_path path, std::string interface,
          std::string property, auto value,
          std::chrono::milliseconds timeout = std::chrono::milliseconds(30000))
     -> sdbusplus::async::task<Result>

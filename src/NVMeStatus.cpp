@@ -42,7 +42,7 @@ NVMeStatus::NVMeStatus(
     const std::string& sensorConfiguration, unsigned int pollRate,
     uint8_t index, uint8_t busId, uint8_t cpldAddress, uint8_t statusReg) :
     ItemInterface(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+        static_cast<sdbusplus::bus_t&>(*conn),
         ("/xyz/openbmc_project/sensors/drive/" + escapeName(sensorName))
             .c_str(),
         ItemInterface::action::defer_emit),

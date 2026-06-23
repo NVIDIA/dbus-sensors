@@ -867,7 +867,7 @@ TEST(MCTPDEndpoint, pathBuildsFromNetworkAndEid)
     auto device = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-test-device", "usb0", std::vector<uint8_t>{0x20});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        device, nullptr, sdbusplus::message::object_path("/test/path"), 7, 9);
+        device, nullptr, sdbusplus::object_path("/test/path"), 7, 9);
 
     EXPECT_EQ(MCTPDEndpoint::path(endpoint),
               "/au/com/codeconstruct/mctp1/networks/7/endpoints/9");
@@ -878,7 +878,7 @@ TEST(MCTPDEndpoint, accessorsDescribeAndDeviceReturnExpectedValues)
     auto device = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-test-device", "usb0", std::vector<uint8_t>{0x20});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        device, nullptr, sdbusplus::message::object_path("/test/path"), 7, 9);
+        device, nullptr, sdbusplus::object_path("/test/path"), 7, 9);
 
     EXPECT_EQ(endpoint->network(), 7);
     EXPECT_EQ(endpoint->eid(), 9);
@@ -892,7 +892,7 @@ TEST(MCTPDEndpoint, deviceReturnsCorrectDevice)
     auto dev = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-dev-accessor", "usb0", std::vector<uint8_t>{0x20});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 5);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 5);
     EXPECT_EQ(endpoint->device(), dev);
     EXPECT_EQ(endpoint->eid(), 5);
     EXPECT_EQ(endpoint->network(), 1);
@@ -904,11 +904,11 @@ TEST(MCTPDEndpoint, pathFormatsCorrectlyForVariousNetworksAndEids)
     auto dev = std::make_shared<USBMCTPDDevice>(nullptr, "usb-path-fmt", "usb0",
                                                 std::vector<uint8_t>{});
     auto ep1 = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/p1"), 1, 9);
+        dev, nullptr, sdbusplus::object_path("/test/p1"), 1, 9);
     EXPECT_EQ(MCTPDEndpoint::path(ep1),
               "/au/com/codeconstruct/mctp1/networks/1/endpoints/9");
     auto ep2 = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/p2"), 3, 255);
+        dev, nullptr, sdbusplus::object_path("/test/p2"), 3, 255);
     EXPECT_EQ(MCTPDEndpoint::path(ep2),
               "/au/com/codeconstruct/mctp1/networks/3/endpoints/255");
 }
@@ -1645,7 +1645,7 @@ TEST(MCTPDEndpoint, removedWithoutSubscriberIsNoop)
     auto dev = std::make_shared<USBMCTPDDevice>(nullptr, "usb-test-device",
                                                 "usb0", std::vector<uint8_t>{});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 5);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 5);
     endpoint->removed();
     EXPECT_EQ(endpoint->eid(), 5);
     EXPECT_EQ(endpoint->network(), 1);
@@ -1657,7 +1657,7 @@ TEST(MCTPDDevice, getEidPrefersLiveEndpointEidOverStaticEid)
         nullptr, "usb-test-device", "usb0", std::vector<uint8_t>{},
         std::optional<uint8_t>(9));
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 22);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 22);
     dev->setEndpointForTest(endpoint);
 
     ASSERT_TRUE(dev->getEid().has_value());
@@ -1763,7 +1763,7 @@ TEST(MCTPDDevice, onDiscoveryNotifyWhenDiscoveryAlreadyNeededIsNoop)
         std::optional<uint8_t>(12));
     auto endpoint = std::make_shared<MCTPDEndpoint>(
         dev, nullptr,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/12"),
         1, 12);
     dev->setEndpointForTest(endpoint);
@@ -1781,7 +1781,7 @@ TEST(MCTPDDevice, onDiscoveryNotifySetsDebounceFlagWithoutRunningTimer)
         std::optional<uint8_t>(12));
     auto endpoint = std::make_shared<MCTPDEndpoint>(
         dev, nullptr,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/12"),
         1, 12);
     dev->setEndpointForTest(endpoint);
@@ -1801,7 +1801,7 @@ TEST(MCTPDDevice, endpointRemovedClearsEndpointAndInvokesRemovedCallback)
         std::optional<uint8_t>(12));
     auto endpoint = std::make_shared<MCTPDEndpoint>(
         dev, nullptr,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/12"),
         1, 12);
     endpoint->notifyRemoved =
@@ -1857,7 +1857,7 @@ TEST(MCTPDEndpoint, updateConnectivityUnknownStateDoesNotInvokeCallbacks)
         std::make_shared<USBMCTPDDevice>(nullptr, "usb-unknown-connectivity",
                                          "usb0", std::vector<uint8_t>{0x20});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 7);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 7);
     int degradedCalls = 0;
     int availableCalls = 0;
     endpoint->notifyDegraded =
@@ -1880,7 +1880,7 @@ TEST(MCTPDEndpoint, updateConnectivityDegradedInvokesDegradedCallback)
         std::make_shared<USBMCTPDDevice>(nullptr, "usb-degraded-connectivity",
                                          "usb0", std::vector<uint8_t>{0x20});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 9);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 9);
     bool degradedCalled = false;
     endpoint->notifyDegraded =
         [&degradedCalled](const std::shared_ptr<MCTPEndpoint>&) {
@@ -1899,7 +1899,7 @@ TEST(MCTPDEndpoint, updateConnectivityAvailableClearsRecoveryState)
     dev->inHealthRecoveryMode = true;
     dev->consecutivePingFailures = 2;
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 11);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 11);
     bool availableCalled = false;
     endpoint->notifyAvailable =
         [&availableCalled](const std::shared_ptr<MCTPEndpoint>&) {
@@ -1943,7 +1943,7 @@ TEST(MCTPDDevice, startHealthMonitoringEidMismatchReturnsEarly)
         std::nullopt, std::optional<uint8_t>(1));
     auto endpoint = std::make_shared<MCTPDEndpoint>(
         dev, nullptr,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/99"),
         1, 99);
     dev->setEndpointForTest(endpoint);
@@ -2001,7 +2001,7 @@ TEST(MCTPDEndpoint, updateConnectivityDegradedWithoutCallbackIsNoop)
     auto dev = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-deg-no-cb", "usb0", std::vector<uint8_t>{0x20});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 7);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 7);
     endpoint->updateEndpointConnectivity("Degraded");
     EXPECT_EQ(endpoint->eid(), 7);
     EXPECT_EQ(endpoint->network(), 1);
@@ -2012,7 +2012,7 @@ TEST(MCTPDEndpoint, updateConnectivityAvailableWithoutCallbackIsNoop)
     auto dev = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-avail-no-cb", "usb0", std::vector<uint8_t>{0x20});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 7);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 7);
     endpoint->updateEndpointConnectivity("Available");
     EXPECT_EQ(endpoint->eid(), 7);
     EXPECT_EQ(endpoint->network(), 1);
@@ -2072,7 +2072,7 @@ TEST(MCTPDEndpoint, describeContainsNetworkAndEid)
     auto dev = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-describe-ep", "usb0", std::vector<uint8_t>{0x20});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 3, 42);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 3, 42);
     auto desc = endpoint->describe();
     EXPECT_NE(desc.find('3'), std::string::npos);
     EXPECT_NE(desc.find("42"), std::string::npos);
@@ -2086,7 +2086,7 @@ TEST(MCTPDEndpoint, updateConnectivityDegradedWithCallbackStopsHealthMonitoring)
         std::optional<uint8_t>(12), std::nullopt, std::nullopt, std::nullopt,
         std::nullopt, std::optional<uint8_t>(1));
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 12);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 12);
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
     int degradedCalls = 0;
     endpoint->notifyDegraded =
@@ -2216,7 +2216,7 @@ TEST(MCTPDEndpoint, pathFormatsWithDifferentEidsAndNetworks)
     auto dev = std::make_shared<USBMCTPDDevice>(nullptr, "usb-path-test",
                                                 "usb0", std::vector<uint8_t>{});
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test"), 2, 99);
+        dev, nullptr, sdbusplus::object_path("/test"), 2, 99);
     EXPECT_EQ(ep->network(), 2);
     EXPECT_EQ(ep->eid(), 99);
     auto path = MCTPDEndpoint::path(ep);
@@ -2229,7 +2229,7 @@ TEST(MCTPDEndpoint, describeContainsDeviceInfo)
     auto dev = std::make_shared<USBMCTPDDevice>(nullptr, "usb-desc", "usb0",
                                                 std::vector<uint8_t>{0x42});
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test"), 1, 7);
+        dev, nullptr, sdbusplus::object_path("/test"), 1, 7);
     auto desc = ep->describe();
     EXPECT_NE(desc.find('7'), std::string::npos);
     EXPECT_NE(desc.find("usb0"), std::string::npos);
@@ -2240,7 +2240,7 @@ TEST(MCTPDEndpoint, removedWithoutNotifierIsNoop)
     auto dev = std::make_shared<USBMCTPDDevice>(nullptr, "usb-removed-noop",
                                                 "usb0", std::vector<uint8_t>{});
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test"), 1, 5);
+        dev, nullptr, sdbusplus::object_path("/test"), 1, 5);
     ep->removed();
     EXPECT_EQ(ep->eid(), 5);
 }
@@ -2342,7 +2342,7 @@ TEST(MCTPDDevice, endpointRemovedWithEndpointClearsAndNotifies)
         nullptr, "usb-ep-removed-with-ep", "usb0", std::vector<uint8_t>{0x20},
         std::optional<uint8_t>(12));
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 12);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 12);
     bool removedCalled = false;
     endpoint->notifyRemoved =
         [&removedCalled](const std::shared_ptr<MCTPEndpoint>&) {
@@ -2391,7 +2391,7 @@ TEST(MCTPDEndpoint, updateConnectivityUnknownStringIsIgnored)
     auto dev = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-unknown-conn", "usb0", std::vector<uint8_t>{0x20});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 7);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 7);
     int degradedCalls = 0;
     int availableCalls = 0;
     endpoint->notifyDegraded =
@@ -2636,7 +2636,7 @@ TEST_F(FakeConnFixture, performDiscoveryWithEndpointCoversHasBridgeInterface)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -2656,7 +2656,7 @@ TEST_F(FakeConnFixture, performHealthCheckCoversAllLambdas)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -2684,7 +2684,7 @@ TEST_F(FakeConnFixture, performHealthCheckBridgePoolCoversLambda)
         std::vector<std::string>{"usb-hc-bridge", "bridge-a", "bridge-b"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -2708,7 +2708,7 @@ TEST_F(FakeConnFixture, startHealthMonitoringTimerLambdaCovered)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -2741,7 +2741,7 @@ TEST_F(FakeConnFixture, recoverNoArgCallsRecoverWithEid)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -2758,7 +2758,7 @@ TEST_F(FakeConnFixture, subscribeCreatesMatchAndFiresCallback)
         conn, "usb-subscribe", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     try
@@ -2783,7 +2783,7 @@ TEST_F(FakeConnFixture, removeCallsAsyncAndFiresLambda)
                                                     std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     EXPECT_NO_THROW(ep->remove());
@@ -2808,7 +2808,7 @@ TEST_F(FakeConnFixture, onMctpEndpointChangeThrowsOnNullMsg)
         conn, "usb-ep-change", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     auto msg = sdbusplus::message_t(nullptr);
@@ -2822,7 +2822,7 @@ TEST_F(FakeConnFixture, mctpDEndpointAccessors)
         conn, "usb-accessors", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/10"),
         1, 10);
 
@@ -2841,7 +2841,7 @@ TEST_F(FakeConnFixture, mctpDEndpointPathFormatsCorrectly)
                                                     std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/11"),
         1, 11);
     std::string path = MCTPDEndpoint::path(ep);
@@ -2856,7 +2856,7 @@ TEST_F(FakeConnFixture, mctpDEndpointRemovedInvokesCallback)
                                                     std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/12"),
         1, 12);
 
@@ -2875,7 +2875,7 @@ TEST_F(FakeConnFixture, mctpDEndpointRemovedIsNoopWithoutCallback)
         conn, "usb-removed-noop", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/13"),
         1, 13);
     EXPECT_NO_THROW(ep->removed());
@@ -2896,7 +2896,7 @@ TEST_F(FakeConnFixture, endpointRemovedWithEndpointCallsRemoved)
         conn, "usb-ep-rem-ep", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/14"),
         1, 14);
     dev->setEndpointForTest(ep);
@@ -2914,7 +2914,7 @@ TEST_F(FakeConnFixture, updateEndpointConnectivityDegraded)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/15"),
         1, 15);
     dev->setEndpointForTest(ep);
@@ -2938,7 +2938,7 @@ TEST_F(FakeConnFixture, updateEndpointConnectivityAvailable)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/16"),
         1, 16);
     dev->setEndpointForTest(ep);
@@ -2959,7 +2959,7 @@ TEST_F(FakeConnFixture, updateEndpointConnectivityUnknownState)
         conn, "usb-conn-unk", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/17"),
         1, 17);
     EXPECT_NO_THROW(ep->updateEndpointConnectivity("SomeUnknownState"));
@@ -3127,7 +3127,7 @@ TEST_F(FakeConnFixture, onDiscoveryNotifyWithEndpointCoversTimerLambda)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3162,7 +3162,7 @@ TEST_F(FakeConnFixture, performHealthCheckTimerSuccessPathCovered)
         std::nullopt, std::optional<uint8_t>(0)); // pollingInterval=0
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3349,7 +3349,7 @@ TEST(MCTPDDevice, UpdateConnectivityAvailableInRecoveryNoEndpointCallsCallback)
     // No endpoint set — endpoint member is nullptr.
 
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 12);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 12);
     bool availableCalled = false;
     ep->notifyAvailable =
         [&availableCalled](const std::shared_ptr<MCTPEndpoint>&) {
@@ -3374,7 +3374,7 @@ TEST(MCTPDDevice, UpdateConnectivityDegradedNoCallbackStopsHealthMonitoring)
     dev->healthTimer = std::make_unique<boost::asio::steady_timer>(localIo);
 
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 12);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 12);
     // notifyDegraded NOT set — just verify no crash.
     EXPECT_NO_THROW(ep->updateEndpointConnectivity("Degraded"));
     EXPECT_EQ(ep->eid(), 12);
@@ -3394,7 +3394,7 @@ TEST_F(FakeConnFixture, performHealthCheckInRecoveryModeIgnoresFailure)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3427,7 +3427,7 @@ TEST_F(FakeConnFixture, performHealthCheckFailuresReachThresholdCallsRecover)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3467,7 +3467,7 @@ TEST_F(FakeConnFixture, performHealthCheckSuppressesEidBelowThreshold)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3553,7 +3553,7 @@ TEST_F(FakeConnFixture, startHealthMonitoringCreatesTimerWithValidConfig)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3579,7 +3579,7 @@ TEST_F(FakeConnFixture, startHealthMonitoringReusesExistingTimer)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3611,7 +3611,7 @@ TEST_F(FakeConnFixture, onEndpointEstablishedStartsHealthMonitoring)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3646,7 +3646,7 @@ TEST_F(FakeConnFixture, performHealthCheckInRecoveryModeDoesNotIncrementCounter)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3731,7 +3731,7 @@ TEST_F(FakeConnFixture, performHealthCheckBridgePoolAlreadyUnresponsive)
                                  "bridge-b"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3760,7 +3760,7 @@ TEST_F(FakeConnFixture,
         std::vector<std::string>{"usb-hc-bridge-thresh-ins", "bridge-a"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3792,7 +3792,7 @@ TEST_F(FakeConnFixture,
         std::vector<std::string>{"usb-hc-suppress-unresp2", "bridge-eid12b"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3824,7 +3824,7 @@ TEST_F(FakeConnFixture, performHealthCheckSuppressesMainEidBelowThresholdMinus1)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3853,7 +3853,7 @@ TEST_F(FakeConnFixture, performHealthCheckNoSuppressAtThresholdMinus1Failures)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3890,7 +3890,7 @@ TEST_F(FakeConnFixture, performHealthCheckBridgePoolTwoEidsReachThreshold)
         std::vector<std::string>{"usb-hc-2eid-thresh", "bridge-a", "bridge-b"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3941,7 +3941,7 @@ TEST_F(FakeConnFixture, onMctpEndpointChangeWithNullMsgBodyEntered)
         conn, "usb-ep-change2", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     auto msg = sdbusplus::message_t(nullptr);
@@ -3958,7 +3958,7 @@ TEST_F(FakeConnFixture, removeWithEndpointCallsEndpointRemove)
         conn, "usb-remove-ep", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -3979,7 +3979,7 @@ TEST(MCTPDEndpoint,
     dev->inHealthRecoveryMode = true;
     dev->consecutivePingFailures = 2;
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 12);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 12);
     dev->setEndpointForTest(ep);
 
     bool availableCalled = false;
@@ -4003,7 +4003,7 @@ TEST_F(FakeConnFixture, updateConnectivityDegradedNullCallbackWithHealthTimer)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/12"),
         1, 12);
     dev->setEndpointForTest(ep);
@@ -4021,7 +4021,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/13"),
         1, 13);
     dev->setEndpointForTest(ep);
@@ -4055,7 +4055,7 @@ TEST(MCTPDEndpoint, updateConnectivityAvailableInRecoveryNoEndpointOnDevice)
         [&cbCalled](const std::shared_ptr<MCTPDDevice>&) { cbCalled = true; });
 
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 12);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 12);
     bool availableCalled = false;
     ep->notifyAvailable =
         [&availableCalled](const std::shared_ptr<MCTPEndpoint>&) {
@@ -4188,7 +4188,7 @@ TEST_F(FakeConnFixture, endpointRemovedWithEndpointButNoRemovedCallback)
         conn, "usb-ep-rem-no-cb2", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/20"),
         1, 20);
     dev->setEndpointForTest(ep);
@@ -4324,7 +4324,7 @@ TEST_F(FakeConnFixture, subscribeThrowsAndClearsCallbacks)
         conn, "usb-subscribe-throw2", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
 
@@ -4428,7 +4428,7 @@ TEST_F(FakeConnFixture, recoverNoArgWithEndpointCallsRecoverWithEid)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -4477,7 +4477,7 @@ TEST(MCTPDEndpoint, removedWithNotifyRemovedInvokesItTwice)
     auto dev = std::make_shared<USBMCTPDDevice>(nullptr, "usb-removed-invoke2",
                                                 "usb0", std::vector<uint8_t>{});
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 5);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 5);
     int callCount = 0;
     ep->notifyRemoved = [&callCount](const std::shared_ptr<MCTPEndpoint>&) {
         callCount++;
@@ -4499,7 +4499,7 @@ TEST_F(FakeConnFixture, onDiscoveryNotifySecondCallWhilePendingIsNoop)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -4533,7 +4533,7 @@ TEST_F(FakeConnFixture, onDiscoveryNotifyTimerLambdaFiresDiscovery)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -4567,7 +4567,7 @@ TEST(MCTPDEndpoint, updateConnectivityStartingUpIsUnrecognised)
     auto dev = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-starting-up2", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 7);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 7);
     int degradedCalls = 0;
     int availableCalls = 0;
     ep->notifyDegraded =
@@ -4588,7 +4588,7 @@ TEST(MCTPDEndpoint, updateConnectivityUnavailableOfflineIsUnrecognised)
     auto dev = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-unavailable2", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 7);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 7);
     EXPECT_NO_THROW(ep->updateEndpointConnectivity("UnavailableOffline"));
 }
 
@@ -4597,7 +4597,7 @@ TEST(MCTPDEndpoint, updateConnectivityEmptyStringIsUnrecognised)
     auto dev = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-empty-conn2", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 7);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 7);
     EXPECT_NO_THROW(ep->updateEndpointConnectivity(""));
 }
 
@@ -4635,7 +4635,7 @@ TEST(MCTPDDevice, managesEidWithLiveEndpointEid)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, nullptr,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/22"),
         1, 22);
     dev->setEndpointForTest(ep);
@@ -4691,7 +4691,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -4734,7 +4734,7 @@ TEST_F(FakeConnFixture, performHealthCheckSuccessWithEndpointClearsRecoveryMode)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -4803,7 +4803,7 @@ TEST_F(FakeConnFixture,
         std::vector<std::string>{"usb-hc-bridge-unresponsive", "bridge-a"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -4840,7 +4840,7 @@ TEST_F(FakeConnFixture, subscribeTwiceReplacesCallbacks)
         conn, "usb-subscribe-twice", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
 
@@ -4889,7 +4889,7 @@ TEST(MCTPDEndpoint, updateConnectivityEmptyStringIsIgnored)
     auto dev = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-empty-conn", "usb0", std::vector<uint8_t>{0x20});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 7);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 7);
     int degradedCalls = 0;
     int availableCalls = 0;
     endpoint->notifyDegraded =
@@ -4912,7 +4912,7 @@ TEST(MCTPDEndpoint, updateConnectivityStartingUpIsIgnored)
     auto dev = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-starting-conn", "usb0", std::vector<uint8_t>{0x20});
     auto endpoint = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/path"), 1, 8);
+        dev, nullptr, sdbusplus::object_path("/test/path"), 1, 8);
     int degradedCalls = 0;
     int availableCalls = 0;
     endpoint->notifyDegraded =
@@ -4945,7 +4945,7 @@ TEST_F(FakeConnFixture, recoverWhenAlreadyInRecoveryModeIsIdempotent)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -4971,7 +4971,7 @@ TEST_F(FakeConnFixture, performHealthCheckFirstFailureIncrementsCounterOnly)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -5015,7 +5015,7 @@ TEST_F(FakeConnFixture,
         std::vector<std::string>{"usb-hc-bridge-recovery", "bridge-a"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -5054,7 +5054,7 @@ TEST_F(FakeConnFixture,
         std::vector<std::string>{"usb-hc-bridge-threshold", "bridge-a"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -5091,7 +5091,7 @@ TEST_F(FakeConnFixture, subscribeThrowsClearsCallbacks)
         conn, "usb-subscribe-clears", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
 
@@ -5129,7 +5129,7 @@ TEST_F(FakeConnFixture, performHealthCheckSuccessResetsConsecutivePingFailures)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -5172,7 +5172,7 @@ TEST_F(FakeConnFixture, removeWithEndpointCallsEndpointRemoveNewGroup22)
         conn, "usb-remove-ep-g22", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -5197,7 +5197,7 @@ TEST_F(FakeConnFixture, subscribeAsyncGetConnectivityErrorPathCovered)
         conn, "usb-subscribe-get-err", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
 
@@ -5233,7 +5233,7 @@ TEST_F(FakeConnFixture, performHealthCheckInsertsSuppressedEidBelowThreshold)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -5341,8 +5341,8 @@ TEST(MCTPDEndpoint, moveConstructorTransfersState)
 {
     auto dev = std::make_shared<USBMCTPDDevice>(
         nullptr, "usb-move-test", "usb0", std::vector<uint8_t>{0x20});
-    MCTPDEndpoint source(dev, nullptr,
-                         sdbusplus::message::object_path("/test/move"), 3, 77);
+    MCTPDEndpoint source(dev, nullptr, sdbusplus::object_path("/test/move"), 3,
+                         77);
 
     // Invoke the move constructor.
     MCTPDEndpoint dest(std::move(source));
@@ -5449,7 +5449,7 @@ TEST(MCTPDDevice, getEidWithLiveEndpointReturnsEndpointEid)
         std::optional<uint8_t>(9)); // staticEID
 
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/live-eid"), 1, 55);
+        dev, nullptr, sdbusplus::object_path("/test/live-eid"), 1, 55);
     dev->setEndpointForTest(ep);
 
     // With a live endpoint, getEid() should return the endpoint's EID (55),
@@ -5553,7 +5553,7 @@ TEST_F(FakeConnFixture, removeWithEndpointCoversEndpointRemoveLambdaErrorPath)
         conn, "usb-remove-lambda-err-g44", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/30"),
         1, 30);
     dev->setEndpointForTest(ep);
@@ -5577,7 +5577,7 @@ TEST(MCTPDDevice, getEidWithEndpointAndBridgePoolPrefersEndpointEid)
         std::optional<uint8_t>(11));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, nullptr,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -5603,7 +5603,7 @@ TEST_F(FakeConnFixture,
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -5737,7 +5737,7 @@ TEST(MCTPDDevice, getNameForEidWithLiveEndpointEidMatchReturnsName)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, nullptr,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -5762,7 +5762,7 @@ TEST_F(FakeConnFixture, performHealthCheckSecondFailureDoesNotTriggerRecover)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -5819,7 +5819,7 @@ TEST_F(FakeConnFixture,
         std::vector<std::string>{"usb-hc-bridge-nontimeout-g56", "bridge-nt"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -5873,7 +5873,7 @@ TEST_F(FakeConnFixture, endpointRemovedClearsEndpointMember)
         conn, "usb-ep-removed-rm-g58", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/25"),
         1, 25);
     dev->setEndpointForTest(ep);
@@ -5912,7 +5912,7 @@ TEST_F(FakeConnFixture, performHealthCheckWeakPtrAliveIncrementsCounter)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -6128,9 +6128,8 @@ TEST(MCTPDEndpoint, removedWithNoCallbackIsNoopG71)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         nullptr, "usb-ep-removed-noop-g71", "usb0", std::vector<uint8_t>{0x20});
-    MCTPDEndpoint ep(dev, nullptr,
-                     sdbusplus::message::object_path("/test/removed-noop"), 1,
-                     5);
+    MCTPDEndpoint ep(dev, nullptr, sdbusplus::object_path("/test/removed-noop"),
+                     1, 5);
     // notifyRemoved is null by default.
     EXPECT_NO_THROW(ep.removed());
 }
@@ -6193,7 +6192,7 @@ TEST_F(FakeConnFixture, onDiscoveryNotifyWithDiscoveryNeededTrueIsNoop)
         std::nullopt, std::nullopt);
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -6365,7 +6364,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -6402,7 +6401,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -6433,8 +6432,8 @@ TEST(MCTPDEndpoint, eidAndNetworkAccessorsG87)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         nullptr, "usb-ep-accessors-g87", "usb0", std::vector<uint8_t>{});
-    MCTPDEndpoint ep(dev, nullptr,
-                     sdbusplus::message::object_path("/test/ep-access"), 5, 77);
+    MCTPDEndpoint ep(dev, nullptr, sdbusplus::object_path("/test/ep-access"), 5,
+                     77);
     EXPECT_EQ(ep.eid(), 77U);
     EXPECT_EQ(ep.network(), 5);
 }
@@ -6531,7 +6530,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -6566,7 +6565,7 @@ TEST_F(FakeConnFixture, onEndpointEstablishedWithEidMismatchDoesNotCreateTimer)
     // Endpoint with EID 10 — mismatch with staticEID 9.
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/10"),
         1, 10);
     dev->setEndpointForTest(ep);
@@ -6657,7 +6656,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -6922,8 +6921,8 @@ TEST(MCTPDEndpoint, describeFormatsNetworkEidAndDeviceG113)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         nullptr, "usb-ep-desc-g113", "usb0", std::vector<uint8_t>{0xAB, 0xCD});
-    MCTPDEndpoint ep(dev, nullptr,
-                     sdbusplus::message::object_path("/test/ep-desc"), 3, 55);
+    MCTPDEndpoint ep(dev, nullptr, sdbusplus::object_path("/test/ep-desc"), 3,
+                     55);
 
     std::string desc = ep.describe();
     // Must contain network and EID numbers.
@@ -6961,8 +6960,7 @@ TEST(MCTPDEndpoint, removedWithCallbackFiresItG115)
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         nullptr, "usb-ep-rmcb-g115", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/ep-rmcb-g115"), 1,
-        7);
+        dev, nullptr, sdbusplus::object_path("/test/ep-rmcb-g115"), 1, 7);
     bool removedFired = false;
     ep->notifyRemoved = [&removedFired](const std::shared_ptr<MCTPEndpoint>&) {
         removedFired = true;
@@ -7047,7 +7045,7 @@ TEST(MCTPDDevice, managesEidWithLiveEndpointAndBridgePoolG119)
                                  "bridge-b"});
     // Install a live endpoint with EID 9 (matches staticEID).
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/live-ep"), 1, 9);
+        dev, nullptr, sdbusplus::object_path("/test/live-ep"), 1, 9);
     dev->setEndpointForTest(ep);
 
     // Live endpoint EID 9 → managesEid(9) true via getEid() path.
@@ -7074,8 +7072,7 @@ TEST(MCTPDDevice, getNameForEidWithLiveEndpointMatchingStaticEidG120)
         std::vector<std::string>{"usb-name-live-g120", "bridge-a"});
     // Install live endpoint with EID 9.
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/live-ep-name"), 1,
-        9);
+        dev, nullptr, sdbusplus::object_path("/test/live-ep-name"), 1, 9);
     dev->setEndpointForTest(ep);
 
     // getEid() returns 9 (from live endpoint); getNameForEid(9) returns name.
@@ -7118,7 +7115,7 @@ TEST(MCTPDEndpoint, pathStaticHelperFormatsCorrectlyG123)
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         nullptr, "usb-ep-path-g123", "usb0", std::vector<uint8_t>{});
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/ep-path"), 2, 42);
+        dev, nullptr, sdbusplus::object_path("/test/ep-path"), 2, 42);
 
     std::string p = MCTPDEndpoint::path(ep);
     // Should contain the network id and eid.
@@ -7162,7 +7159,7 @@ TEST_F(FakeConnFixture, performHealthCheckBridgePoolStartOnlySkipsBridgeLoop)
         std::vector<std::string>{"usb-hc-bp-start-only-g125", "bridge-a"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7204,7 +7201,7 @@ TEST_F(FakeConnFixture, performHealthCheckNoBridgePoolSkipsBridgeSection)
         std::nullopt, std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7247,7 +7244,7 @@ TEST_F(FakeConnFixture,
         std::vector<std::string>{"usb-hc-bp-below-thresh-g127", "bridge-11"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7293,7 +7290,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7335,7 +7332,7 @@ TEST(MCTPDDevice, onEndpointInterfacesRemovedEarlyReturnIfInterfaceNotPresent)
         nullptr, "usb-iface-early-g129", "usb0", std::vector<uint8_t>{0x20});
     bool removedCalled = false;
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path(objpath), 1, 50);
+        dev, nullptr, sdbusplus::object_path(objpath), 1, 50);
     ep->notifyRemoved = [&removedCalled](const std::shared_ptr<MCTPEndpoint>&) {
         removedCalled = true;
     };
@@ -7386,7 +7383,7 @@ TEST_F(FakeConnFixture, setupOnSetupLambdaErrorPathCallsAddedWithEc)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7425,7 +7422,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7458,7 +7455,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7550,7 +7547,7 @@ TEST_F(FakeConnFixture,
         std::vector<std::string>{"usb-bp-success-g134", "bridge-10"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7597,7 +7594,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7633,7 +7630,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7672,7 +7669,7 @@ TEST_F(FakeConnFixture, onDiscoveryNotifyWithEndpointSchedulesDiscoveryTimer)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7710,7 +7707,7 @@ TEST_F(FakeConnFixture, startHealthMonitoringReusesExistingHealthTimer)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7824,7 +7821,7 @@ TEST_F(FakeConnFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7865,7 +7862,7 @@ TEST_F(FakeConnFixture, performHealthCheckBridgePoolSuppressByUnresponsiveEid)
         std::vector<std::string>{"usb-bp-suppress-unresp-g144", "bridge-10"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -7927,7 +7924,7 @@ TEST_F(FakeConnFixture, onDiscoveryNotifyTimerCancelTakesOperationAbortedBranch)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -8156,7 +8153,7 @@ TEST_F(AsyncFixture, setupNotAllocatedWithExistingEndpointCallsAddedEmpty)
     // is taken
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/10"),
         1, 10);
     dev->setEndpointForTest(ep);
@@ -8226,7 +8223,7 @@ TEST_F(AsyncFixture, performHealthCheckSuccessResetsFailureCounter)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -8266,7 +8263,7 @@ TEST_F(AsyncFixture, performHealthCheckSuccessInRecoveryWithEndpointCompletes)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -8346,7 +8343,7 @@ TEST_F(AsyncFixture, bridgePoolPingSuccessResetsFailureCounter)
         std::nullopt, std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -9286,7 +9283,7 @@ TEST_F(FakeConnFixture, MCTPDDeviceRemoveWithEndpointCallsEndpointRemove)
         conn, "usb-remove-ep-g200", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/50"),
         1, 50);
     dev->setEndpointForTest(ep);
@@ -9322,7 +9319,7 @@ TEST_F(FakeConnFixture, MCTPDDeviceEndpointRemovedClearsEndpoint)
         std::optional<uint8_t>(51));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/51"),
         1, 51);
     dev->setEndpointForTest(ep);
@@ -9374,7 +9371,7 @@ TEST_F(FakeConnFixture, MCTPDDeviceRecoverWithEndpointCallsRecoverEid)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/53"),
         1, 53);
     dev->setEndpointForTest(ep);
@@ -9400,7 +9397,7 @@ TEST_F(FakeConnFixture, onDiscoveryNotifyWithEndpointAndAlreadyNeededIsNoop)
         std::optional<uint8_t>(54));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/54"),
         1, 54);
     dev->setEndpointForTest(ep);
@@ -9426,7 +9423,7 @@ TEST_F(FakeConnFixture, onDiscoveryNotifyWithEndpointFirstCallSetsFlag)
         std::optional<uint8_t>(55));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/55"),
         1, 55);
     dev->setEndpointForTest(ep);
@@ -9460,7 +9457,7 @@ TEST_F(FakeConnFixture, startHealthMonitoringIntervalZeroReturnsEarly)
         std::nullopt, std::optional<uint8_t>(0)); // pollingInterval=0
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/56"),
         1, 56);
     dev->setEndpointForTest(ep);
@@ -9506,7 +9503,7 @@ TEST_F(FakeConnFixture, startHealthMonitoringEidMismatchReturnsEarly)
     // Endpoint has EID=99, which differs from staticEID=57
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/99"),
         1, 99); // EID=99 ≠ staticEID=57
     dev->setEndpointForTest(ep);
@@ -9663,7 +9660,7 @@ TEST_F(FakeConnFixture, getEidWithEndpointReturnsEndpointEid)
         std::optional<uint8_t>(63)); // staticEID=63
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/64"),
         1, 64); // endpoint EID=64
     dev->setEndpointForTest(ep);
@@ -9900,7 +9897,7 @@ TEST_F(FakeConnFixture, MCTPDEndpointDescribeFormatsNetworkAndEid)
         conn, "usb-ep-desc-g232", "usb0", std::vector<uint8_t>{0xAB});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/5/endpoints/71"),
         5, 71);
     auto desc = ep->describe();
@@ -9919,7 +9916,7 @@ TEST_F(FakeConnFixture, MCTPDEndpointRemovedWithoutCallbackNocrash)
         conn, "usb-ep-rem-nocb-g233", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/72"),
         1, 72);
     // notifyRemoved not set
@@ -10229,7 +10226,7 @@ TEST_F(AsyncFixture, bridgePoolPingTimedOutAtThresholdLogsError)
         std::vector<std::string>{"usb-bp-timeout-g244", "bridge-11"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/8"),
         1, 8);
     dev->setEndpointForTest(ep);
@@ -10316,7 +10313,7 @@ TEST_F(AsyncFixture, G302_performHealthCheckProceedsWhenBothPresent)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/20"),
         1, 20);
     dev->setEndpointForTest(ep);
@@ -10358,7 +10355,7 @@ TEST_F(AsyncFixture, G303_suppressionInsertedWhenFailuresBelowThresholdMinus1)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/21"),
         1, 21);
     dev->setEndpointForTest(ep);
@@ -10406,7 +10403,7 @@ TEST_F(AsyncFixture, G304_suppressionNotInsertedWhenFailuresAtThresholdMinus1)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/22"),
         1, 22);
     dev->setEndpointForTest(ep);
@@ -10460,7 +10457,7 @@ TEST_F(AsyncFixture, G305_pingFailureBelowThresholdIncrementsCounterNoRecovery)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/23"),
         1, 23);
     dev->setEndpointForTest(ep);
@@ -10506,7 +10503,7 @@ TEST_F(AsyncFixture, G306_pingFailureAtThresholdNonTimedOutDoesNotLogMctpError)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/24"),
         1, 24);
     dev->setEndpointForTest(ep);
@@ -10558,7 +10555,7 @@ TEST_F(AsyncFixture,
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/25"),
         1, 25);
     dev->setEndpointForTest(ep);
@@ -10645,7 +10642,7 @@ TEST_F(AsyncFixture, G309_pingSuccessNotInRecoveryModeResetCounterOnly)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/27"),
         1, 27);
     dev->setEndpointForTest(ep);
@@ -10694,7 +10691,7 @@ TEST_F(AsyncFixture, G310_bridgePoolFirstFailureBelowThresholdNotUnresponsive)
         std::vector<std::string>{"usb-bp-first-fail-g310", "bridge-31"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/28"),
         1, 28);
     dev->setEndpointForTest(ep);
@@ -10746,7 +10743,7 @@ TEST_F(AsyncFixture, G311_bridgePoolEidRecoveredWhenResponseReceived)
         std::vector<std::string>{"usb-bp-recovery-g311", "bridge-32"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/29"),
         1, 29);
     dev->setEndpointForTest(ep);
@@ -10802,7 +10799,7 @@ TEST_F(AsyncFixture,
         std::vector<std::string>{"usb-bp-ok-g312", "bridge-33"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/30"),
         1, 30);
     dev->setEndpointForTest(ep);
@@ -10853,7 +10850,7 @@ TEST_F(FakeConnFixture, G313_startHealthMonitoringEidMismatchReturnEarly)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/99"),
         1, 99); // EID=99 != staticEID=34
     dev->setEndpointForTest(ep);
@@ -10878,7 +10875,7 @@ TEST_F(FakeConnFixture, G314_startHealthMonitoringReusesExistingTimerObject)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/35"),
         1, 35);
     dev->setEndpointForTest(ep);
@@ -10912,7 +10909,7 @@ TEST_F(FakeConnFixture, G315_subscribeThrowsSdBusErrorClearsAllCallbacks)
         conn, "usb-subscribe-g315", "usb0", std::vector<uint8_t>{0x20});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
 
@@ -11205,7 +11202,7 @@ TEST(MCTPDEndpointConnectivity,
         std::nullopt, std::optional<uint8_t>(1));
 
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/g326"), 1, 10);
+        dev, nullptr, sdbusplus::object_path("/test/g326"), 1, 10);
 
     bool degradedCalled = false;
     ep->notifyDegraded = [&](const std::shared_ptr<MCTPEndpoint>&) {
@@ -11224,7 +11221,7 @@ TEST(MCTPDEndpointConnectivity, G327_degradedNoCallbackNocrash)
                                                     std::vector<uint8_t>{0x20});
 
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/g327"), 1, 11);
+        dev, nullptr, sdbusplus::object_path("/test/g327"), 1, 11);
 
     // notifyDegraded not set — should not crash
     EXPECT_NO_THROW(ep->updateEndpointConnectivity("Degraded"));
@@ -11241,7 +11238,7 @@ TEST(MCTPDEndpointConnectivity,
                                                     std::vector<uint8_t>{0x20});
 
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/g328"), 1, 12);
+        dev, nullptr, sdbusplus::object_path("/test/g328"), 1, 12);
 
     bool availableCalled = false;
     ep->notifyAvailable = [&](const std::shared_ptr<MCTPEndpoint>&) {
@@ -11260,7 +11257,7 @@ TEST(MCTPDEndpointConnectivity, G329_availableNoCallbackNocrash)
                                                     std::vector<uint8_t>{0x20});
 
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/g329"), 1, 13);
+        dev, nullptr, sdbusplus::object_path("/test/g329"), 1, 13);
 
     // notifyAvailable not set — should not crash
     EXPECT_NO_THROW(ep->updateEndpointConnectivity("Available"));
@@ -11274,7 +11271,7 @@ TEST(MCTPDEndpointConnectivity, G330_unknownConnectivityHitsElseBranch)
                                                     std::vector<uint8_t>{0x20});
 
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, nullptr, sdbusplus::message::object_path("/test/g330"), 1, 14);
+        dev, nullptr, sdbusplus::object_path("/test/g330"), 1, 14);
 
     EXPECT_NO_THROW(ep->updateEndpointConnectivity("UnknownState"));
 }
@@ -11306,7 +11303,7 @@ TEST_F(AsyncFixture,
     // Pre-set endpoint to simulate "already assigned" state.
     auto preEp = std::make_shared<MCTPDEndpoint>(
         dev, nullptr,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/5"),
         1, 5);
     dev->setEndpointForTest(preEp);
@@ -11390,7 +11387,7 @@ TEST_F(AsyncFixture, G333_recoverWithEndpointCallsRecoverEidSuccessPath)
 
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/20"),
         1, 20);
     dev->setEndpointForTest(ep);
@@ -11417,7 +11414,7 @@ TEST_F(AsyncFixture, G334_recoverEidAsyncErrorLogsError)
 
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/21"),
         1, 21);
     dev->setEndpointForTest(ep);
@@ -11446,7 +11443,7 @@ TEST_F(AsyncFixture, G335_performHealthCheckSuccessResetsCounterNotInRecovery)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -11481,7 +11478,7 @@ TEST_F(AsyncFixture, G336_performHealthCheckSuccessInRecoveryClearsFlag)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -11577,7 +11574,7 @@ TEST_F(AsyncFixture, G339_performHealthCheckEtimeoutAtThresholdLogsError)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -11615,7 +11612,7 @@ TEST_F(AsyncFixture, G340_performHealthCheckNonEtimeoutAtThresholdCallsRecover)
         std::nullopt, std::optional<uint8_t>(1));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -11975,7 +11972,7 @@ TEST_F(FakeConnFixture, G350_performDiscoveryEndpointSetNoCallbackReturnsEarly)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -12001,7 +11998,7 @@ TEST_F(AsyncFixture, G351_performDiscoveryEndpointSetCallbackLearnEndpointError)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -12040,7 +12037,7 @@ TEST_F(AsyncFixture,
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -12077,7 +12074,7 @@ TEST_F(AsyncFixture,
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -12114,7 +12111,7 @@ TEST_F(AsyncFixture, G354_performDiscoveryDeviceDestroyedBeforeCallbackIsNoop)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -12147,7 +12144,7 @@ TEST_F(AsyncFixture,
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -12231,7 +12228,7 @@ TEST_F(FakeConnFixture, G356_onEndpointIfacesRemovedInterfaceNotPresent)
 
     // Set an endpoint so we can verify it is NOT cleared (early return).
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, conn, sdbusplus::message::object_path(objPath), 1, 5);
+        dev, conn, sdbusplus::object_path(objPath), 1, 5);
     dev->setEndpointForTest(ep);
 
     std::weak_ptr<MCTPDDevice> weak = dev;
@@ -12261,7 +12258,7 @@ TEST_F(FakeConnFixture, G357_onEndpointIfacesRemovedInterfacePresentDeviceAlive)
         std::optional<uint8_t>(6));
 
     auto ep = std::make_shared<MCTPDEndpoint>(
-        dev, conn, sdbusplus::message::object_path(objPath), 1, 6);
+        dev, conn, sdbusplus::object_path(objPath), 1, 6);
     dev->setEndpointForTest(ep);
 
     std::weak_ptr<MCTPDDevice> weak = dev;
@@ -12346,7 +12343,7 @@ TEST_F(AsyncFixture, G359_subscribeAsyncCallbackEcErrorPath)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
 
@@ -12372,7 +12369,7 @@ TEST_F(AsyncFixture, G360_subscribeAsyncCallbackDeviceAliveUpdatesConnectivity)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -12403,7 +12400,7 @@ TEST_F(AsyncFixture, G361_subscribeAsyncCallbackDeviceDestroyedBeforeCallback)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
 
@@ -12492,7 +12489,7 @@ TEST_F(FakeConnFixture, G362_onMctpEndpointChangeWrongInterface)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
 
@@ -12521,7 +12518,7 @@ TEST_F(FakeConnFixture, G363_onMctpEndpointChangeNoConnectivityKey)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
 
@@ -12551,7 +12548,7 @@ TEST_F(FakeConnFixture, G364_onMctpEndpointChangeConnectivityDegraded)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -12596,7 +12593,7 @@ TEST_F(AsyncFixture, performHealthCheckBridgePoolSuccessCoversNestedLambda)
         std::vector<std::string>{"usb-hc-bridge-nested", "bridge-a"});
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);

@@ -33,19 +33,19 @@ class DbusProxy : public Protector
     sdbusplus::async::context* ctx;
     std::string service;
     Kind kind;
-    sdbusplus::message::object_path path;
+    sdbusplus::object_path path;
     std::unique_ptr<sdbusplus::async::match> match{nullptr};
 
     explicit DbusProxy(sdbusplus::async::context& ctx,
                        const std::string& service, Kind kind,
-                       const sdbusplus::message::object_path& path) :
+                       const sdbusplus::object_path& path) :
         ctx(&ctx), service(service), kind(kind), path(path), match()
     {}
 
     auto init() -> sdbusplus::async::task<>;
 
     static auto detect(sdbusplus::async::context& ctx,
-                       const sdbusplus::message::object_path& path)
+                       const sdbusplus::object_path& path)
         -> sdbusplus::async::task<std::optional<std::pair<Kind, std::string>>>;
 
   public:
@@ -65,7 +65,7 @@ class DbusProxy : public Protector
      * @return The constructed DbusProxy, or std::nullopt on failure.
      */
     static auto create(sdbusplus::async::context& ctx,
-                       const sdbusplus::message::object_path& path)
+                       const sdbusplus::object_path& path)
         -> sdbusplus::async::task<std::optional<DbusProxy>>;
 
     /** @copydoc Protector::set */

@@ -44,6 +44,6 @@ class PSURedundancy :
   private:
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
     sdbusplus::asio::object_server& objServer;
-    std::shared_ptr<sdbusplus::bus::match::match> psuEventMatcher;
+    std::shared_ptr<sdbusplus::bus::match_t> psuEventMatcher;
     void setStatus();
 };

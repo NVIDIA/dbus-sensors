@@ -198,7 +198,7 @@ TEST(ManageMCTPEntity, irrelevantEntities)
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     ManagedObjectType entities{
-        {sdbusplus::message::object_path("/test/path"),
+        {sdbusplus::object_path("/test/path"),
          {{"xyz.openbmc_project.Configuration.NVME1000", {}}}}};
     EXPECT_NO_THROW(manageMCTPEntity(conn, reactor, entities));
 }
@@ -510,7 +510,7 @@ TEST(ManageMCTPEntity, withValidUSBGadgetDeviceDefersSetupOnFailure)
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     ManagedObjectType entities{
-        {sdbusplus::message::object_path("/test/usb_gadget"),
+        {sdbusplus::object_path("/test/usb_gadget"),
          {{"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget",
            {{"Type", std::string("MCTPUSBGadgetTarget")},
             {"Name", std::string("usb0")},
@@ -528,13 +528,13 @@ TEST(ManageMCTPEntity, withTwoUSBGadgetDevicesDefersSetupOnFailure)
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     ManagedObjectType entities{
-        {sdbusplus::message::object_path("/test/usb_gadget1"),
+        {sdbusplus::object_path("/test/usb_gadget1"),
          {{"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget",
            {{"Type", std::string("MCTPUSBGadgetTarget")},
             {"Name", std::string("usb0")},
             {"Interface", std::string("mctpusb0")},
             {"LocalEID", std::string("10")}}}}},
-        {sdbusplus::message::object_path("/test/usb_gadget2"),
+        {sdbusplus::object_path("/test/usb_gadget2"),
          {{"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget",
            {{"Type", std::string("MCTPUSBGadgetTarget")},
             {"Name", std::string("usb1")},
@@ -727,7 +727,7 @@ TEST(ManageMCTPEntity, withI2CDeviceThrowsOnNullConn)
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     ManagedObjectType entities{
-        {sdbusplus::message::object_path("/test/i2c"),
+        {sdbusplus::object_path("/test/i2c"),
          {{"xyz.openbmc_project.Configuration.MCTPI2CTarget",
            {{"Type", std::string("MCTPI2CTarget")},
             {"Name", std::string("i2c0")},
@@ -807,7 +807,7 @@ TEST(ReactorIsRetrying, returnsTrueForEidZeroAfterSetupFailure)
     auto reactor = std::make_shared<MCTPReactor>(server);
 
     ManagedObjectType entities{
-        {sdbusplus::message::object_path("/test/usb_gadget_retry"),
+        {sdbusplus::object_path("/test/usb_gadget_retry"),
          {{"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget",
            {{"Type", std::string("MCTPUSBGadgetTarget")},
             {"Name", std::string("usb0")},
@@ -836,7 +836,7 @@ TEST(ManageMCTPEntity, duplicatePathWithDifferentDeviceHandledWithoutThrow)
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
 
-    const sdbusplus::message::object_path path("/test/usb_duplicate");
+    const sdbusplus::object_path path("/test/usb_duplicate");
     const SensorBaseConfigMap baseConfig{
         {"Type", std::string("MCTPUSBGadgetTarget")},
         {"Name", std::string("usb0")},
@@ -1181,7 +1181,7 @@ TEST(HandleTransportErrorSignal, retryingEidCausesEarlyReturn)
 
     // Add a USBGadget device so failureCounts becomes non-empty (EID 0 check)
     ManagedObjectType entities{
-        {sdbusplus::message::object_path("/test/usb_retry_eid"),
+        {sdbusplus::object_path("/test/usb_retry_eid"),
          {{"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget",
            {{"Type", std::string("MCTPUSBGadgetTarget")},
             {"Name", std::string("usb0")},
@@ -1476,7 +1476,7 @@ TEST(ReactorMainHandlers, removeInventoryPreviouslyManagedUSBGadgetDevice)
         "/xyz/openbmc_project/inventory/test/usbgadget_remove";
 
     ManagedObjectType entities{
-        {sdbusplus::message::object_path(invPath),
+        {sdbusplus::object_path(invPath),
          {{"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget",
            {{"Type", std::string("MCTPUSBGadgetTarget")},
             {"Name", std::string("usb0")},
@@ -2008,12 +2008,12 @@ TEST(ManageMCTPEntity, mixedRecognisedAndUnrecognisedEntitiesHandledCleanly)
 
     ManagedObjectType entities{
         // Unrecognised — deviceFromConfig returns nullptr
-        {sdbusplus::message::object_path("/test/mixed/nvme"),
+        {sdbusplus::object_path("/test/mixed/nvme"),
          {{"xyz.openbmc_project.Configuration.NVME1000",
            {{"Type", std::string("NVME1000")},
             {"Name", std::string("nvme0")}}}}},
         // Recognised USBGadget — deviceFromConfig returns a device
-        {sdbusplus::message::object_path("/test/mixed/usbgadget"),
+        {sdbusplus::object_path("/test/mixed/usbgadget"),
          {{"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget",
            {{"Type", std::string("MCTPUSBGadgetTarget")},
             {"Name", std::string("usb0")},
@@ -2052,7 +2052,7 @@ TEST(ManageMCTPEntity, samePathAddedTwiceWithDifferentDeviceHandledInternally)
         {"Name", std::string("usb0")},
         {"Interface", std::string("mctpusb0")},
         {"LocalEID", std::string("10")}};
-    const sdbusplus::message::object_path path("/test/dup/usbgadget");
+    const sdbusplus::object_path path("/test/dup/usbgadget");
     const std::string iface =
         "xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget";
 
@@ -2940,7 +2940,7 @@ TEST(MCTPReactor, tickWithDeferredDeviceDoesNotThrow)
     auto reactor = std::make_shared<MCTPReactor>(server);
 
     ManagedObjectType entities{
-        {sdbusplus::message::object_path("/test/tick/usb"),
+        {sdbusplus::object_path("/test/tick/usb"),
          {{"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget",
            {{"Type", std::string("MCTPUSBGadgetTarget")},
             {"Name", std::string("usb0")},
@@ -3507,17 +3507,17 @@ TEST(ManageMCTPEntity, threeIterationsNullValidNullB1)
     gSystemCallCount = 0;
 
     ManagedObjectType entities{
-        {sdbusplus::message::object_path("/test/entity/fake1_b1"),
+        {sdbusplus::object_path("/test/entity/fake1_b1"),
          {{"xyz.openbmc_project.Configuration.FakeTypeA",
            {{"Type", std::string("FakeTypeA")},
             {"Name", std::string("f0_b1")}}}}},
-        {sdbusplus::message::object_path("/test/entity/usb_b1"),
+        {sdbusplus::object_path("/test/entity/usb_b1"),
          {{"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget",
            {{"Type", std::string("MCTPUSBGadgetTarget")},
             {"Name", std::string("usb0")},
             {"Interface", std::string("mctpusb0")},
             {"LocalEID", std::string("10")}}}}},
-        {sdbusplus::message::object_path("/test/entity/fake2_b1"),
+        {sdbusplus::object_path("/test/entity/fake2_b1"),
          {{"xyz.openbmc_project.Configuration.FakeTypeB",
            {{"Type", std::string("FakeTypeB")},
             {"Name", std::string("f1_b1")}}}}}};

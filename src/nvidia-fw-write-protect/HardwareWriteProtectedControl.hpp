@@ -25,9 +25,8 @@ using HardwareWriteProtectedControlIntf = sdbusplus::async::server_t<
 class HardwareWriteProtectedControl : public HardwareWriteProtectedControlIntf
 {
   public:
-    explicit HardwareWriteProtectedControl(
-        sdbusplus::async::context& ctx,
-        const sdbusplus::message::object_path& path) :
+    explicit HardwareWriteProtectedControl(sdbusplus::async::context& ctx,
+                                           const sdbusplus::object_path& path) :
         HardwareWriteProtectedControlIntf(ctx, path.str.c_str())
     {
         emitAdded(*this);

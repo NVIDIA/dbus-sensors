@@ -804,7 +804,7 @@ int main()
                 return;
             }
 
-            sdbusplus::message::object_path path;
+            sdbusplus::object_path path;
             std::vector<std::string> interfaces;
 
             msg.read(path, interfaces);

@@ -32,7 +32,7 @@ WatchdogSensor::WatchdogSensor(
     /*boost::asio::io_context& io,*/
     const std::string& sensorName, const std::string& sensorConfiguration) :
     AssocInterface(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+        static_cast<sdbusplus::bus_t&>(*conn),
         ("/xyz/openbmc_project/sensors/watchdog/" + escapeName(sensorName))
             .c_str(),
         AssocInterface::action::defer_emit),
@@ -120,8 +120,8 @@ WatchdogSensor::WatchdogSensor(
         }
     };
 
-    watchdogEventMatcher = std::make_shared<sdbusplus::bus::match::match>(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+    watchdogEventMatcher = std::make_shared<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*conn),
         "type='signal',interface='xyz.openbmc_project.Watchdog',"
         "member='Timeout'",
         std::move(watchdogEventMatcherCallback));

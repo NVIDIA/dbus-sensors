@@ -53,8 +53,8 @@ void createSensors(
             const SensorBaseConfiguration* baseConfiguration = nullptr;
             const SensorBaseConfigMap* baseConfigMap = nullptr;
 
-            for (const std::pair<sdbusplus::message::object_path, SensorData>&
-                     sensor : sensorConfigurations)
+            for (const std::pair<sdbusplus::object_path, SensorData>& sensor :
+                 sensorConfigurations)
             {
                 sensorData = &(sensor.second);
                 for (const char* type : sensorTypes)
@@ -178,7 +178,7 @@ void interfaceRemoved(
         return;
     }
 
-    sdbusplus::message::object_path path;
+    sdbusplus::object_path path;
     std::vector<std::string> interfaces;
 
     message.read(path, interfaces);
@@ -209,7 +209,7 @@ int main()
     sdbusplus::asio::object_server objectServer(systemBus);
     boost::container::flat_map<std::string, std::shared_ptr<PLXTempSensor>>
         sensors;
-    std::vector<std::unique_ptr<sdbusplus::bus::match::match>> matches;
+    std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches;
     auto sensorsChanged =
         std::make_shared<boost::container::flat_set<std::string>>();
 
@@ -247,8 +247,8 @@ int main()
 
     for (const char* type : sensorTypes)
     {
-        auto match = std::make_unique<sdbusplus::bus::match::match>(
-            static_cast<sdbusplus::bus::bus&>(*systemBus),
+        auto match = std::make_unique<sdbusplus::bus::match_t>(
+            static_cast<sdbusplus::bus_t&>(*systemBus),
             "type='signal',member='PropertiesChanged',path_namespace='" +
                 std::string(inventoryPath) + "',arg0namespace='" + type + "'",
             eventHandler);
@@ -257,8 +257,8 @@ int main()
 
     // Watch for entity-manager to remove configuration interfaces
     // so the corresponding sensors can be removed.
-    auto ifaceRemovedMatch = std::make_unique<sdbusplus::bus::match::match>(
-        static_cast<sdbusplus::bus::bus&>(*systemBus),
+    auto ifaceRemovedMatch = std::make_unique<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*systemBus),
         "type='signal',member='InterfacesRemoved',arg0path='" +
             std::string(inventoryPath) + "/'",
         [&sensors](sdbusplus::message::message& msg) {

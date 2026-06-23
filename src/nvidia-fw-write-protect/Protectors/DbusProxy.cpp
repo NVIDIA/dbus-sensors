@@ -68,7 +68,7 @@ auto DbusProxy::init() -> sdbusplus::async::task<>
 }
 
 auto DbusProxy::create(sdbusplus::async::context& ctx,
-                       const sdbusplus::message::object_path& path)
+                       const sdbusplus::object_path& path)
     -> sdbusplus::async::task<std::optional<DbusProxy>>
 {
     namespace rules = sdbusplus::bus::match::rules;
@@ -105,7 +105,7 @@ auto DbusProxy::create(sdbusplus::async::context& ctx,
 }
 
 auto DbusProxy::detect(sdbusplus::async::context& ctx,
-                       const sdbusplus::message::object_path& path)
+                       const sdbusplus::object_path& path)
     -> sdbusplus::async::task<
         std::optional<std::pair<DbusProxy::Kind, std::string>>>
 {

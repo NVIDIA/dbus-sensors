@@ -38,8 +38,7 @@ auto DomainManager::start() -> sdbusplus::async::task<>
 }
 
 void DomainManager::processInventoryAdded(
-    const sdbusplus::message::object_path& objectPath,
-    const std::string& interfaceName)
+    const sdbusplus::object_path& objectPath, const std::string& interfaceName)
 {
     info("Inventory added {PATH} ({INTF})", "PATH", objectPath, "INTF",
          interfaceName);
@@ -72,7 +71,7 @@ void DomainManager::processInventoryAdded(
 }
 
 void DomainManager::processInventoryRemoved(
-    const sdbusplus::message::object_path& objectPath, const std::string&)
+    const sdbusplus::object_path& objectPath, const std::string&)
 {
     info("Inventory removed {OBJECT} - ignoring", "OBJECT", objectPath);
 }
@@ -244,7 +243,7 @@ auto DomainManager::monitorSource(std::shared_ptr<Source> source,
     }
 }
 
-auto DomainManager::addGroup(sdbusplus::message::object_path objectPath,
+auto DomainManager::addGroup(sdbusplus::object_path objectPath,
                              std::string interface) -> sdbusplus::async::task<>
 {
     auto config = co_await GroupConfig::tryFrom(ctx, EntityManager::serviceName,
@@ -309,8 +308,7 @@ auto DomainManager::addGroup(sdbusplus::message::object_path objectPath,
         info("Group {NAME}: creating Domain at {PATH} with chassis "
              "association to {CHASSIS}",
              "NAME", config->name, "PATH", objectPath, "CHASSIS", chassisPath);
-        auto domainPath =
-            sdbusplus::message::object_path("/xyz/openbmc_project/state");
+        auto domainPath = sdbusplus::object_path("/xyz/openbmc_project/state");
         domainPath /= objectPath.filename();
         group->domain = std::make_unique<Domain>(ctx, domainPath, this,
                                                  settableSource, chassisPath);
@@ -349,7 +347,7 @@ auto DomainManager::addGroup(sdbusplus::message::object_path objectPath,
     info("Successfully added group {NAME}", "NAME", groupName);
 }
 
-auto DomainManager::addGpioGroup(sdbusplus::message::object_path objectPath,
+auto DomainManager::addGpioGroup(sdbusplus::object_path objectPath,
                                  std::string interface)
     -> sdbusplus::async::task<>
 {

@@ -72,7 +72,7 @@ static void findMatchingSysfsAttributes(
 }
 
 void createSensors(
-    sdbusplus::bus::bus& bus, boost::asio::io_context& io,
+    sdbusplus::bus_t& bus, boost::asio::io_context& io,
     sdbusplus::asio::object_server& objectServer,
     boost::container::flat_map<
         std::string, std::shared_ptr<DiscreteLeakDetectSensor>>& sensors,

@@ -73,7 +73,7 @@ LeakDetectSensor::LeakDetectSensor(
     sensorMin(sensorMin), configurationPath(configurationPath),
     shutdownOnLeak(shutdownOnLeak), shutdownDelaySeconds(shutdownDelaySeconds)
 {
-    sdbusplus::message::object_path sensorObjPath(
+    sdbusplus::object_path sensorObjPath(
         "/xyz/openbmc_project/sensors/voltage/");
     sensorObjPath /= name;
 
@@ -135,7 +135,7 @@ LeakDetectSensor::LeakDetectSensor(
         objectServer.add_interface(sensorObjPath, association::interface);
     createAssociation(sensorAssociation, configurationPath);
 
-    sdbusplus::message::object_path inventoryObjPath(
+    sdbusplus::object_path inventoryObjPath(
         "/xyz/openbmc_project/inventory/leakdetectors/");
     inventoryObjPath /= name;
 
@@ -161,7 +161,7 @@ LeakDetectSensor::LeakDetectSensor(
     std::vector<Association> inventoryAssociations;
     inventoryAssociations.emplace_back(
         "chassis", "contained_by",
-        sdbusplus::message::object_path(configurationPath).parent_path());
+        sdbusplus::object_path(configurationPath).parent_path());
     inventoryAssociation->register_property("Associations",
                                             inventoryAssociations);
     if (!inventoryAssociation->initialize())
@@ -171,7 +171,7 @@ LeakDetectSensor::LeakDetectSensor(
         return;
     }
 
-    sdbusplus::message::object_path stateObjPath(
+    sdbusplus::object_path stateObjPath(
         "/xyz/openbmc_project/state/leakdetectors/");
     stateObjPath /= name;
 
@@ -386,7 +386,7 @@ void LeakDetectSensor::handleResponse(const boost::system::error_code& err,
         std::string objPath = sensorInterface->get_object_path();
         std::string ifaceName = sensorInterface->get_interface_name();
         std::string parentChassis =
-            sdbusplus::message::object_path(configurationPath).parent_path();
+            sdbusplus::object_path(configurationPath).parent_path();
 
         updateTelemetry(objPath, ifaceName, "Value", newValue, parentChassis);
 #endif

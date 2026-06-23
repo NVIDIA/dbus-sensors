@@ -142,22 +142,20 @@ class DomainManager
     std::unique_ptr<EntityManager> entityManager;
 
     /// @brief Dispatch an Entity Manager inventory-added event.
-    void processInventoryAdded(
-        const sdbusplus::message::object_path& objectPath,
-        const std::string& interfaceName);
+    void processInventoryAdded(const sdbusplus::object_path& objectPath,
+                               const std::string& interfaceName);
 
     /// @brief Handle an Entity Manager inventory-removed event.
-    void processInventoryRemoved(
-        const sdbusplus::message::object_path& objectPath,
-        const std::string& interfaceName);
+    void processInventoryRemoved(const sdbusplus::object_path& objectPath,
+                                 const std::string& interfaceName);
 
     /// @brief Read a group config, build graph topology, and create
     ///        D-Bus facades based on the EM config type.
-    auto addGroup(sdbusplus::message::object_path objectPath,
-                  std::string interface) -> sdbusplus::async::task<>;
+    auto addGroup(sdbusplus::object_path objectPath, std::string interface)
+        -> sdbusplus::async::task<>;
 
-    auto addGpioGroup(sdbusplus::message::object_path objectPath,
-                      std::string interface) -> sdbusplus::async::task<>;
+    auto addGpioGroup(sdbusplus::object_path objectPath, std::string interface)
+        -> sdbusplus::async::task<>;
 
     /// @brief Return the Source for @p identifier, creating a graph node
     ///        if one does not already exist.

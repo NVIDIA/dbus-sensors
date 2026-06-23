@@ -83,7 +83,7 @@ class GPIOPresence : public std::enable_shared_from_this<GPIOPresence>
     // @params statusIfc: pointer to object status interface.
     // @params objPath: the dbus object path.
     // @params config: EM config
-    void addObj(std::unique_ptr<sdbusplus::asio::dbus_interface>& statusIfc,
+    void addObj(std::shared_ptr<sdbusplus::asio::dbus_interface>& statusIfc,
                 const std::string& objPath, const Config& config);
 
     // Remove a object from the object reference list.
@@ -99,7 +99,7 @@ class GPIOPresence : public std::enable_shared_from_this<GPIOPresence>
   private:
     struct ObjIfaces
     {
-        std::unique_ptr<sdbusplus::asio::dbus_interface> statusIfc;
+        std::shared_ptr<sdbusplus::asio::dbus_interface> statusIfc;
         Config config;
     };
 

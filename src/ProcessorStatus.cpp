@@ -28,7 +28,7 @@ ProcessorStatus::ProcessorStatus(
     boost::asio::io_context& io, const std::string& sensorName,
     const std::string& gpioName, const std::string& sensorConfiguration) :
     ItemInterface(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+        static_cast<sdbusplus::bus_t&>(*conn),
         ("/xyz/openbmc_project/sensors/cpu/" + escapeName(sensorName)).c_str(),
         ItemInterface::action::defer_emit),
     name(escapeName(sensorName)), gpio(gpioName), objServer(objectServer),

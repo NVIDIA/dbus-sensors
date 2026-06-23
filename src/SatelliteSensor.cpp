@@ -658,8 +658,8 @@ int main()
             });
         };
 
-    sdbusplus::bus::match::match configMatch(
-        static_cast<sdbusplus::bus::bus&>(*systemBus),
+    sdbusplus::bus::match_t configMatch(
+        static_cast<sdbusplus::bus_t&>(*systemBus),
         "type='signal',member='PropertiesChanged',"
         "path_namespace='" +
             std::string(inventoryPath) +

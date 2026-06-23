@@ -28,7 +28,7 @@ class SoftwareComponent : public SoftwareSettingsIntf
      * @param path D-Bus object path (e.g. /xyz/openbmc_project/software/NAME).
      */
     explicit SoftwareComponent(sdbusplus::async::context& ctx,
-                               const sdbusplus::message::object_path& path) :
+                               const sdbusplus::object_path& path) :
         SoftwareSettingsIntf(ctx, path.str.c_str())
     {
         emit_added();

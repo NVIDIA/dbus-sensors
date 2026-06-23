@@ -27,7 +27,7 @@ SELSensor::SELSensor(sdbusplus::asio::object_server& objectServer,
                      const std::string& sensorName,
                      const std::string& sensorConfiguration) :
     AssocInterface(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+        static_cast<sdbusplus::bus_t&>(*conn),
         ("/xyz/openbmc_project/sensors/EventLogging/" + escapeName(sensorName))
             .c_str(),
         AssocInterface::action::defer_emit),
@@ -82,8 +82,8 @@ SELSensor::SELSensor(sdbusplus::asio::object_server& objectServer,
         }
     };
 
-    selEventMatcher = std::make_shared<sdbusplus::bus::match::match>(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+    selEventMatcher = std::make_shared<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*conn),
         "type='signal',interface='xyz.openbmc_project.Logging.Create',"
         "member='SEL'",
         std::move(selEventMatcherCallback));

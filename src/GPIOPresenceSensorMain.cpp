@@ -40,8 +40,8 @@
 
 namespace gpio_presence_sensing
 {
-std::unique_ptr<sdbusplus::bus::match::match> ifcAdded;
-std::unique_ptr<sdbusplus::bus::match::match> ifcRemoved;
+std::unique_ptr<sdbusplus::bus::match_t> ifcAdded;
+std::unique_ptr<sdbusplus::bus::match_t> ifcRemoved;
 
 using OnInterfaceAddedCallback =
     std::function<void(std::string_view, std::string_view, const Config&)>;
@@ -70,7 +70,7 @@ void setupInterfaceAdded(sdbusplus::asio::connection* conn,
     auto callback = std::move(cb);
     std::function<void(sdbusplus::message::message & msg)> handler =
         [callback](sdbusplus::message::message& msg) {
-            sdbusplus::message::object_path objPath;
+            sdbusplus::object_path objPath;
             SensorData ifcAndProperties;
             msg.read(objPath, ifcAndProperties);
             auto found =
@@ -122,8 +122,8 @@ void setupInterfaceAdded(sdbusplus::asio::connection* conn,
         "xyz.openbmc_project.EntityManager", "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 
-    ifcAdded = std::make_unique<sdbusplus::bus::match::match>(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+    ifcAdded = std::make_unique<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*conn),
         sdbusplus::bus::match::rules::interfacesAdded() +
             sdbusplus::bus::match::rules::sender(
                 "xyz.openbmc_project.EntityManager"),
@@ -140,12 +140,12 @@ void setupInterfaceRemoved(sdbusplus::asio::connection* conn,
     // Listen to the interface removed event.
     std::function<void(sdbusplus::message::message & msg)> handler =
         [callback = std::move(cb)](sdbusplus::message::message msg) {
-            sdbusplus::message::object_path objPath;
+            sdbusplus::object_path objPath;
             msg.read(objPath);
             callback(objPath.str);
         };
-    ifcRemoved = std::make_unique<sdbusplus::bus::match::match>(
-        static_cast<sdbusplus::bus::bus&>(*conn),
+    ifcRemoved = std::make_unique<sdbusplus::bus::match_t>(
+        static_cast<sdbusplus::bus_t&>(*conn),
         sdbusplus::bus::match::rules::interfacesRemoved() +
             sdbusplus::bus::match::rules::sender(
                 "xyz.openbmc_project.EntityManager"),
@@ -157,20 +157,19 @@ void addInventoryObject(
     sdbusplus::asio::object_server& objectServer,
     const gpio_presence_sensing::Config& config)
 {
-    sdbusplus::message::object_path inventoryPath(
+    sdbusplus::object_path inventoryPath(
         gpio_presence_sensing::inventoryObjPath);
-    sdbusplus::message::object_path inventoryCableObjPath(
+    sdbusplus::object_path inventoryCableObjPath(
         gpio_presence_sensing::inventoryCableObjPath);
-    sdbusplus::message::object_path objPath = inventoryPath / config.name;
-    sdbusplus::message::object_path objCablePath =
-        inventoryCableObjPath / config.name;
+    sdbusplus::object_path objPath = inventoryPath / config.name;
+    sdbusplus::object_path objCablePath = inventoryCableObjPath / config.name;
     std::cout << "New config received " << objPath.str << std::endl;
     if (controller->hasObj(objPath.str))
     {
         controller->removeObj(objPath.str);
     }
     // Status
-    auto statusIfc = objectServer.add_unique_interface(
+    auto statusIfc = objectServer.add_interface(
         objCablePath, gpio_presence_sensing::interfaces::statusIfc);
     auto cableIfc =
         objectServer.add_interface(objCablePath, interfaces::statusCableIfc);

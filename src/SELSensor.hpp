@@ -29,5 +29,5 @@ class SELSensor :
   private:
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorInterface;
     sdbusplus::asio::object_server& objServer;
-    std::shared_ptr<sdbusplus::bus::match::match> selEventMatcher;
+    std::shared_ptr<sdbusplus::bus::match_t> selEventMatcher;
 };

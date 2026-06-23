@@ -567,8 +567,8 @@ void MCTPReactor::onMctpdEndpointInterfacesAdded(sdbusplus::message_t& msg)
 {
     try
     {
-        auto [objPath, interfaces] =
-            msg.unpack<sdbusplus::message::object_path, SensorData>();
+        auto [objPath,
+              interfaces] = msg.unpack<sdbusplus::object_path, SensorData>();
         if (interfaces.find(mctpdEndpointControlIface) == interfaces.end())
         {
             return;

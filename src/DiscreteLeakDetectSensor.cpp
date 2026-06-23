@@ -94,7 +94,7 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
 {
     DiscreteLeakDetectSensor::lastUID++;
     uid = DiscreteLeakDetectSensor::lastUID;
-    sdbusplus::message::object_path inventoryObjPath(
+    sdbusplus::object_path inventoryObjPath(
         "/xyz/openbmc_project/inventory/leakdetectors/");
     inventoryObjPath /= name;
 
@@ -120,7 +120,7 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
     std::vector<Association> inventoryAssociations;
     inventoryAssociations.emplace_back(
         "chassis", "contained_by",
-        sdbusplus::message::object_path(configurationPath).parent_path());
+        sdbusplus::object_path(configurationPath).parent_path());
     inventoryAssociation->register_property("Associations",
                                             inventoryAssociations);
     if (!inventoryAssociation->initialize())
@@ -130,7 +130,7 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
         return;
     }
 
-    sdbusplus::message::object_path stateObjPath(
+    sdbusplus::object_path stateObjPath(
         "/xyz/openbmc_project/state/leakdetectors/");
     stateObjPath /= name;
 

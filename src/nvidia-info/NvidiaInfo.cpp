@@ -125,7 +125,7 @@ void NvidiaInfo::onInterfacesAdded(sdbusplus::message_t& msg)
 {
     try
     {
-        sdbusplus::message::object_path objPath;
+        sdbusplus::object_path objPath;
         InterfacesAddedMap interfaces;
         msg.read(objPath, interfaces);
 

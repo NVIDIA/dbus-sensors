@@ -34,7 +34,7 @@
 namespace gpio_presence_sensing
 {
 void GPIOPresence::addObj(
-    std::unique_ptr<sdbusplus::asio::dbus_interface>& statusIfc,
+    std::shared_ptr<sdbusplus::asio::dbus_interface>& statusIfc,
     const std::string& objPath, const Config& config)
 {
     std::cerr << "New objPath added " << objPath << std::endl;
