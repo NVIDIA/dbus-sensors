@@ -62,6 +62,14 @@ namespace
 #endif
 constexpr int32_t socketsPerModule = NVIDIA_INFO_SOCKETS_PER_MODULE;
 
+// HGX inventory name prefix (meson nvidia-info-hgx-prefix); empty on non-HGX
+// platforms. Defaults to "HGX_" so test/schema sources build without the -D.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
+#ifndef NVIDIA_INFO_HGX_PREFIX
+#define NVIDIA_INFO_HGX_PREFIX "HGX_"
+#endif
+constexpr std::string_view hgxPrefix = NVIDIA_INFO_HGX_PREFIX;
+
 // Upper bound on the CPU socket index, matching the schema's Socket range.
 constexpr uint32_t maxSocket = 255;
 
@@ -594,10 +602,11 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
 
         const std::string cpuPath =
             std::format("{}/cpu/CPU_{}", inventoryPath, cpuIndex);
-        const std::string componentPath =
-            std::format("{}/component/HGX_CPU_{}", inventoryPath, cpuIndex);
-        const std::string boardPath = std::format(
-            "{}/board/HGX_ProcessorModule_{}", inventoryPath, moduleIdx);
+        const std::string componentPath = std::format(
+            "{}/component/{}CPU_{}", inventoryPath, hgxPrefix, cpuIndex);
+        const std::string boardPath =
+            std::format("{}/board/{}ProcessorModule_{}", inventoryPath,
+                        hgxPrefix, moduleIdx);
 
         stored.cpus[i].publish(*objServer, cpuPath, componentPath, boardPath,
                                cpuIndex);
@@ -620,8 +629,8 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         }
         const uint64_t slotIndex = rank * pcieStride + static_cast<uint64_t>(i);
         const std::string pciePath =
-            std::format("{}/board/HGX_ProcessorModule_{}/pcieslot{}",
-                        inventoryPath, moduleIdx, slotIndex);
+            std::format("{}/board/{}ProcessorModule_{}/pcieslot{}",
+                        inventoryPath, hgxPrefix, moduleIdx, slotIndex);
         stored.pcieSlots[i].publish(*objServer, pciePath, moduleIdx);
     }
 
@@ -629,8 +638,8 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
     {
         const uint64_t tpmIndex = rank * tpmStride + static_cast<uint64_t>(i);
         std::string tpmPath =
-            std::format("{}/board/HGX_ProcessorModule_{}/tpm{}", inventoryPath,
-                        moduleIdx, tpmIndex);
+            std::format("{}/board/{}ProcessorModule_{}/tpm{}", inventoryPath,
+                        hgxPrefix, moduleIdx, tpmIndex);
         stored.tpms[i].publish(*objServer, tpmPath);
     }
 

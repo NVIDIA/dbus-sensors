@@ -46,6 +46,9 @@ executable(
         '-DNVIDIA_INFO_SOCKETS_PER_MODULE=' + get_option(
             'nvidia-info-sockets-per-module',
         ).to_string(),
+        '-DNVIDIA_INFO_HGX_PREFIX="' + get_option(
+            'nvidia-info-hgx-prefix',
+        ) + '"',
     ],
     implicit_include_directories: false,
     include_directories: [nvidia_info_include_dir, sensor_include_dir],
