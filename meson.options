@@ -114,6 +114,12 @@ option(
     description: 'Number of CPU sockets per processor module on this platform.',
 )
 option(
+    'nvidia-info-hgx-prefix',
+    type: 'string',
+    value: 'HGX_',
+    description: 'Name prefix for the HGX inventory subtree (ProcessorModule board and CPU component); empty on platforms without an HGX subtree.',
+)
+option(
     'external',
     type: 'feature',
     value: 'enabled',
