@@ -4218,9 +4218,9 @@ TEST(USBGadgetMCTPDevice, setupMctpAddrAddFailsNonEexist)
     gSystemRetval = 0; // default: succeed
     gSystemCallCount = 0;
     // system() call order in setup(): idx=0 modprobe, idx=1 mctp link set,
-    // idx=2 nft delete table (unchecked), idx=3-7 five nft add commands,
-    // idx=8 mctp addr add.
-    gSystemFailOnCall = 8; // call idx=8 (mctp addr add) fails
+    // idx=2 nft delete table (unchecked), idx=3-12 ten nft add commands,
+    // idx=13 mctp addr add.
+    gSystemFailOnCall = 13; // call idx=13 (mctp addr add) fails
     gMockCreateDirectories = true;
     gCreateDirectoriesRetval = true;
     gCreateDirectoriesFailOnCall = -1;
@@ -4261,10 +4261,10 @@ TEST(USBGadgetMCTPDevice, setupMctpAddrAddFailsNonEexist)
 TEST_F(SetupMockFixture, setupMctpAddrAddFailsEexist)
 {
     // system() call order: idx=0 modprobe, idx=1 mctp link set,
-    // idx=2 nft delete table (unchecked), idx=3-7 nft add commands, idx=8 addr
-    // add.
-    gSystemFailOnCall = 8; // call idx=8 (mctp addr add) fails
-    errno = EEXIST;        // EEXIST → continue past addr add
+    // idx=2 nft delete table (unchecked), idx=3-12 nft add commands, idx=13
+    // addr add.
+    gSystemFailOnCall = 13; // call idx=13 (mctp addr add) fails
+    errno = EEXIST;         // EEXIST → continue past addr add
 
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
     bool called = false;
@@ -4670,15 +4670,17 @@ TEST_F(SetupMockFixture, G257linkSetFailCallsCallbackWithError)
 }
 
 // ===========================================================================
-// G258 — setup(): mctp addr add fails with non-EEXIST errno (system call idx=8)
-// Uses SetupMockFixture; overrides gSystemFailOnCall=8, errno=EPERM.
+// G258 — setup(): mctp addr add fails with non-EEXIST errno (system call
+// idx=13)
+// Uses SetupMockFixture; overrides gSystemFailOnCall=13, errno=EPERM.
 // system() call order: idx=0 modprobe, idx=1 mctp link set,
-// idx=2 nft delete table (unchecked), idx=3-7 nft add commands, idx=8 addr add.
+// idx=2 nft delete table (unchecked), idx=3-12 nft add commands, idx=13 addr
+// add.
 // ===========================================================================
 TEST_F(SetupMockFixture, G258addrAddFailNonEexistCallsCallbackWithError)
 {
-    gSystemFailOnCall = 8; // mctp addr add (idx=8) fails
-    errno = EPERM;         // non-EEXIST → error path
+    gSystemFailOnCall = 13; // mctp addr add (idx=13) fails
+    errno = EPERM;          // non-EEXIST → error path
 
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
     bool called = false;
@@ -5122,7 +5124,7 @@ TEST_F(SetupMockFixture, G283udcSysfsFailCallsCallbackWithError)
 // ===========================================================================
 TEST_F(SetupMockFixture, G284addrAddEexistContinuesToRoleEndpointFail)
 {
-    gSystemFailOnCall = 8;         // mctp addr add (idx=8) fails
+    gSystemFailOnCall = 13;        // mctp addr add (idx=13) fails
     errno = EEXIST;                // EEXIST → continue past addr add
     gMockSdBusCallSuccess = false; // setRoleEndpoint fails → callback error
 
@@ -5690,18 +5692,18 @@ TEST_F(USBGadgetSocketMockTest,
 //
 // Strategy:
 //   - Use SetupMockFixture (all filesystem/system mocks enabled, sdbus success)
-//   - Set gSystemFailOnCall=8 (fail call index 8: "mctp addr add ...")
+//   - Set gSystemFailOnCall=13 (fail call index 13: "mctp addr add ...")
 //   - Set gSystemFailErrno=EEXIST so __wrap_system sets errno=EEXIST on failure
 //   - system() call indices: 0=modprobe, 1=mctp link set,
-//     2=nft delete table (unchecked), 3-7=nft add commands, 8=mctp addr add
+//     2=nft delete table (unchecked), 3-12=nft add commands, 13=mctp addr add
 //   - After EEXIST: setup() continues to setRoleEndpoint() → succeeds →
 //     isSetup=true, callback(ec={}, endpoint non-null)
 // ===========================================================================
 TEST_F(SetupMockFixture, G309setupMctpAddrAddFailsWithEexistContinues)
 {
-    // Fail only the 9th system() call (index 8 = "mctp addr add ...") and
+    // Fail only the 14th system() call (index 13 = "mctp addr add ...") and
     // make it appear as EEXIST so the `if (errno != EEXIST)` branch is FALSE.
-    gSystemFailOnCall = 8;
+    gSystemFailOnCall = 13;
     gSystemFailErrno = EEXIST;
 
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
