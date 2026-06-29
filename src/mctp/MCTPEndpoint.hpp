@@ -635,20 +635,30 @@ class SPIMCTPDDevice : public MCTPDDevice
     SPIMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
         const std::string& name, int bus, int chipselect,
+        const std::string& interface,
         std::optional<uint8_t> staticEID = std::nullopt,
         std::optional<uint8_t> pollingInterval = std::nullopt,
         const std::vector<std::string>& deviceNames = {}) :
-        MCTPDDevice(connection, name, interfaceFromBusCs(bus, chipselect),
-                    std::vector<uint8_t>{}, staticEID, std::nullopt,
-                    std::nullopt, std::nullopt, std::nullopt, pollingInterval,
-                    deviceNames)
+        MCTPDDevice(connection, name, interface, std::vector<uint8_t>{},
+                    staticEID, std::nullopt, std::nullopt, std::nullopt,
+                    std::nullopt, pollingInterval, deviceNames),
+        bus_(bus), chipselect_(chipselect)
     {}
     ~SPIMCTPDDevice() override = default;
+
+    std::size_t id() const override;
+    void setup(std::function<void(const std::error_code& ec,
+                                  const std::shared_ptr<MCTPEndpoint>& ep)>&&
+                   added) override;
 
   private:
     static constexpr const char* configType = "MCTPSPIDevice";
 
     static std::string interfaceFromBusCs(int bus, int chipselect);
+
+    int bus_{};
+    int chipselect_{};
+    bool interfaceConfirmed_{false};
 };
 
 class XROTMCTPDDevice : public MCTPDDevice

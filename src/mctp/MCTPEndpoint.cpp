@@ -2329,17 +2329,33 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
 
     auto pollingInterval = getPollingInterval(iface);
 
+    std::string interface;
+    try
+    {
+        interface = interfaceFromBusCs(bus, chipselect);
+        info("SPI netdev resolved for [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ]: {INTERFACE}",
+             "SPI_BUS", bus, "SPI_CS", chipselect, "INTERFACE", interface);
+    }
+    catch (const MCTPException& ex)
+    {
+        warning(
+            "SPI netdev not yet visible for"
+            " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ],"
+            " will retry via tick: {EXCEPTION}",
+            "SPI_BUS", bus, "SPI_CS", chipselect, "EXCEPTION", ex);
+    }
+
     try
     {
         if (staticEID.has_value())
         {
             return std::make_shared<SPIMCTPDDevice>(
-                connection, name, bus, chipselect, staticEID.value(),
-                pollingInterval, names);
+                connection, name, bus, chipselect, interface,
+                staticEID.value(), pollingInterval, names);
         }
         return std::make_shared<SPIMCTPDDevice>(
-            connection, name, bus, chipselect, std::nullopt, pollingInterval,
-            names);
+            connection, name, bus, chipselect, interface, std::nullopt,
+            pollingInterval, names);
     }
     catch (const MCTPException& ex)
     {
@@ -2364,6 +2380,75 @@ std::string SPIMCTPDDevice::interfaceFromBusCs(int bus, int chipselect)
     }
 
     return it->path().filename();
+}
+
+std::size_t SPIMCTPDDevice::id() const
+{
+    std::size_t h1 = std::hash<int>{}(bus_);
+    std::size_t h2 = std::hash<int>{}(chipselect_);
+    return h1 ^ (h2 << 1);
+}
+
+void SPIMCTPDDevice::setup(
+    std::function<void(const std::error_code& ec,
+                       const std::shared_ptr<MCTPEndpoint>& ep)>&& added)
+{
+    if (!interfaceConfirmed_)
+    {
+        std::string resolved;
+        try
+        {
+            resolved = interfaceFromBusCs(bus_, chipselect_);
+        }
+        catch (const MCTPException& ex)
+        {
+            debug(
+                "SPI netdev not yet visible for"
+                " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ],"
+                " will retry on next tick: {EXCEPTION}",
+                "SPI_BUS", bus_, "SPI_CS", chipselect_, "EXCEPTION", ex);
+            added(std::make_error_code(std::errc::no_such_device), {});
+            return;
+        }
+
+        if (resolved != interface)
+        {
+            if (!interface.empty())
+            {
+                info(
+                    "SPI netdev name changed"
+                    " {OLD_INTERFACE} → {NEW_INTERFACE}"
+                    " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ]",
+                    "OLD_INTERFACE", interface, "NEW_INTERFACE", resolved,
+                    "SPI_BUS", bus_, "SPI_CS", chipselect_);
+            }
+            else
+            {
+                info(
+                    "SPI netdev resolved for"
+                    " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ]: {INTERFACE}",
+                    "SPI_BUS", bus_, "SPI_CS", chipselect_, "INTERFACE",
+                    resolved);
+            }
+            interface = resolved;
+            onDiscoveryMatchRule();
+        }
+    }
+
+    MCTPDDevice::setup(
+        [orig = std::move(added),
+         weak = weak_from_this()](const std::error_code& ec,
+                                  const std::shared_ptr<MCTPEndpoint>& ep) mutable {
+            if (auto self = std::dynamic_pointer_cast<SPIMCTPDDevice>(
+                    weak.lock()))
+            {
+                if (!ec)
+                {
+                    self->interfaceConfirmed_ = true;
+                }
+            }
+            orig(ec, ep);
+        });
 }
 
 /* MCTP XROT */
