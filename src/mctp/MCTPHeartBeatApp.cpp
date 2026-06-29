@@ -601,14 +601,16 @@ class MCTPHeartbeatService
         {
             return;
         }
-        // Send restart notification before exiting
-        if (vdmRestartNotification(fd, targetEid) != 0)
+        if constexpr (MCTP_HEARTBEAT_RESTART_NOTIFICATION)
         {
-            lg2::error("Failed to send restart notification");
-        }
-        else
-        {
-            lg2::info("Restart notification sent");
+            if (vdmRestartNotification(fd, targetEid) != 0)
+            {
+                lg2::error("Failed to send restart notification");
+            }
+            else
+            {
+                lg2::info("Restart notification sent");
+            }
         }
 
         lg2::info("Heartbeat service stopped");

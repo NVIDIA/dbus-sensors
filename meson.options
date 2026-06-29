@@ -77,6 +77,12 @@ option(
     description: 'Enable MCTP Reactor service.',
 )
 option(
+    'mctp-heartbeat-restart-notification',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Send VDM restart notification on MCTP heartbeat service shutdown.',
+)
+option(
     'mcu',
     type: 'feature',
     value: 'enabled',

@@ -215,6 +215,7 @@ test(
         'sd_bus_wrappers.cpp',
         cpp_args: subobject_linkage_disable_args + boost_asio_test_backend_args + [
             '-fno-access-control',
+            '-DMCTP_HEARTBEAT_RESTART_NOTIFICATION=false',
         ],
         link_args: socket_wrap_link_args,
         dependencies: [gmock_dep, ut_deps_list, utils_dep],

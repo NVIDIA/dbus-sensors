@@ -17,9 +17,18 @@ executable(
 )
 
 if get_option('mctpheartbeat').enabled()
+    mctpheartbeat_cpp_args = []
+    if get_option('mctp-heartbeat-restart-notification').enabled()
+        mctpheartbeat_cpp_args += ['-DMCTP_HEARTBEAT_RESTART_NOTIFICATION=true']
+    else
+        mctpheartbeat_cpp_args += [
+            '-DMCTP_HEARTBEAT_RESTART_NOTIFICATION=false',
+        ]
+    endif
     executable(
         'mctpheartbeat',
         'MCTPHeartBeatApp.cpp',
+        cpp_args: mctpheartbeat_cpp_args,
         dependencies: [default_deps, utils_dep],
         install: true,
     )
