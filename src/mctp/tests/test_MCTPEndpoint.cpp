@@ -5621,21 +5621,21 @@ TEST_F(FakeConnFixture,
 }
 
 // ===========================================================================
-// Group G47: SPIMCTPDDevice — constructor throws when sysfs net device absent
-// (interfaceFromBusCs reads /sys/bus/spi/devices/spiN.cs/net/ and throws
-// MCTPException when the path does not exist in the test environment).
+// Group G47: SPIMCTPDDevice — construction defers netdev resolution to setup()
+// The constructor takes a (possibly empty) interface name directly and no
+// longer walks sysfs, so it succeeds even when the SPI net device is absent;
+// interfaceFromBusCs() is retried on every setup() tick instead.
 // ===========================================================================
 
-TEST(SPIMCTPDDevice, constructorThrowsWhenBusNotConfiguredAsMCTP)
+TEST(SPIMCTPDDevice, constructorSucceedsWithDeferredInterface)
 {
-    // Bus 0, chipselect 0 → interfaceFromBusCs checks
-    // /sys/bus/spi/devices/spi0.0/net/ which does not exist in the test
-    // environment → MCTPException("Bus is not configured as an MCTP interface")
-    EXPECT_THROW(std::make_shared<SPIMCTPDDevice>(
-                     nullptr, "spi-full-g47", 0, 0, std::optional<uint8_t>(5),
-                     std::optional<uint8_t>(30),
-                     std::vector<std::string>{"spi-full-g47", "spi-sub"}),
-                 MCTPException);
+    // Bus 0, chipselect 0 with an unresolved (empty) interface: construction
+    // must not throw. Resolution is deferred to setup(), which retries the
+    // sysfs walk until the net device appears.
+    EXPECT_NO_THROW(std::make_shared<SPIMCTPDDevice>(
+        nullptr, "spi-full-g47", 0, 0, "", std::optional<uint8_t>(5),
+        std::optional<uint8_t>(30),
+        std::vector<std::string>{"spi-full-g47", "spi-sub"}));
 }
 
 // ===========================================================================

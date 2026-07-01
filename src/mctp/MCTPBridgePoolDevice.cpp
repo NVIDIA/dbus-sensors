@@ -416,8 +416,7 @@ void BridgePoolMCTPDevice::setup(
 
 void BridgePoolMCTPDevice::onEndpointAdded(sdbusplus::message_t& msg)
 {
-    auto [path, interfaces] =
-        msg.unpack<sdbusplus::message::object_path, SensorData>();
+    auto [path, interfaces] = msg.unpack<sdbusplus::object_path, SensorData>();
 
     if (!interfaces.contains(mctpdEndpointControlInterface))
     {
@@ -437,7 +436,7 @@ void BridgePoolMCTPDevice::onEndpointAdded(sdbusplus::message_t& msg)
 void BridgePoolMCTPDevice::onEndpointRemoved(sdbusplus::message_t& msg)
 {
     auto [path, interfaces] =
-        msg.unpack<sdbusplus::message::object_path, std::set<std::string>>();
+        msg.unpack<sdbusplus::object_path, std::set<std::string>>();
 
     if (!interfaces.contains(mctpdEndpointControlInterface))
     {

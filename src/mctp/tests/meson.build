@@ -194,6 +194,7 @@ test(
         '../MCTPEndpoint.cpp',
         '../MCTPEndpointUtils.cpp',
         '../MCTPCustomDevices.cpp',
+        '../MCTPBridgePoolDevice.cpp',
         'sd_bus_wrappers.cpp',
         'filesystem_wrappers.cpp',
         'phosphor_logging_drain.cpp',
