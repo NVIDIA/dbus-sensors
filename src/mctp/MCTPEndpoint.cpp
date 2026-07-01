@@ -1749,7 +1749,11 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
             "Configuration object violates MCTPUSBDevice schema");
     }
 
-    auto name = std::visit(VariantToStringVisitor(), mName->second);
+    // Parse the comma-separated Name into the primary device name and any
+    // bridge-pool member names, mirroring I2C/SPI so getName() returns the
+    // primary and getNameForEid() can resolve per-pool-member names.
+    std::vector<std::string> names = getDeviceNames(iface);
+    std::string name = names[0];
 
     // The migrated MCTPUSBDevice schema describes the endpoint by physical USB
     // topology (RootHubPath/Port); resolve the netdev at runtime from sysfs,
@@ -2041,7 +2045,6 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     }
 
     auto pollingInterval = getPollingInterval(iface);
-    std::vector<std::string> names = getDeviceNames(iface);
 
     try
     {
