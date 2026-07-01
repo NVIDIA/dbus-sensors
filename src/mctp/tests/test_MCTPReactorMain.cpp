@@ -76,8 +76,8 @@ TEST(DeviceFromConfig, usbGadgetValidConfigCreatesDevice)
 TEST(DeviceFromConfig, usbConfigCreatesDevice)
 {
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
-    SensorData config{{"xyz.openbmc_project.Configuration.MCTPUSBTarget",
-                       {{"Type", std::string("MCTPUSBTarget")},
+    SensorData config{{"xyz.openbmc_project.Configuration.MCTPUSBDevice",
+                       {{"Type", std::string("MCTPUSBDevice")},
                         {"Name", std::string("usb0")},
                         {"Interface", std::string("usb0")}}}};
     auto device = deviceFromConfig(conn, config);
@@ -118,7 +118,7 @@ TEST(DeviceFromConfig, pcieConfigBadAddressReturnsNull)
     EXPECT_EQ(deviceFromConfig(conn, config), nullptr);
 }
 
-TEST(DeviceFromConfig, spiConfigReturnsNull)
+TEST(DeviceFromConfig, spiConfigCreatesDevice)
 {
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     SensorData config{{"xyz.openbmc_project.Configuration.MCTPSPIDevice",
@@ -126,7 +126,9 @@ TEST(DeviceFromConfig, spiConfigReturnsNull)
                         {"Name", std::string("spi0")},
                         {"Bus", std::string("0")},
                         {"ChipSelect", std::string("0")}}}};
-    EXPECT_EQ(deviceFromConfig(conn, config), nullptr);
+    // SPI netdev resolution is deferred to setup(); deviceFromConfig returns a
+    // device even when the sysfs net device is absent.
+    EXPECT_NE(deviceFromConfig(conn, config), nullptr);
 }
 
 TEST(DeviceFromConfig, i2cValidConfigReturnsNull)
@@ -163,8 +165,8 @@ TEST(DeviceFromConfig, allDeviceTypesWithValidConfigs)
           {"LocalEID", std::string("10")}}}};
     EXPECT_NE(deviceFromConfig(conn, usbGadget), nullptr);
 
-    SensorData usb{{"xyz.openbmc_project.Configuration.MCTPUSBTarget",
-                    {{"Type", std::string("MCTPUSBTarget")},
+    SensorData usb{{"xyz.openbmc_project.Configuration.MCTPUSBDevice",
+                    {{"Type", std::string("MCTPUSBDevice")},
                      {"Name", std::string("usb0")},
                      {"Interface", std::string("usb0")}}}};
     EXPECT_NE(deviceFromConfig(conn, usb), nullptr);
@@ -1401,7 +1403,7 @@ TEST(ReactorMainHandlers, removeInventoryUSBMatchedInterface)
 
     auto msg = makeRemoveInventoryMsg(
         "/xyz/openbmc_project/inventory/test/usb0",
-        {"xyz.openbmc_project.Configuration.MCTPUSBTarget"});
+        {"xyz.openbmc_project.Configuration.MCTPUSBDevice"});
 
     if (!msg)
     {
@@ -1834,9 +1836,9 @@ TEST(DeviceFromConfig, usbGadgetEidZeroReturnsNull)
 TEST(DeviceFromConfig, usbConfigMissingInterfaceReturnsNull)
 {
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
-    // MCTPUSBTarget match requires "Interface" field
-    SensorData config{{"xyz.openbmc_project.Configuration.MCTPUSBTarget",
-                       {{"Type", std::string("MCTPUSBTarget")},
+    // MCTPUSBDevice match requires "Interface" field
+    SensorData config{{"xyz.openbmc_project.Configuration.MCTPUSBDevice",
+                       {{"Type", std::string("MCTPUSBDevice")},
                         {"Name", std::string("usb0")}}}};
     // If Interface missing, from() returns nullptr or throws
     EXPECT_EQ(deviceFromConfig(conn, config), nullptr);
@@ -2201,8 +2203,8 @@ TEST(DeviceFromConfig, usbConfigMissingNameFieldCaughtReturnsNull)
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     // "Name" is absent → from() throws std::invalid_argument → caught →
     // deviceFromConfig returns nullptr.
-    SensorData config{{"xyz.openbmc_project.Configuration.MCTPUSBTarget",
-                       {{"Type", std::string("MCTPUSBTarget")},
+    SensorData config{{"xyz.openbmc_project.Configuration.MCTPUSBDevice",
+                       {{"Type", std::string("MCTPUSBDevice")},
                         {"Interface", std::string("usb0")}}}};
     EXPECT_EQ(deviceFromConfig(conn, config), nullptr);
 }
@@ -3543,7 +3545,7 @@ TEST(ReactorMainHandlers, removeInventoryAllSixInterfacesShortCircuitsB1)
         "/xyz/openbmc_project/inventory/test/all_ifaces_b1",
         {"xyz.openbmc_project.Configuration.MCTPI2CTarget",
          "xyz.openbmc_project.Configuration.MCTPI3CTarget",
-         "xyz.openbmc_project.Configuration.MCTPUSBTarget",
+         "xyz.openbmc_project.Configuration.MCTPUSBDevice",
          "xyz.openbmc_project.Configuration.MCTPSPIDevice",
          "xyz.openbmc_project.Configuration.MCTPXROTTarget",
          "xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget"});

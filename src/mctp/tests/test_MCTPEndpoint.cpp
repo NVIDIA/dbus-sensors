@@ -281,14 +281,14 @@ TEST(USBMCTPDDevice, matchIrrelevantConfig)
 
 TEST(USBMCTPDDevice, matchRelevantConfig)
 {
-    SensorData config{{"xyz.openbmc_project.Configuration.MCTPUSBTarget", {}}};
+    SensorData config{{"xyz.openbmc_project.Configuration.MCTPUSBDevice", {}}};
     EXPECT_TRUE(USBMCTPDDevice::match(config));
 }
 
 TEST(USBMCTPDDevice, matchInterfacesRelevant)
 {
     std::set<std::string> interfaces{
-        "xyz.openbmc_project.Configuration.MCTPUSBTarget"};
+        "xyz.openbmc_project.Configuration.MCTPUSBDevice"};
     EXPECT_TRUE(USBMCTPDDevice::match(interfaces));
 }
 
@@ -314,7 +314,7 @@ TEST(USBMCTPDDevice, fromBadIfaceWrongType)
 TEST(USBMCTPDDevice, fromBadIfaceNoName)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Interface", "usb0"},
     };
     EXPECT_THROW(USBMCTPDDevice::from({}, iface), std::invalid_argument);
@@ -323,7 +323,7 @@ TEST(USBMCTPDDevice, fromBadIfaceNoName)
 TEST(USBMCTPDDevice, fromBadIfaceNoInterface)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "test"},
     };
     EXPECT_THROW(USBMCTPDDevice::from({}, iface), std::invalid_argument);
@@ -332,7 +332,7 @@ TEST(USBMCTPDDevice, fromBadIfaceNoInterface)
 TEST(USBMCTPDDevice, fromValidMinimalConfig)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-test-device"},
         {"Interface", "usb0"},
     };
@@ -346,7 +346,7 @@ TEST(USBMCTPDDevice, fromValidMinimalConfig)
 TEST(USBMCTPDDevice, fromValidWithStaticEidWithoutBridgePool)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-main"},
         {"Interface", "usb-static"},
         {"StaticEndpointID", "42"},
@@ -363,7 +363,7 @@ TEST(USBMCTPDDevice, fromValidWithStaticEidWithoutBridgePool)
 TEST(USBMCTPDDevice, fromValidWithEmptyIgnoreLists)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-main"},
         {"Interface", "usb-empty-ignore"},
         {"StaticEndpointID", "13"},
@@ -380,7 +380,7 @@ TEST(USBMCTPDDevice, fromValidWithEmptyIgnoreLists)
 TEST(USBMCTPDDevice, getNameForEidReturnsNulloptForEidOutsideBridgePool)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},    {"Name", "usb-main,bridge-a,bridge-b"},
+        {"Type", "MCTPUSBDevice"},    {"Name", "usb-main,bridge-a,bridge-b"},
         {"Interface", "usb2"},        {"StaticEndpointID", "9"},
         {"BridgePoolStartEID", "10"}, {"BridgePoolEndEID", "11"},
     };
@@ -394,7 +394,7 @@ TEST(USBMCTPDDevice, getNameForEidReturnsNulloptForEidOutsideBridgePool)
 TEST(USBMCTPDDevice, fromValidWithStaticAndBridgeStartOnly)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},         {"Name", "usb-main"},
+        {"Type", "MCTPUSBDevice"},         {"Name", "usb-main"},
         {"Interface", "usb-bridge-start"}, {"StaticEndpointID", "9"},
         {"BridgePoolStartEID", "10"},
     };
@@ -410,7 +410,7 @@ TEST(USBMCTPDDevice, fromValidWithStaticAndBridgeStartOnly)
 TEST(USBMCTPDDevice, fromValidWithoutStaticButWithBridgeEnd)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-main"},
         {"Interface", "usb-bridge-end-only"},
         {"BridgePoolEndEID", "11"},
@@ -983,7 +983,7 @@ TEST(MCTPException, whatReturnsProvidedMessage)
 TEST(USBMCTPDDevice, fromValidWithStaticEidBridgePoolAndIgnoreLists)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-main,bridge-a,bridge-b"},
         {"Interface", "usb0"},
         {"StaticEndpointID", "9"},
@@ -1014,7 +1014,7 @@ TEST(USBMCTPDDevice, fromValidWithStaticEidBridgePoolAndIgnoreLists)
 TEST(USBMCTPDDevice, getNameForEidReturnsNulloptForMissingBridgeName)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},    {"Name", "usb-main"},
+        {"Type", "MCTPUSBDevice"},    {"Name", "usb-main"},
         {"Interface", "usb1"},        {"StaticEndpointID", "9"},
         {"BridgePoolStartEID", "10"}, {"BridgePoolEndEID", "11"},
     };
@@ -1028,7 +1028,7 @@ TEST(USBMCTPDDevice, getNameForEidReturnsNulloptForMissingBridgeName)
 TEST(USBMCTPDDevice, getNameForEidBelowBridgeStartReturnsNullopt)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},    {"Name", "usb-main,bridge-a,bridge-b"},
+        {"Type", "MCTPUSBDevice"},    {"Name", "usb-main,bridge-a,bridge-b"},
         {"Interface", "usb2"},        {"StaticEndpointID", "9"},
         {"BridgePoolStartEID", "10"}, {"BridgePoolEndEID", "11"},
     };
@@ -1042,7 +1042,7 @@ TEST(USBMCTPDDevice, getNameForEidBelowBridgeStartReturnsNullopt)
 TEST(USBMCTPDDevice, bridgeStartWithoutEndDoesNotManageBridgeEids)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},    {"Name", "usb-main,bridge-a"},
+        {"Type", "MCTPUSBDevice"},    {"Name", "usb-main,bridge-a"},
         {"Interface", "usb3"},        {"StaticEndpointID", "9"},
         {"BridgePoolStartEID", "10"},
     };
@@ -1057,7 +1057,7 @@ TEST(USBMCTPDDevice, bridgeStartWithoutEndDoesNotManageBridgeEids)
 TEST(USBMCTPDDevice, fromBadStaticEndpointIdThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-main"},
         {"Interface", "usb0"},
         {"StaticEndpointID", "not-a-number"},
@@ -1068,7 +1068,7 @@ TEST(USBMCTPDDevice, fromBadStaticEndpointIdThrows)
 TEST(USBMCTPDDevice, fromBadBridgeStartThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-main"},
         {"Interface", "usb0"},
         {"BridgePoolStartEID", "invalid"},
@@ -1079,7 +1079,7 @@ TEST(USBMCTPDDevice, fromBadBridgeStartThrows)
 TEST(USBMCTPDDevice, fromBadBridgeEndThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-main"},
         {"Interface", "usb0"},
         {"BridgePoolEndEID", "invalid"},
@@ -1185,7 +1185,7 @@ TEST(I3CMCTPDDevice, fromValidUint64AddressWithStaticReturnsNullNoNetDevice)
     EXPECT_EQ(device, nullptr);
 }
 
-TEST(SPIMCTPDDevice, fromValidShapeWithoutNetDeviceReturnsNull)
+TEST(SPIMCTPDDevice, fromValidShapeWithoutNetDeviceCreatesDeferredDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", "MCTPSPIDevice"},
@@ -1194,7 +1194,10 @@ TEST(SPIMCTPDDevice, fromValidShapeWithoutNetDeviceReturnsNull)
         {"ChipSelect", "0"},
     };
     auto device = SPIMCTPDDevice::from({}, iface);
-    EXPECT_EQ(device, nullptr);
+    // Netdev resolution is deferred to setup(): from() creates the device
+    // with an unresolved (empty) interface instead of returning null.
+    ASSERT_NE(device, nullptr);
+    EXPECT_TRUE(device->getInterface().empty());
 }
 
 TEST(I2CMCTPDDevice, fromBadStaticEndpointIdThrows)
@@ -1271,14 +1274,16 @@ TEST(I3CMCTPDDevice, fromBadAddressTypeThrows)
     EXPECT_THROW(I3CMCTPDDevice::from({}, iface), std::invalid_argument);
 }
 
-TEST(SPIMCTPDDevice, fromValidWithStaticEidButNoNetDeviceReturnsNull)
+TEST(SPIMCTPDDevice, fromValidWithStaticEidButNoNetDeviceCreatesDeferredDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", "MCTPSPIDevice"}, {"Name", "spi-test-device"}, {"Bus", "0"},
         {"ChipSelect", "0"},       {"StaticEndpointID", "7"},
     };
     auto device = SPIMCTPDDevice::from({}, iface);
-    EXPECT_EQ(device, nullptr);
+    // Deferred netdev resolution: device is created even without a netdev.
+    ASSERT_NE(device, nullptr);
+    EXPECT_TRUE(device->getInterface().empty());
 }
 
 TEST(XROTMCTPDDevice, fromValidWithPollingIntervalAndStaticEid)
@@ -1311,7 +1316,7 @@ TEST(XROTMCTPDDevice, fromValidWithoutStaticEid)
 TEST(USBMCTPDDevice, fromParsesIgnoreListsWithMixedValues)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-mixed"},
         {"Interface", "usb3"},
         {"StaticEndpointID", "31"},
@@ -1328,7 +1333,7 @@ TEST(USBMCTPDDevice, fromParsesIgnoreListsWithMixedValues)
 TEST(USBMCTPDDevice, fromIgnoreEidsWrongVariantTypeIsHandled)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-ignore-eids-wrong-type"},
         {"Interface", "usb4"},
         {"StaticEndpointID", "31"},
@@ -1344,7 +1349,7 @@ TEST(USBMCTPDDevice, fromIgnoreEidsWrongVariantTypeIsHandled)
 TEST(USBMCTPDDevice, fromIgnoreMessageTypesWrongVariantTypeIsHandled)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-ignore-msg-wrong-type"},
         {"Interface", "usb5"},
         {"StaticEndpointID", "32"},
@@ -1360,7 +1365,7 @@ TEST(USBMCTPDDevice, fromIgnoreMessageTypesWrongVariantTypeIsHandled)
 TEST(USBMCTPDDevice, fromIgnoreListsEmptyStringIsAccepted)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"}, {"Name", "usb-ignore-whitespace"},
+        {"Type", "MCTPUSBDevice"}, {"Name", "usb-ignore-whitespace"},
         {"Interface", "usb6"},     {"StaticEndpointID", "33"},
         {"IgnoreEIDs", ""},        {"IgnoreMessageTypes", ""},
     };
@@ -1374,7 +1379,7 @@ TEST(USBMCTPDDevice, fromIgnoreListsEmptyStringIsAccepted)
 TEST(USBMCTPDDevice, fromIgnoreEidsOutOfRangeValueIsSkipped)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},   {"Name", "usb-ignore-oor"},
+        {"Type", "MCTPUSBDevice"},   {"Name", "usb-ignore-oor"},
         {"Interface", "usb0"},       {"StaticEndpointID", "10"},
         {"IgnoreEIDs", "1, 300, 2"},
     };
@@ -1387,7 +1392,7 @@ TEST(USBMCTPDDevice, fromIgnoreEidsOutOfRangeValueIsSkipped)
 TEST(USBMCTPDDevice, fromIgnoreMessageTypesOutOfRangeValueIsSkipped)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-ignore-msg-oor"},
         {"Interface", "usb0"},
         {"StaticEndpointID", "11"},
@@ -1402,7 +1407,7 @@ TEST(USBMCTPDDevice, fromIgnoreMessageTypesOutOfRangeValueIsSkipped)
 TEST(USBMCTPDDevice, fromIgnoreEidsEmptyStringIsHandled)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"}, {"Name", "usb-ignore-empty-eids"},
+        {"Type", "MCTPUSBDevice"}, {"Name", "usb-ignore-empty-eids"},
         {"Interface", "usb0"},     {"StaticEndpointID", "12"},
         {"IgnoreEIDs", ""},        {"IgnoreMessageTypes", ""},
     };
@@ -1415,7 +1420,7 @@ TEST(USBMCTPDDevice, fromIgnoreEidsEmptyStringIsHandled)
 TEST(USBMCTPDDevice, fromWithBridgePoolEndEidOnlyNoBridgeStart)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},  {"Name", "usb-end-only"},
+        {"Type", "MCTPUSBDevice"},  {"Name", "usb-end-only"},
         {"Interface", "usb0"},      {"StaticEndpointID", "13"},
         {"BridgePoolEndEID", "20"},
     };
@@ -1428,7 +1433,7 @@ TEST(USBMCTPDDevice, fromWithBridgePoolEndEidOnlyNoBridgeStart)
 TEST(USBMCTPDDevice, fromWithNoStaticButWithBridgeStartAndEnd)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},  {"Name", "usb-no-static-bridge"},
+        {"Type", "MCTPUSBDevice"},  {"Name", "usb-no-static-bridge"},
         {"Interface", "usb0"},      {"BridgePoolStartEID", "10"},
         {"BridgePoolEndEID", "20"},
     };
@@ -1441,7 +1446,7 @@ TEST(USBMCTPDDevice, fromWithNoStaticButWithBridgeStartAndEnd)
 TEST(USBMCTPDDevice, fromBadBridgePoolEndEidThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-bad-end"},
         {"Interface", "usb0"},
         {"StaticEndpointID", "9"},
@@ -1454,7 +1459,7 @@ TEST(USBMCTPDDevice, fromBadBridgePoolEndEidThrows)
 TEST(USBMCTPDDevice, fromBadBridgePoolStartEidThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},     {"Name", "usb-bad-start"},
+        {"Type", "MCTPUSBDevice"},     {"Name", "usb-bad-start"},
         {"Interface", "usb0"},         {"StaticEndpointID", "9"},
         {"BridgePoolStartEID", "xyz"},
     };
@@ -1462,7 +1467,7 @@ TEST(USBMCTPDDevice, fromBadBridgePoolStartEidThrows)
     EXPECT_THROW(USBMCTPDDevice::from({}, iface), std::invalid_argument);
 }
 
-TEST(SPIMCTPDDevice, fromValidWithPollingIntervalReturnsNull)
+TEST(SPIMCTPDDevice, fromValidWithPollingIntervalCreatesDeferredDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", "MCTPSPIDevice"},
@@ -1472,10 +1477,11 @@ TEST(SPIMCTPDDevice, fromValidWithPollingIntervalReturnsNull)
         {"StaticEndpointID", "7"},
         {"PollingInterval", "30"},
     };
-    EXPECT_EQ(SPIMCTPDDevice::from({}, iface), nullptr);
+    // Deferred netdev resolution: device is created even without a netdev.
+    ASSERT_NE(SPIMCTPDDevice::from({}, iface), nullptr);
 }
 
-TEST(SPIMCTPDDevice, fromValidWithoutStaticEidReturnsNull)
+TEST(SPIMCTPDDevice, fromValidWithoutStaticEidCreatesDeferredDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", "MCTPSPIDevice"},
@@ -1483,7 +1489,8 @@ TEST(SPIMCTPDDevice, fromValidWithoutStaticEidReturnsNull)
         {"Bus", "0"},
         {"ChipSelect", "0"},
     };
-    EXPECT_EQ(SPIMCTPDDevice::from({}, iface), nullptr);
+    // Deferred netdev resolution: device is created even without a netdev.
+    ASSERT_NE(SPIMCTPDDevice::from({}, iface), nullptr);
 }
 
 TEST(XROTMCTPDDevice, fromValidWithPollingIntervalReturnsDevice)
@@ -1534,7 +1541,7 @@ TEST(I3CMCTPDDevice, fromWithBridgePoolEndEidOnlyReturnsNull)
 TEST(USBMCTPDDevice, fromIgnoreEidsNegativeValueIsSkipped)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},  {"Name", "usb-neg-eid"},
+        {"Type", "MCTPUSBDevice"},  {"Name", "usb-neg-eid"},
         {"Interface", "usb0"},      {"StaticEndpointID", "10"},
         {"IgnoreEIDs", "1, -5, 2"},
     };
@@ -1546,7 +1553,7 @@ TEST(USBMCTPDDevice, fromIgnoreEidsNegativeValueIsSkipped)
 TEST(USBMCTPDDevice, fromIgnoreMessageTypesNegativeValueIsSkipped)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-neg-msg"},
         {"Interface", "usb0"},
         {"StaticEndpointID", "11"},
@@ -1560,7 +1567,7 @@ TEST(USBMCTPDDevice, fromIgnoreMessageTypesNegativeValueIsSkipped)
 TEST(USBMCTPDDevice, fromIgnoreMessageTypesEmptyStringIsHandled)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},  {"Name", "usb-msg-empty"},
+        {"Type", "MCTPUSBDevice"},  {"Name", "usb-msg-empty"},
         {"Interface", "usb0"},      {"StaticEndpointID", "12"},
         {"IgnoreMessageTypes", ""},
     };
@@ -1572,7 +1579,7 @@ TEST(USBMCTPDDevice, fromIgnoreMessageTypesEmptyStringIsHandled)
 TEST(USBMCTPDDevice, fromIgnoreEidsOnlyInvalidTokensReturnsEmptyList)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},  {"Name", "usb-all-bad-eids"},
+        {"Type", "MCTPUSBDevice"},  {"Name", "usb-all-bad-eids"},
         {"Interface", "usb0"},      {"StaticEndpointID", "13"},
         {"IgnoreEIDs", "abc, xyz"},
     };
@@ -1584,7 +1591,7 @@ TEST(USBMCTPDDevice, fromIgnoreEidsOnlyInvalidTokensReturnsEmptyList)
 TEST(USBMCTPDDevice, fromIgnoreMessageTypesOnlyInvalidTokensReturnsEmptyList)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "usb-all-bad-msg"},
         {"Interface", "usb0"},
         {"StaticEndpointID", "14"},
@@ -1598,7 +1605,7 @@ TEST(USBMCTPDDevice, fromIgnoreMessageTypesOnlyInvalidTokensReturnsEmptyList)
 TEST(USBMCTPDDevice, fromWithAllFieldsIncludingPollingAndBridgePool)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},    {"Name", "usb-full,bridge-a,bridge-b"},
+        {"Type", "MCTPUSBDevice"},    {"Name", "usb-full,bridge-a,bridge-b"},
         {"Interface", "usb0"},        {"StaticEndpointID", "9"},
         {"BridgePoolStartEID", "10"}, {"BridgePoolEndEID", "11"},
         {"IgnoreEIDs", "1, 2"},       {"IgnoreMessageTypes", "3, 4"},
@@ -3021,7 +3028,8 @@ TEST(I2CMCTPDDeviceInterface, interfaceFromBusNonExistentReturnsNull)
 }
 
 // 26. SPIMCTPDDevice::interfaceFromBusCs — non-existent bus/cs → null
-TEST(SPIMCTPDDeviceInterface, interfaceFromBusCsNonExistentReturnsNull)
+TEST(SPIMCTPDDeviceInterface,
+     interfaceFromBusCsNonExistentCreatesDeferredDevice)
 {
     // Bus 9999, CS 0 → /sys/bus/spi/devices/spi9999.0/net doesn't exist
     SensorBaseConfigMap iface{
@@ -3031,7 +3039,10 @@ TEST(SPIMCTPDDeviceInterface, interfaceFromBusCsNonExistentReturnsNull)
         {"ChipSelect", std::string("0")},
     };
     auto dev = SPIMCTPDDevice::from(nullptr, iface);
-    EXPECT_EQ(dev, nullptr);
+    // Deferred netdev resolution: device is created even when the sysfs net
+    // path does not exist; the interface stays empty until setup() resolves it.
+    ASSERT_NE(dev, nullptr);
+    EXPECT_TRUE(dev->getInterface().empty());
 }
 
 // ===========================================================================
@@ -3286,7 +3297,7 @@ TEST(I2CMCTPDDevice, I2CFromIgnoreMessageTypesNonNumericSkipped)
 TEST(USBMCTPDDevice, USBFromIgnoreEidsOutOfRangeSkipped)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-eid-oor-256")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -3497,7 +3508,7 @@ TEST_F(FakeConnFixture, performHealthCheckSuppressesEidBelowThreshold)
 TEST(USBMCTPDDevice, fromIgnoreEidsMaxValidValueAccepted)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-eid-max")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -3512,7 +3523,7 @@ TEST(USBMCTPDDevice, fromIgnoreEidsMaxValidValueAccepted)
 TEST(USBMCTPDDevice, fromIgnoreEidsZeroIsValidEntry)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-eid-zero")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -4258,7 +4269,7 @@ TEST(SPIMCTPDDevice, fromWithStaticEidCoversFirstBranch)
         {"StaticEndpointID", std::string("7")},
     };
     auto device = SPIMCTPDDevice::from({}, iface);
-    EXPECT_EQ(device, nullptr);
+    ASSERT_NE(device, nullptr);
 }
 
 TEST(SPIMCTPDDevice, fromWithoutStaticEidCoversSecondBranch)
@@ -4270,7 +4281,7 @@ TEST(SPIMCTPDDevice, fromWithoutStaticEidCoversSecondBranch)
         {"ChipSelect", std::string("0")},
     };
     auto device = SPIMCTPDDevice::from({}, iface);
-    EXPECT_EQ(device, nullptr);
+    ASSERT_NE(device, nullptr);
 }
 
 // ===========================================================================
@@ -4280,7 +4291,7 @@ TEST(SPIMCTPDDevice, fromWithoutStaticEidCoversSecondBranch)
 TEST(USBMCTPDDevice, fromWithStaticAndBridgePoolStartCoversFirstBranch)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-branch1b")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("9")},
@@ -4296,7 +4307,7 @@ TEST(USBMCTPDDevice, fromWithStaticAndBridgePoolStartCoversFirstBranch)
 TEST(USBMCTPDDevice, fromWithStaticOnlyCoversSecondBranch)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-branch2b")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("5")},
@@ -4309,7 +4320,7 @@ TEST(USBMCTPDDevice, fromWithStaticOnlyCoversSecondBranch)
 TEST(USBMCTPDDevice, fromWithNoStaticCoversThirdBranch)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-branch3b")},
         {"Interface", std::string("usb0")},
     };
@@ -4395,7 +4406,7 @@ TEST(MCTPDDevice, performHealthCheckWithPollingButNoStaticReturnsEarly)
 TEST(USBMCTPDDevice, fromIgnoreMessageTypesEmptyStringSetsNullopt2)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-msg-empty3")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("15")},
@@ -4409,7 +4420,7 @@ TEST(USBMCTPDDevice, fromIgnoreMessageTypesEmptyStringSetsNullopt2)
 TEST(USBMCTPDDevice, fromIgnoreEidsEmptyStringSetsNullopt2)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-eids-empty3")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("16")},
@@ -5494,7 +5505,7 @@ TEST(I2CMCTPDDevice, fromWithIgnoreMessageTypesVectorTypeUsesOuterCatch)
 TEST(USBMCTPDDevice, fromWithIgnoreEidsVectorUint8TypeUsesOuterCatch)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-eids-vec-u8-g41")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -5514,7 +5525,7 @@ TEST(USBMCTPDDevice, fromWithIgnoreEidsVectorUint8TypeUsesOuterCatch)
 TEST(USBMCTPDDevice, fromWithIgnoreMessageTypesVectorUint8TypeUsesOuterCatch)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-msg-vec-u8-g42")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("11")},
@@ -5795,7 +5806,7 @@ TEST_F(FakeConnFixture, performHealthCheckSecondFailureDoesNotTriggerRecover)
 TEST(USBMCTPDDevice, fromWithBridgeStartOnlyAndNoStaticCreatesDevice)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-bridge-start-no-static-g55")},
         {"Interface", std::string("usb0")},
         {"BridgePoolStartEID", std::string("10")},
@@ -6216,7 +6227,7 @@ TEST_F(FakeConnFixture, onDiscoveryNotifyWithDiscoveryNeededTrueIsNoop)
 TEST(USBMCTPDDevice, fromWithStaticAndNoBridgeCoversSecondBranch)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-static-nobp-g76")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("9")},
@@ -6315,7 +6326,7 @@ TEST(USBMCTPDDevice, fromWithWrongTypeThrows)
 TEST(SPIMCTPDDevice, fromWithWrongTypeThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("spi-wrong-type-g82")},
         {"Bus", std::string("0")},
         {"ChipSelect", std::string("0")},
@@ -6330,7 +6341,7 @@ TEST(SPIMCTPDDevice, fromWithWrongTypeThrows)
 TEST(XROTMCTPDDevice, fromWithWrongTypeThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("xrot-wrong-type-g83")},
         {"Interface", std::string("xrot0")},
     };
@@ -6466,7 +6477,7 @@ TEST_F(FakeConnFixture, setupWithoutStaticEidCallsAssignEndpointG88)
 TEST(USBMCTPDDevice, fromWithNoNameThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         // "Name" absent
         {"Interface", std::string("usb0")},
     };
@@ -6613,7 +6624,7 @@ TEST(I2CMCTPDDevice, fromWithMultipleValidIgnoreMessageTypesParsesAll)
 TEST(USBMCTPDDevice, fromWithMultipleValidIgnoreEidsParsesAll)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-multi-eid-g96")},
         {"Interface", std::string("usb0")},
         {"IgnoreEIDs", std::string("10, 20, 30, 40")},
@@ -6630,7 +6641,7 @@ TEST(USBMCTPDDevice, fromWithMultipleValidIgnoreEidsParsesAll)
 TEST(USBMCTPDDevice, fromWithStaticAndBridgePoolCreatesDeviceSuccessfully)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-full-pool-g97")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("9")},
@@ -6743,7 +6754,7 @@ TEST(I2CMCTPDDevice, fromWithBadBridgePoolEndEidThrows)
 TEST(USBMCTPDDevice, fromWithBadBridgePoolStartEidThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-bad-bpstart-g102")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("9")},
@@ -6759,7 +6770,7 @@ TEST(USBMCTPDDevice, fromWithBadBridgePoolStartEidThrows)
 TEST(USBMCTPDDevice, fromWithBadBridgePoolEndEidThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-bad-bpend-g103")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("9")},
@@ -6854,7 +6865,7 @@ TEST(I2CMCTPDDevice, fromWithIgnoreMessageTypesInvalidTokenSkipsEntry)
 TEST(USBMCTPDDevice, fromWithIgnoreEidsOutOfRangeSkipsEntry)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-ig-eid-oob-g108")},
         {"Interface", std::string("usb0")},
         // 5 is valid; 300 is out of range → skipped.
@@ -6872,7 +6883,7 @@ TEST(USBMCTPDDevice, fromWithIgnoreEidsOutOfRangeSkipsEntry)
 TEST(USBMCTPDDevice, fromWithIgnoreEidsInvalidTokenSkipsEntry)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-ig-eid-inv-g109")},
         {"Interface", std::string("usb0")},
         // "xyz" is non-numeric → stoll throws → warning logged, skipped.
@@ -6890,7 +6901,7 @@ TEST(USBMCTPDDevice, fromWithIgnoreEidsInvalidTokenSkipsEntry)
 TEST(USBMCTPDDevice, fromWithIgnoreMessageTypesOutOfRangeSkipsEntry)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-igmt-oob-g110")},
         {"Interface", std::string("usb0")},
         // 2 is valid; 512 is out of range → skipped.
@@ -6908,7 +6919,7 @@ TEST(USBMCTPDDevice, fromWithIgnoreMessageTypesOutOfRangeSkipsEntry)
 TEST(USBMCTPDDevice, fromWithIgnoreMessageTypesInvalidTokenSkipsEntry)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-igmt-inv-g111")},
         {"Interface", std::string("usb0")},
         // "bad" is non-numeric → stoll throws → warning logged, skipped.
@@ -7005,7 +7016,7 @@ TEST(I2CMCTPDDevice, fromWithEmptyIgnoreMessageTypesReturnsNullopt)
 TEST(USBMCTPDDevice, fromWithEmptyIgnoreEidsStringReturnsDevice)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-ig-eid-empty-g117")},
         {"Interface", std::string("usb0")},
         {"IgnoreEIDs", std::string("")},
@@ -7024,7 +7035,7 @@ TEST(USBMCTPDDevice, fromWithEmptyIgnoreEidsStringReturnsDevice)
 TEST(USBMCTPDDevice, fromWithEmptyIgnoreMessageTypesStringReturnsDevice)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-igmt-empty-g118")},
         {"Interface", std::string("usb0")},
         {"IgnoreMessageTypes", std::string("")},
@@ -7910,9 +7921,10 @@ TEST(SPIMCTPDDevice, fromWithNoStaticEidCreatesDeviceViaThirdBranch)
         // "StaticEndpointID" absent → warning + third constructor branch
     };
     // interfaceFromBusCs(0, 0) reads /sys/bus/spi/devices/spi0.0/net →
-    // doesn't exist in the test environment → MCTPException → caught → nullptr.
+    // doesn't exist in the test environment → MCTPException → caught → the
+    // device is created with a deferred (empty) interface (not null).
     auto result = SPIMCTPDDevice::from({}, iface);
-    EXPECT_EQ(result, nullptr);
+    ASSERT_NE(result, nullptr);
 }
 
 // ===========================================================================
@@ -8646,11 +8658,11 @@ TEST(I3CMCTPDDevice, matchSensorDataReturnedMapIsAccessibleG166)
 TEST(USBMCTPDDevice, matchSensorDataReturnedMapIsAccessibleG167)
 {
     SensorBaseConfigMap configMap{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-match-map-g167")},
     };
     SensorData config{
-        {"xyz.openbmc_project.Configuration.MCTPUSBTarget", configMap}};
+        {"xyz.openbmc_project.Configuration.MCTPUSBDevice", configMap}};
 
     auto result = USBMCTPDDevice::match(config);
     ASSERT_TRUE(result.has_value());
@@ -9132,7 +9144,7 @@ TEST(SuiteG191, SPIFromStaticEndpointIdOobThrows)
 TEST(SuiteG192, USBFromIgnoreEidsEmptyStringNullopt)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-ieids-empty-g192")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -9152,7 +9164,7 @@ TEST(SuiteG192, USBFromIgnoreEidsEmptyStringNullopt)
 TEST(SuiteG193, USBFromIgnoreEidsOobEntrySkippedDeviceCreated)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-ieids-oob-g193")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -9172,7 +9184,7 @@ TEST(SuiteG193, USBFromIgnoreEidsOobEntrySkippedDeviceCreated)
 TEST(SuiteG194, USBFromIgnoreMessageTypesEmptyStringNullopt)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-imt-empty-g194")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -9192,7 +9204,7 @@ TEST(SuiteG194, USBFromIgnoreMessageTypesEmptyStringNullopt)
 TEST(SuiteG195, USBFromIgnoreMessageTypesOobEntrySkippedDeviceCreated)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-imt-oob-g195")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -9212,7 +9224,7 @@ TEST(SuiteG195, USBFromIgnoreMessageTypesOobEntrySkippedDeviceCreated)
 TEST(SuiteG196, USBFromBridgePoolEndEidOobThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-bpe-oob-g196")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -9231,7 +9243,7 @@ TEST(SuiteG196, USBFromBridgePoolEndEidOobThrows)
 TEST(SuiteG197, USBFromAllValidFieldsCreatesDevice)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-full-g197")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -9252,14 +9264,14 @@ TEST(SuiteG197, USBFromAllValidFieldsCreatesDevice)
 // ===========================================================================
 // Group G198: USBMCTPDDevice::from — missing required 'Interface' field
 // Source: MCTPEndpoint.cpp line ~1359-1364: mInterface==iface.end() →
-// throws std::invalid_argument("Configuration object violates MCTPUSBTarget
+// throws std::invalid_argument("Configuration object violates MCTPUSBDevice
 // schema").
 // ===========================================================================
 
 TEST(SuiteG198, USBFromMissingInterfaceFieldThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-noint-g198")},
         // No "Interface" key → throws
     };
@@ -9998,7 +10010,7 @@ TEST(SuiteG226, getInterfaceReturnsDeviceInterface)
 TEST(SuiteG227, USBFromStaticEndpointIdOobThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-seid-oob-g227")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("300")}, // OOB → throws
@@ -10015,7 +10027,7 @@ TEST(SuiteG227, USBFromStaticEndpointIdOobThrows)
 TEST(SuiteG228, USBFromBridgePoolStartEidOobThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-bps-oob-g228")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -10034,7 +10046,7 @@ TEST(SuiteG228, USBFromBridgePoolStartEidOobThrows)
 TEST(SuiteG229, USBFromNoStaticEidTakesThirdBranch)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-dynamic-g229")},
         {"Interface", std::string("usb0")},
         // No StaticEndpointID → dynamic EID path
@@ -10054,7 +10066,7 @@ TEST(SuiteG229, USBFromNoStaticEidTakesThirdBranch)
 TEST(SuiteG230, USBFromIgnoreEidsNonNumericSkippedDeviceCreated)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-ieids-abc-g230")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -10074,7 +10086,7 @@ TEST(SuiteG230, USBFromIgnoreEidsNonNumericSkippedDeviceCreated)
 TEST(SuiteG231, USBFromIgnoreMessageTypesNonNumericSkippedDeviceCreated)
 {
     SensorBaseConfigMap iface{
-        {"Type", std::string("MCTPUSBTarget")},
+        {"Type", std::string("MCTPUSBDevice")},
         {"Name", std::string("usb-imt-abc-g231")},
         {"Interface", std::string("usb0")},
         {"StaticEndpointID", std::string("10")},
@@ -10192,7 +10204,7 @@ TEST(SuiteG237, SPIFromStaticEidTakesFirstBranch)
         {"StaticEndpointID", std::string("74")},
     };
     auto result = SPIMCTPDDevice::from({}, iface);
-    EXPECT_EQ(result, nullptr);
+    ASSERT_NE(result, nullptr);
 }
 
 // ===========================================================================
@@ -10211,7 +10223,7 @@ TEST(SuiteG238, SPIFromNoStaticEidTakesSecondBranch)
         // No StaticEndpointID
     };
     auto result = SPIMCTPDDevice::from({}, iface);
-    EXPECT_EQ(result, nullptr);
+    ASSERT_NE(result, nullptr);
 }
 
 // ===========================================================================

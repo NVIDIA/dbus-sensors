@@ -1533,7 +1533,7 @@ TEST(MCTPDeviceFrom, I3CWithAllOptionalFields)
 TEST(MCTPDeviceFrom, USBMinimalNoOptionalFields)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "cov-usb"},
         {"Interface", "usb0"},
     };
@@ -1545,7 +1545,7 @@ TEST(MCTPDeviceFrom, USBMinimalNoOptionalFields)
 TEST(MCTPDeviceFrom, USBWithAllOptionalFieldsIncludingIgnoreLists)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "cov-usb-full,bridge-a,bridge-b"},
         {"Interface", "usb0"},
         {"StaticEndpointID", "9"},
@@ -1561,7 +1561,7 @@ TEST(MCTPDeviceFrom, USBWithAllOptionalFieldsIncludingIgnoreLists)
 TEST(MCTPDeviceFrom, USBWithEmptyIgnoreLists)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"}, {"Name", "cov-usb-empty-ignore"},
+        {"Type", "MCTPUSBDevice"}, {"Name", "cov-usb-empty-ignore"},
         {"Interface", "usb0"},     {"StaticEndpointID", "13"},
         {"IgnoreEIDs", ""},        {"IgnoreMessageTypes", ""},
     };
@@ -1572,7 +1572,7 @@ TEST(MCTPDeviceFrom, USBWithEmptyIgnoreLists)
 TEST(MCTPDeviceFrom, USBWithOnlyValidIgnoreEntries)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},    {"Name", "cov-usb-valid-ignore"},
+        {"Type", "MCTPUSBDevice"},    {"Name", "cov-usb-valid-ignore"},
         {"Interface", "usb0"},        {"StaticEndpointID", "14"},
         {"IgnoreEIDs", "10, 20, 30"}, {"IgnoreMessageTypes", "1, 2"},
     };
@@ -1583,7 +1583,7 @@ TEST(MCTPDeviceFrom, USBWithOnlyValidIgnoreEntries)
 TEST(MCTPDeviceFrom, USBIgnoreEidsWrongVariantType)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "cov-usb-wrong-ignore"},
         {"Interface", "usb0"},
         {"StaticEndpointID", "15"},
@@ -1596,7 +1596,7 @@ TEST(MCTPDeviceFrom, USBIgnoreEidsWrongVariantType)
 TEST(MCTPDeviceFrom, USBWithWhitespaceOnlyIgnoreLists)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"}, {"Name", "cov-usb-ws-ignore"},
+        {"Type", "MCTPUSBDevice"}, {"Name", "cov-usb-ws-ignore"},
         {"Interface", "usb0"},     {"StaticEndpointID", "16"},
         {"IgnoreEIDs", " , , "},   {"IgnoreMessageTypes", "  , "},
     };
@@ -1604,7 +1604,7 @@ TEST(MCTPDeviceFrom, USBWithWhitespaceOnlyIgnoreLists)
     ASSERT_NE(dev, nullptr);
 }
 
-TEST(MCTPDeviceFrom, SPIMinimalReturnsNull)
+TEST(MCTPDeviceFrom, SPIMinimalCreatesDeferredDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", "MCTPSPIDevice"},
@@ -1612,16 +1612,18 @@ TEST(MCTPDeviceFrom, SPIMinimalReturnsNull)
         {"Bus", "0"},
         {"ChipSelect", "0"},
     };
-    EXPECT_EQ(SPIMCTPDDevice::from({}, iface), nullptr);
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
+    ASSERT_NE(SPIMCTPDDevice::from({}, iface), nullptr);
 }
 
-TEST(MCTPDeviceFrom, SPIWithStaticReturnsNull)
+TEST(MCTPDeviceFrom, SPIWithStaticCreatesDeferredDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", "MCTPSPIDevice"}, {"Name", "cov-spi-static"}, {"Bus", "0"},
         {"ChipSelect", "0"},       {"StaticEndpointID", "7"},
     };
-    EXPECT_EQ(SPIMCTPDDevice::from({}, iface), nullptr);
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
+    ASSERT_NE(SPIMCTPDDevice::from({}, iface), nullptr);
 }
 
 TEST(MCTPDeviceFrom, XROTMinimalNoStatic)
@@ -1760,7 +1762,8 @@ TEST(MCTPDeviceFrom, SPIWithPollingInterval)
         {"StaticEndpointID", "7"},
         {"PollingInterval", "30"},
     };
-    EXPECT_EQ(SPIMCTPDDevice::from({}, iface), nullptr);
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
+    ASSERT_NE(SPIMCTPDDevice::from({}, iface), nullptr);
 }
 
 TEST(MCTPDeviceFrom, SPIBadStaticEndpointIdThrows)
@@ -1798,7 +1801,7 @@ TEST(MCTPDeviceFrom, XROTBadStaticEndpointIdThrows)
 TEST(MCTPDeviceFrom, USBWithBridgeStartBadValueThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},     {"Name", "cov-usb-bad-start"},
+        {"Type", "MCTPUSBDevice"},     {"Name", "cov-usb-bad-start"},
         {"Interface", "usb0"},         {"StaticEndpointID", "9"},
         {"BridgePoolStartEID", "xyz"},
     };
@@ -1808,7 +1811,7 @@ TEST(MCTPDeviceFrom, USBWithBridgeStartBadValueThrows)
 TEST(MCTPDeviceFrom, USBWithBridgeEndBadValueThrows)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},   {"Name", "cov-usb-bad-end"},
+        {"Type", "MCTPUSBDevice"},   {"Name", "cov-usb-bad-end"},
         {"Interface", "usb0"},       {"StaticEndpointID", "9"},
         {"BridgePoolEndEID", "xyz"},
     };
@@ -1818,7 +1821,7 @@ TEST(MCTPDeviceFrom, USBWithBridgeEndBadValueThrows)
 TEST(MCTPDeviceFrom, USBWithBridgePoolNoStaticEid)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},  {"Name", "cov-usb-pool-no-static"},
+        {"Type", "MCTPUSBDevice"},  {"Name", "cov-usb-pool-no-static"},
         {"Interface", "usb0"},      {"BridgePoolStartEID", "10"},
         {"BridgePoolEndEID", "20"},
     };
@@ -1830,7 +1833,7 @@ TEST(MCTPDeviceFrom, USBWithBridgePoolNoStaticEid)
 TEST(MCTPDeviceFrom, USBWithBridgeEndOnlyNoStart)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},  {"Name", "cov-usb-end-only"},
+        {"Type", "MCTPUSBDevice"},  {"Name", "cov-usb-end-only"},
         {"Interface", "usb0"},      {"StaticEndpointID", "9"},
         {"BridgePoolEndEID", "20"},
     };
@@ -1842,7 +1845,7 @@ TEST(MCTPDeviceFrom, USBWithBridgeEndOnlyNoStart)
 TEST(MCTPDeviceFrom, USBWithPollingInterval)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"}, {"Name", "cov-usb-poll"},
+        {"Type", "MCTPUSBDevice"}, {"Name", "cov-usb-poll"},
         {"Interface", "usb0"},     {"StaticEndpointID", "9"},
         {"PollingInterval", "30"},
     };
@@ -1854,7 +1857,7 @@ TEST(MCTPDeviceFrom, USBWithPollingInterval)
 TEST(MCTPDeviceFrom, USBWithStaticAndBridgeStartNoEnd)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},    {"Name", "cov-usb-start-no-end"},
+        {"Type", "MCTPUSBDevice"},    {"Name", "cov-usb-start-no-end"},
         {"Interface", "usb0"},        {"StaticEndpointID", "9"},
         {"BridgePoolStartEID", "10"},
     };
@@ -1866,7 +1869,7 @@ TEST(MCTPDeviceFrom, USBWithStaticAndBridgeStartNoEnd)
 TEST(MCTPDeviceFrom, USBNoStaticNoBridge)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "cov-usb-bare"},
         {"Interface", "usb0"},
     };
@@ -1891,7 +1894,7 @@ TEST(MCTPDeviceFrom, XROTNoStaticNoPolling)
 TEST(MCTPDeviceFrom, USBWithIgnoreEidsNegativeAndLarge)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "cov-usb-ignore-edge"},
         {"Interface", "usb0"},
         {"StaticEndpointID", "9"},
@@ -1947,7 +1950,7 @@ TEST(MCTPDeviceFrom, SPIBadChipSelectThrows)
 TEST(MCTPDeviceFrom, USBStaticOnlyNoBridge)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "cov-usb-static-only"},
         {"Interface", "usb0"},
         {"StaticEndpointID", "25"},
@@ -1960,7 +1963,7 @@ TEST(MCTPDeviceFrom, USBStaticOnlyNoBridge)
 TEST(MCTPDeviceFrom, USBBadStaticEndpointIdThrowsInvalidArg)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},
+        {"Type", "MCTPUSBDevice"},
         {"Name", "cov-usb-bad-eid"},
         {"Interface", "usb0"},
         {"StaticEndpointID", "not-a-number"},
@@ -1982,7 +1985,7 @@ TEST(MCTPDeviceFrom, XROTBadStaticEndpointIdThrowsInvalidArg)
 TEST(MCTPDeviceFrom, USBWithAllFieldsFullyPopulated)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"},    {"Name", "full-usb,bridge-a,bridge-b"},
+        {"Type", "MCTPUSBDevice"},    {"Name", "full-usb,bridge-a,bridge-b"},
         {"Interface", "usb0"},        {"StaticEndpointID", "9"},
         {"BridgePoolStartEID", "10"}, {"BridgePoolEndEID", "11"},
         {"IgnoreEIDs", "1,2,3"},      {"IgnoreMessageTypes", "4,5"},
@@ -2062,7 +2065,7 @@ TEST(MCTPDeviceFrom, I2CWithIgnoreMessageTypesWrongVariant)
 TEST(MCTPDeviceFrom, USBWithPollingIntervalZero)
 {
     SensorBaseConfigMap iface{
-        {"Type", "MCTPUSBTarget"}, {"Name", "cov-usb-poll-zero"},
+        {"Type", "MCTPUSBDevice"}, {"Name", "cov-usb-poll-zero"},
         {"Interface", "usb0"},     {"StaticEndpointID", "9"},
         {"PollingInterval", "0"},
     };
