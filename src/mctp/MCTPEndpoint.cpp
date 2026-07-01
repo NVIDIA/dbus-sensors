@@ -2129,7 +2129,11 @@ std::string USBMCTPDDevice::interfaceFromRootHubPort(
     std::string segment;
     while (std::getline(ss, segment, '.'))
     {
-        prefix = prefix.empty() ? segment : prefix + "." + segment;
+        if (!prefix.empty())
+        {
+            prefix += '.';
+        }
+        prefix += segment;
         dir /= std::format("{}-{}", busNum, prefix);
     }
     dir /=
@@ -2215,20 +2219,20 @@ void USBMCTPDDevice::setup(
         }
     }
 
-    MCTPDDevice::setup([orig = std::move(added), weak = weak_from_this()](
-                           const std::error_code& ec,
-                           const std::shared_ptr<MCTPEndpoint>& ep) mutable {
-        if (auto self = std::dynamic_pointer_cast<USBMCTPDDevice>(weak.lock()))
-        {
-            if (!ec)
-            {
-                self->interfaceConfirmed_ = true;
-            }
-            // On failure: do NOT clear interface. The next tick will
-            // re-resolve via sysfs and pick up any udev rename.
-        }
-        orig(ec, ep);
-    });
+    // Forward the caller's callback straight through; interfaceConfirmed_ is
+    // latched from onEndpointEstablished() on success. Wrapping it in a local
+    // lambda here would construct an in-frame std::function that the static
+    // analyzer cannot trace through the async AssignEndpoint call.
+    MCTPDDevice::setup(std::move(added));
+}
+
+void USBMCTPDDevice::onEndpointEstablished()
+{
+    MCTPDDevice::onEndpointEstablished();
+    // The endpoint was established, so AssignEndpointStatic succeeded on the
+    // resolved netdev: stop re-walking sysfs on subsequent ticks. On failure
+    // this hook is not called, so the name is re-resolved next tick.
+    interfaceConfirmed_ = true;
 }
 
 /* MCTP SPI*/
@@ -2424,18 +2428,20 @@ void SPIMCTPDDevice::setup(
         }
     }
 
-    MCTPDDevice::setup([orig = std::move(added), weak = weak_from_this()](
-                           const std::error_code& ec,
-                           const std::shared_ptr<MCTPEndpoint>& ep) mutable {
-        if (auto self = std::dynamic_pointer_cast<SPIMCTPDDevice>(weak.lock()))
-        {
-            if (!ec)
-            {
-                self->interfaceConfirmed_ = true;
-            }
-        }
-        orig(ec, ep);
-    });
+    // Forward the caller's callback straight through; interfaceConfirmed_ is
+    // latched from onEndpointEstablished() on success. Wrapping it in a local
+    // lambda here would construct an in-frame std::function that the static
+    // analyzer cannot trace through the async AssignEndpoint call.
+    MCTPDDevice::setup(std::move(added));
+}
+
+void SPIMCTPDDevice::onEndpointEstablished()
+{
+    MCTPDDevice::onEndpointEstablished();
+    // AssignEndpointStatic succeeded on the resolved netdev: stop re-walking
+    // sysfs on subsequent ticks. On failure this hook is not called, so the
+    // name is re-resolved next tick.
+    interfaceConfirmed_ = true;
 }
 
 /* MCTP XROT */

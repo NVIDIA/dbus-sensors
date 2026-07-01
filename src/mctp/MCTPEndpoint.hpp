@@ -604,8 +604,8 @@ class USBMCTPDDevice : public MCTPDDevice
   private:
     static constexpr const char* configType = "MCTPUSBDevice";
     const uint8_t recoveryThreshold;
-    std::string rootHubPath_{};
-    std::string port_{};
+    std::string rootHubPath_;
+    std::string port_;
     uint8_t configuration_{1};
     uint8_t interfaceNum_{0};
 
@@ -618,6 +618,11 @@ class USBMCTPDDevice : public MCTPDDevice
         const std::string& rootHubPath, const std::string& port,
         uint8_t configuration, uint8_t interfaceNum);
 
+    // Latches once AssignEndpoint(Static) has succeeded on the resolved
+    // netdev, after which setup() stops re-walking sysfs. Set from the
+    // onEndpointEstablished() success hook so setup() need not wrap the
+    // caller's callback in an in-frame std::function.
+    void onEndpointEstablished() override;
     bool interfaceConfirmed_{false};
 };
 
@@ -657,6 +662,11 @@ class SPIMCTPDDevice : public MCTPDDevice
 
     int bus_{};
     int chipselect_{};
+
+    // Latches once AssignEndpoint(Static) has succeeded on the resolved
+    // netdev; set from the onEndpointEstablished() success hook so setup()
+    // need not wrap the caller's callback in an in-frame std::function.
+    void onEndpointEstablished() override;
     bool interfaceConfirmed_{false};
 };
 

@@ -265,9 +265,12 @@ bool BridgePoolMCTPDevice::resolveBridge()
             reply.read(value);
             poolEnd = std::get<uint8_t>(value);
         }
-        catch (const std::exception&)
+        catch (const std::exception& e)
         {
             // PoolEnd is optional for resolution; only used for bounds check.
+            debug(
+                "BridgePoolMCTPDevice {NAME}: PoolEnd unavailable on {BRIDGE}: {ERROR}",
+                "NAME", name, "BRIDGE", bridgeName, "ERROR", e.what());
         }
 
         auto net = networkFromMctpdEndpointPath(bridgePath);
@@ -293,7 +296,7 @@ bool BridgePoolMCTPDevice::resolveBridge()
             }
         }
 
-        networkId = *net;
+        networkId = net;
         bridgedEid = static_cast<uint8_t>(*poolStart + poolIndex);
         resolved = true;
         info(
