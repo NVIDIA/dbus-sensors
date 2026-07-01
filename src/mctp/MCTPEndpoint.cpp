@@ -7,7 +7,6 @@
 #include <systemd/sd-bus-protocol.h>
 #include <systemd/sd-bus.h>
 
-
 #include <boost/asio/error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/system/detail/errc.hpp>
@@ -1319,8 +1318,8 @@ static std::optional<std::vector<std::uint8_t>> parseByteList(
     }
     try
     {
-        auto valuesStr = std::visit(VariantToStringVisitor(),
-                                    mProperty->second);
+        auto valuesStr =
+            std::visit(VariantToStringVisitor(), mProperty->second);
         if (!valuesStr.empty())
         {
             values = std::vector<std::uint8_t>{};
@@ -1349,10 +1348,9 @@ static std::optional<std::vector<std::uint8_t>> parseByteList(
                     }
                     catch (const std::exception& e)
                     {
-                        warning(
-                            "Invalid {PROPERTY} entry: '{VALUE}' - {ERROR}",
-                            "PROPERTY", property, "VALUE", token, "ERROR",
-                            e.what());
+                        warning("Invalid {PROPERTY} entry: '{VALUE}' - {ERROR}",
+                                "PROPERTY", property, "VALUE", token, "ERROR",
+                                e.what());
                     }
                 }
             }
@@ -1370,8 +1368,8 @@ static std::optional<std::vector<std::uint8_t>> parseByteList(
     }
     catch (const std::exception& e)
     {
-        warning("Failed to parse {PROPERTY}: {ERROR} for {CONTEXT}",
-                "PROPERTY", property, "ERROR", e.what(), "CONTEXT", context);
+        warning("Failed to parse {PROPERTY}: {ERROR} for {CONTEXT}", "PROPERTY",
+                property, "ERROR", e.what(), "CONTEXT", context);
         values = std::nullopt;
     }
     return values;
@@ -1487,10 +1485,10 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
         bridgePoolEndEid = parsedbridgePoolEndEid;
     }
 
-    auto ignoreMessageTypes = parseByteList(
-        iface, "IgnoreMessageTypes",
-        std::format("I2C device [ bus: {}, address: {} ]", bus,
-                    static_cast<int>(address)));
+    auto ignoreMessageTypes =
+        parseByteList(iface, "IgnoreMessageTypes",
+                      std::format("I2C device [ bus: {}, address: {} ]", bus,
+                                  static_cast<int>(address)));
 
     auto pollingInterval = getPollingInterval(iface);
 
@@ -1792,30 +1790,27 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
 
         try
         {
-            interface = interfaceFromRootHubPort(physicalRootHubPath,
-                                                 physicalPort,
-                                                 physicalConfiguration,
-                                                 physicalInterfaceNum);
-            info(
-                "USB netdev resolved for"
-                " [ RootHubPath: {ROOT_HUB}, Port: {PORT},"
-                " Config: {CONFIG}, IfaceNum: {IFACE_NUM} ]: {INTERFACE}",
-                "ROOT_HUB", physicalRootHubPath, "PORT", physicalPort,
-                "CONFIG", static_cast<unsigned>(physicalConfiguration),
-                "IFACE_NUM", static_cast<unsigned>(physicalInterfaceNum),
-                "INTERFACE", interface);
+            interface = interfaceFromRootHubPort(
+                physicalRootHubPath, physicalPort, physicalConfiguration,
+                physicalInterfaceNum);
+            info("USB netdev resolved for"
+                 " [ RootHubPath: {ROOT_HUB}, Port: {PORT},"
+                 " Config: {CONFIG}, IfaceNum: {IFACE_NUM} ]: {INTERFACE}",
+                 "ROOT_HUB", physicalRootHubPath, "PORT", physicalPort,
+                 "CONFIG", static_cast<unsigned>(physicalConfiguration),
+                 "IFACE_NUM", static_cast<unsigned>(physicalInterfaceNum),
+                 "INTERFACE", interface);
         }
         catch (const MCTPException& ex)
         {
-            warning(
-                "USB netdev not yet visible for"
-                " [ RootHubPath: {ROOT_HUB}, Port: {PORT},"
-                " Config: {CONFIG}, IfaceNum: {IFACE_NUM} ],"
-                " will retry via tick: {EXCEPTION}",
-                "ROOT_HUB", physicalRootHubPath, "PORT", physicalPort,
-                "CONFIG", static_cast<unsigned>(physicalConfiguration),
-                "IFACE_NUM", static_cast<unsigned>(physicalInterfaceNum),
-                "EXCEPTION", ex);
+            warning("USB netdev not yet visible for"
+                    " [ RootHubPath: {ROOT_HUB}, Port: {PORT},"
+                    " Config: {CONFIG}, IfaceNum: {IFACE_NUM} ],"
+                    " will retry via tick: {EXCEPTION}",
+                    "ROOT_HUB", physicalRootHubPath, "PORT", physicalPort,
+                    "CONFIG", static_cast<unsigned>(physicalConfiguration),
+                    "IFACE_NUM", static_cast<unsigned>(physicalInterfaceNum),
+                    "EXCEPTION", ex);
         }
     }
 
@@ -2134,7 +2129,8 @@ std::string USBMCTPDDevice::interfaceFromRootHubPort(
         prefix = prefix.empty() ? segment : prefix + "." + segment;
         dir /= std::format("{}-{}", busNum, prefix);
     }
-    dir /= std::format("{}-{}:{}.{}", busNum, port, configuration, interfaceNum);
+    dir /=
+        std::format("{}-{}:{}.{}", busNum, port, configuration, interfaceNum);
 
     std::filesystem::directory_iterator nets(dir / "net", ec);
     if (!ec && nets != std::filesystem::end(nets))
@@ -2179,20 +2175,17 @@ void USBMCTPDDevice::setup(
         try
         {
             resolved = interfaceFromRootHubPort(rootHubPath_, port_,
-                                                    configuration_,
-                                                    interfaceNum_);
+                                                configuration_, interfaceNum_);
         }
         catch (const MCTPException& ex)
         {
-            debug(
-                "USB netdev not yet visible for"
-                " [ RootHubPath: {ROOT_HUB}, Port: {PORT},"
-                " Config: {CONFIG}, IfaceNum: {IFACE_NUM} ],"
-                " will retry on next tick: {EXCEPTION}",
-                "ROOT_HUB", rootHubPath_, "PORT", port_,
-                "CONFIG", static_cast<unsigned>(configuration_),
-                "IFACE_NUM", static_cast<unsigned>(interfaceNum_),
-                "EXCEPTION", ex);
+            debug("USB netdev not yet visible for"
+                  " [ RootHubPath: {ROOT_HUB}, Port: {PORT},"
+                  " Config: {CONFIG}, IfaceNum: {IFACE_NUM} ],"
+                  " will retry on next tick: {EXCEPTION}",
+                  "ROOT_HUB", rootHubPath_, "PORT", port_, "CONFIG",
+                  static_cast<unsigned>(configuration_), "IFACE_NUM",
+                  static_cast<unsigned>(interfaceNum_), "EXCEPTION", ex);
             added(std::make_error_code(std::errc::no_such_device), {});
             return;
         }
@@ -2201,42 +2194,38 @@ void USBMCTPDDevice::setup(
         {
             if (!interface.empty())
             {
-                info(
-                    "USB netdev name changed"
-                    " {OLD_INTERFACE} → {NEW_INTERFACE}"
-                    " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ]",
-                    "OLD_INTERFACE", interface, "NEW_INTERFACE", resolved,
-                    "ROOT_HUB", rootHubPath_, "PORT", port_);
+                info("USB netdev name changed"
+                     " {OLD_INTERFACE} → {NEW_INTERFACE}"
+                     " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ]",
+                     "OLD_INTERFACE", interface, "NEW_INTERFACE", resolved,
+                     "ROOT_HUB", rootHubPath_, "PORT", port_);
             }
             else
             {
-                info(
-                    "USB netdev resolved for"
-                    " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ]: {INTERFACE}",
-                    "ROOT_HUB", rootHubPath_, "PORT", port_, "INTERFACE",
-                    resolved);
+                info("USB netdev resolved for"
+                     " [ RootHubPath: {ROOT_HUB}, Port: {PORT} ]: {INTERFACE}",
+                     "ROOT_HUB", rootHubPath_, "PORT", port_, "INTERFACE",
+                     resolved);
             }
             interface = resolved;
             onDiscoveryMatchRule();
         }
     }
 
-    MCTPDDevice::setup(
-        [orig = std::move(added),
-         weak = weak_from_this()](const std::error_code& ec,
-                                  const std::shared_ptr<MCTPEndpoint>& ep) mutable {
-            if (auto self = std::dynamic_pointer_cast<USBMCTPDDevice>(
-                    weak.lock()))
+    MCTPDDevice::setup([orig = std::move(added), weak = weak_from_this()](
+                           const std::error_code& ec,
+                           const std::shared_ptr<MCTPEndpoint>& ep) mutable {
+        if (auto self = std::dynamic_pointer_cast<USBMCTPDDevice>(weak.lock()))
+        {
+            if (!ec)
             {
-                if (!ec)
-                {
-                    self->interfaceConfirmed_ = true;
-                }
-                // On failure: do NOT clear interface. The next tick will
-                // re-resolve via sysfs and pick up any udev rename.
+                self->interfaceConfirmed_ = true;
             }
-            orig(ec, ep);
-        });
+            // On failure: do NOT clear interface. The next tick will
+            // re-resolve via sysfs and pick up any udev rename.
+        }
+        orig(ec, ep);
+    });
 }
 
 /* MCTP SPI*/
@@ -2333,16 +2322,16 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
     try
     {
         interface = interfaceFromBusCs(bus, chipselect);
-        info("SPI netdev resolved for [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ]: {INTERFACE}",
-             "SPI_BUS", bus, "SPI_CS", chipselect, "INTERFACE", interface);
+        info(
+            "SPI netdev resolved for [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ]: {INTERFACE}",
+            "SPI_BUS", bus, "SPI_CS", chipselect, "INTERFACE", interface);
     }
     catch (const MCTPException& ex)
     {
-        warning(
-            "SPI netdev not yet visible for"
-            " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ],"
-            " will retry via tick: {EXCEPTION}",
-            "SPI_BUS", bus, "SPI_CS", chipselect, "EXCEPTION", ex);
+        warning("SPI netdev not yet visible for"
+                " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ],"
+                " will retry via tick: {EXCEPTION}",
+                "SPI_BUS", bus, "SPI_CS", chipselect, "EXCEPTION", ex);
     }
 
     try
@@ -2350,8 +2339,8 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
         if (staticEID.has_value())
         {
             return std::make_shared<SPIMCTPDDevice>(
-                connection, name, bus, chipselect, interface,
-                staticEID.value(), pollingInterval, names);
+                connection, name, bus, chipselect, interface, staticEID.value(),
+                pollingInterval, names);
         }
         return std::make_shared<SPIMCTPDDevice>(
             connection, name, bus, chipselect, interface, std::nullopt,
@@ -2402,11 +2391,10 @@ void SPIMCTPDDevice::setup(
         }
         catch (const MCTPException& ex)
         {
-            debug(
-                "SPI netdev not yet visible for"
-                " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ],"
-                " will retry on next tick: {EXCEPTION}",
-                "SPI_BUS", bus_, "SPI_CS", chipselect_, "EXCEPTION", ex);
+            debug("SPI netdev not yet visible for"
+                  " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ],"
+                  " will retry on next tick: {EXCEPTION}",
+                  "SPI_BUS", bus_, "SPI_CS", chipselect_, "EXCEPTION", ex);
             added(std::make_error_code(std::errc::no_such_device), {});
             return;
         }
@@ -2415,40 +2403,36 @@ void SPIMCTPDDevice::setup(
         {
             if (!interface.empty())
             {
-                info(
-                    "SPI netdev name changed"
-                    " {OLD_INTERFACE} → {NEW_INTERFACE}"
-                    " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ]",
-                    "OLD_INTERFACE", interface, "NEW_INTERFACE", resolved,
-                    "SPI_BUS", bus_, "SPI_CS", chipselect_);
+                info("SPI netdev name changed"
+                     " {OLD_INTERFACE} → {NEW_INTERFACE}"
+                     " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ]",
+                     "OLD_INTERFACE", interface, "NEW_INTERFACE", resolved,
+                     "SPI_BUS", bus_, "SPI_CS", chipselect_);
             }
             else
             {
-                info(
-                    "SPI netdev resolved for"
-                    " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ]: {INTERFACE}",
-                    "SPI_BUS", bus_, "SPI_CS", chipselect_, "INTERFACE",
-                    resolved);
+                info("SPI netdev resolved for"
+                     " [ Bus: {SPI_BUS}, ChipSelect: {SPI_CS} ]: {INTERFACE}",
+                     "SPI_BUS", bus_, "SPI_CS", chipselect_, "INTERFACE",
+                     resolved);
             }
             interface = resolved;
             onDiscoveryMatchRule();
         }
     }
 
-    MCTPDDevice::setup(
-        [orig = std::move(added),
-         weak = weak_from_this()](const std::error_code& ec,
-                                  const std::shared_ptr<MCTPEndpoint>& ep) mutable {
-            if (auto self = std::dynamic_pointer_cast<SPIMCTPDDevice>(
-                    weak.lock()))
+    MCTPDDevice::setup([orig = std::move(added), weak = weak_from_this()](
+                           const std::error_code& ec,
+                           const std::shared_ptr<MCTPEndpoint>& ep) mutable {
+        if (auto self = std::dynamic_pointer_cast<SPIMCTPDDevice>(weak.lock()))
+        {
+            if (!ec)
             {
-                if (!ec)
-                {
-                    self->interfaceConfirmed_ = true;
-                }
+                self->interfaceConfirmed_ = true;
             }
-            orig(ec, ep);
-        });
+        }
+        orig(ec, ep);
+    });
 }
 
 /* MCTP XROT */

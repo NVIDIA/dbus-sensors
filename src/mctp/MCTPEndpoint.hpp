@@ -614,10 +614,9 @@ class USBMCTPDDevice : public MCTPDDevice
      *  the given port/configuration/interfaceNum, then returning its netdev
      *  name from the net/ subdirectory.
      */
-    static std::string interfaceFromRootHubPort(const std::string& rootHubPath,
-                                                const std::string& port,
-                                                uint8_t configuration,
-                                                uint8_t interfaceNum);
+    static std::string interfaceFromRootHubPort(
+        const std::string& rootHubPath, const std::string& port,
+        uint8_t configuration, uint8_t interfaceNum);
 
     bool interfaceConfirmed_{false};
 };

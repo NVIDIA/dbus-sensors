@@ -37,8 +37,7 @@ constexpr const char* mctpdEndpointControlInterface =
     "au.com.codeconstruct.MCTP.Endpoint1";
 constexpr const char* mctpdBridgeInterface =
     "au.com.codeconstruct.MCTP.Bridge1";
-constexpr const char* associationInterface =
-    "xyz.openbmc_project.Association";
+constexpr const char* associationInterface = "xyz.openbmc_project.Association";
 
 // Parse the network id from a mctpd endpoint path of the form
 // /au/com/codeconstruct/mctp1/networks/<N>/endpoints/<EID>.
@@ -129,9 +128,9 @@ std::shared_ptr<BridgePoolMCTPDevice> BridgePoolMCTPDevice::from(
 
     auto sPoolIndex = std::visit(VariantToStringVisitor(), mPoolIndex->second);
     std::uint8_t parsedPoolIndex{};
-    auto [cptr, cec] = std::from_chars(
-        sPoolIndex.data(), sPoolIndex.data() + sPoolIndex.size(),
-        parsedPoolIndex);
+    auto [cptr, cec] =
+        std::from_chars(sPoolIndex.data(),
+                        sPoolIndex.data() + sPoolIndex.size(), parsedPoolIndex);
     if (cec != std::errc{})
     {
         throw std::invalid_argument("Bad PoolIndex");
@@ -162,9 +161,8 @@ bool BridgePoolMCTPDevice::resolveBridge()
     GetSubTreeType subtree;
     try
     {
-        auto method = connection->new_method_call(mapper::busName, mapper::path,
-                                                  mapper::interface,
-                                                  mapper::subtree);
+        auto method = connection->new_method_call(
+            mapper::busName, mapper::path, mapper::interface, mapper::subtree);
         method.append(std::string(mctpdControlPath), 0,
                       std::vector<std::string>{mctpdBridgeInterface});
         auto reply = connection->call(method);
@@ -289,9 +287,8 @@ bool BridgePoolMCTPDevice::resolveBridge()
                 error(
                     "BridgePoolMCTPDevice {NAME}: PoolIndex {INDEX} out of range for bridge {BRIDGE} (PoolStart {START}, PoolEnd {END}); skipping",
                     "NAME", name, "INDEX", static_cast<int>(poolIndex),
-                    "BRIDGE", bridgeName, "START",
-                    static_cast<int>(*poolStart), "END",
-                    static_cast<int>(*poolEnd));
+                    "BRIDGE", bridgeName, "START", static_cast<int>(*poolStart),
+                    "END", static_cast<int>(*poolEnd));
                 return false;
             }
         }
@@ -303,8 +300,7 @@ bool BridgePoolMCTPDevice::resolveBridge()
             "BridgePoolMCTPDevice {NAME}: resolved bridge {BRIDGE} -> network {NET}, bridgedEid {EID} (PoolStart {START} + PoolIndex {INDEX})",
             "NAME", name, "BRIDGE", bridgeName, "NET", *net, "EID",
             static_cast<int>(*bridgedEid), "START",
-            static_cast<int>(*poolStart), "INDEX",
-            static_cast<int>(poolIndex));
+            static_cast<int>(*poolStart), "INDEX", static_cast<int>(poolIndex));
         return true;
     }
 
@@ -389,13 +385,12 @@ void BridgePoolMCTPDevice::setup(
     try
     {
         auto method = connection->new_method_call(
-            mctpdBusName, predicted.c_str(), "org.freedesktop.DBus.Introspectable",
-            "Introspect");
+            mctpdBusName, predicted.c_str(),
+            "org.freedesktop.DBus.Introspectable", "Introspect");
         auto reply = connection->call(method);
         std::string xml;
         reply.read(xml);
-        present =
-            xml.find(mctpdEndpointControlInterface) != std::string::npos;
+        present = xml.find(mctpdEndpointControlInterface) != std::string::npos;
     }
     catch (const std::exception& e)
     {
