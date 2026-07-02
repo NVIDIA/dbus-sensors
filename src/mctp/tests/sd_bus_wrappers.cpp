@@ -65,6 +65,14 @@ bool gMockSdBusCallSuccess =
 int gSdBusCallCount =
     0; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
+// When set, __wrap_sd_bus_call delegates to this handler, letting a test craft
+// a synchronous method reply based on the request message (inspect interface /
+// member / path, then build *reply). Return 0 for success (with *reply set), or
+// a negative errno to model a failed call (connection->call() then throws).
+// Takes precedence over gMockSdBusCallSuccess. Reset to nullptr in teardown.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::function<int(sd_bus_message*, sd_bus_message**)> gSyncCallHandler;
+
 // When gMockSdBusRequestName=true, __wrap_sd_bus_request_name returns
 // -ENOTSUP to simulate a name-claim failure (causes request_name() to throw).
 bool gMockSdBusRequestName =
@@ -110,11 +118,15 @@ int __wrap_sd_bus_add_match(
     return 0;
 }
 
-int __wrap_sd_bus_call(sd_bus* /*bus*/, sd_bus_message* /*message*/,
+int __wrap_sd_bus_call(sd_bus* /*bus*/, sd_bus_message* message,
                        uint64_t /*usec*/, sd_bus_error* /*error*/,
                        sd_bus_message** reply)
 {
     ++gSdBusCallCount;
+    if (gSyncCallHandler)
+    {
+        return gSyncCallHandler(message, reply);
+    }
     if (gMockSdBusCallSuccess)
     {
         if (reply != nullptr)
@@ -137,7 +149,7 @@ int __wrap_sd_bus_message_new_method_call(
     sd_bus* bus, sd_bus_message** m, const char* destination, const char* path,
     const char* interface, const char* member)
 {
-    if (!gMockSdBusCallSuccess)
+    if (!gMockSdBusCallSuccess && !gSyncCallHandler)
     {
         return __real_sd_bus_message_new_method_call(bus, m, destination, path,
                                                      interface, member);

@@ -7,6 +7,7 @@
 #include <sys/epoll.h>
 #include <unistd.h>
 
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
@@ -3341,6 +3342,57 @@ TEST_F(HeartbeatSocketFixture,
 
     // Restore global state for subsequent tests
     gRunning = true;
+}
+
+// ---------------------------------------------------------------------------
+// disabled_main_heartbeat (= main) function coverage
+//
+// The build renames main() to disabled_main_heartbeat via `#define main`.
+// Mirror the reactor's DisabledMainReactorFixture strategy: mock sd_bus_default
+// so the connection constructs without a daemon, and mock sd_bus_request_name
+// to return -ENOTSUP so request_name() throws.  The exception is caught by
+// main's try/catch (which returns 1), so the function body up to request_name()
+// executes and gcovr records disabled_main_heartbeat as covered — without ever
+// reaching the blocking gIo.run().
+// ---------------------------------------------------------------------------
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+extern bool gMockSdBusRequestName;
+
+class DisabledMainHeartbeatFixture : public ::testing::Test
+{
+  protected:
+    int fds[2]{-1, -1};
+
+    void SetUp() override
+    {
+        ASSERT_EQ(pipe(fds), 0);
+        gFakeSdBusFd = fds[0];
+        gMockSdBusDefault = true;
+        gMockSdBusRequestName = true;
+    }
+
+    void TearDown() override
+    {
+        gMockSdBusDefault = false;
+        gMockSdBusRequestName = false;
+        close(fds[0]);
+        close(fds[1]);
+        gFakeSdBusFd = -1;
+        gRunning = true;
+    }
+};
+
+TEST_F(DisabledMainHeartbeatFixture, mainFunctionBodyIsEntered)
+{
+    // Valid "-e 10" args so CLI11_PARSE succeeds; request_name() then throws
+    // (mocked), main catches it and returns 1 without entering gIo.run().
+    std::array<char, 5> arg0{"hbt"};
+    std::array<char, 3> arg1{"-e"};
+    std::array<char, 3> arg2{"10"};
+    std::array<char*, 3> argv{arg0.data(), arg1.data(), arg2.data()};
+    int rc =
+        disabled_main_heartbeat(static_cast<int>(argv.size()), argv.data());
+    EXPECT_EQ(rc, 1);
 }
 
 // NOLINTEND

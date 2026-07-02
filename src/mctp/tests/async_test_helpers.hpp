@@ -30,6 +30,9 @@ struct PendingAsync
 extern int gFakeSdBusFd;
 extern bool gMockSdBusCallSuccess;
 extern int gSdBusCallCount;
+// Synchronous connection->call() reply crafting (see below). Declared here so
+// TestSdBusInterface::sd_bus_call can delegate to it.
+extern std::function<int(sd_bus_message*, sd_bus_message**)> gSyncCallHandler;
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 // TestSdBusInterface: overrides sd_bus methods used by
@@ -115,11 +118,15 @@ class TestSdBusInterface : public sdbusplus::SdBusImpl
     // succeed without a real bus when gMockSdBusCallSuccess=true.
     // This intercepts the virtual-dispatch path from SdBusImpl
     // (libsdbusplus.so) which the linker --wrap cannot reach.
-    int sd_bus_call(sd_bus* /*bus*/, sd_bus_message* /*m*/, uint64_t /*usec*/,
+    int sd_bus_call(sd_bus* /*bus*/, sd_bus_message* m, uint64_t /*usec*/,
                     sd_bus_error* /*ret_error*/,
                     sd_bus_message** reply) override
     {
         ++gSdBusCallCount;
+        if (gSyncCallHandler)
+        {
+            return gSyncCallHandler(m, reply);
+        }
         if (gMockSdBusCallSuccess)
         {
             if (reply != nullptr)

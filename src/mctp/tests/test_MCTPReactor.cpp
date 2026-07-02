@@ -4396,3 +4396,294 @@ TEST_F(MCTPReactorFixture, G306setupEndpointCatchesMCTPExceptionFromSubscribe)
     reactor->tick(); // no-op on Quarantine
     reactor->unmanageMCTPDevice("/g306/dev");
 }
+
+// ===========================================================================
+// Removed-callback state-machine coverage. trackEndpoint() subscribes a
+// removed handler whose behaviour depends on the device's current state.
+// Force each state (accessible via -fno-access-control) then invoke the
+// captured handler to exercise every switch case, plus the degraded/available
+// callbacks.
+// ===========================================================================
+namespace
+{
+void captureAndManage(
+    const std::shared_ptr<MCTPReactor>& reactor,
+    const std::shared_ptr<MockMCTPDevice>& device,
+    const std::shared_ptr<MockMCTPEndpoint>& endpoint,
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)>& degraded,
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)>& available,
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)>& removed)
+{
+    EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_))
+        .WillOnce(testing::DoAll(testing::SaveArg<0>(&degraded),
+                                 testing::SaveArg<1>(&available),
+                                 testing::SaveArg<2>(&removed)));
+    EXPECT_CALL(*device, setup(testing::_))
+        .WillOnce(testing::InvokeArgument<0>(std::error_code(), endpoint));
+    reactor->manageMCTPDevice("/test", device);
+}
+} // namespace
+
+TEST_F(MCTPReactorFixture, removedCallbackQuarantineTerminates)
+{
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> deg;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> avail;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> rem;
+    captureAndManage(reactor, device, endpoint, deg, avail, rem);
+    ASSERT_TRUE(static_cast<bool>(rem));
+    reactor->states[0] = MCTPDeviceState::Quarantine;
+    EXPECT_NO_THROW(rem(endpoint));
+    reactor->unmanageMCTPDevice("/test");
+}
+
+TEST_F(MCTPReactorFixture, removedCallbackRecoveredGoesLost)
+{
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> deg;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> avail;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> rem;
+    captureAndManage(reactor, device, endpoint, deg, avail, rem);
+    ASSERT_TRUE(static_cast<bool>(rem));
+    reactor->states[0] = MCTPDeviceState::Recovered;
+    EXPECT_NO_THROW(rem(endpoint));
+    reactor->unmanageMCTPDevice("/test");
+}
+
+TEST_F(MCTPReactorFixture, removedCallbackRemovingTerminatesIfKnown)
+{
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> deg;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> avail;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> rem;
+    captureAndManage(reactor, device, endpoint, deg, avail, rem);
+    ASSERT_TRUE(static_cast<bool>(rem));
+    reactor->states[0] = MCTPDeviceState::Removing;
+    EXPECT_NO_THROW(rem(endpoint));
+    reactor->unmanageMCTPDevice("/test");
+}
+
+TEST_F(MCTPReactorFixture, removedCallbackPendingGoesUnassigned)
+{
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> deg;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> avail;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> rem;
+    captureAndManage(reactor, device, endpoint, deg, avail, rem);
+    ASSERT_TRUE(static_cast<bool>(rem));
+    reactor->states[0] = MCTPDeviceState::Pending;
+    EXPECT_NO_THROW(rem(endpoint));
+    reactor->unmanageMCTPDevice("/test");
+}
+
+TEST_F(MCTPReactorFixture, removedCallbackRecoveringIsNoop)
+{
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> deg;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> avail;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> rem;
+    captureAndManage(reactor, device, endpoint, deg, avail, rem);
+    ASSERT_TRUE(static_cast<bool>(rem));
+    reactor->states[0] = MCTPDeviceState::Recovering;
+    EXPECT_NO_THROW(rem(endpoint));
+    reactor->unmanageMCTPDevice("/test");
+}
+
+TEST_F(MCTPReactorFixture, degradedAndAvailableCallbacksAreInvokable)
+{
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> deg;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> avail;
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> rem;
+    captureAndManage(reactor, device, endpoint, deg, avail, rem);
+    ASSERT_TRUE(static_cast<bool>(deg));
+    ASSERT_TRUE(static_cast<bool>(avail));
+    EXPECT_NO_THROW(deg(endpoint));
+    EXPECT_NO_THROW(avail(endpoint));
+    reactor->unmanageMCTPDevice("/test");
+}
+
+// ===========================================================================
+// handleUSBSetupFailure() recovery-branch coverage.
+// ===========================================================================
+TEST(MCTPReactor, usbRecoveryBackendFailureAtThresholdWarns)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
+    reactor->setAutoUSBRecoveryEnabled(true);
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-recfail", 1);
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+    // Threshold reached on first failure; backend recovery fails -> warning.
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt("usb-recfail", testing::_))
+        .WillOnce(testing::DoAll(testing::SetArgReferee<1>("clear-halt failed"),
+                                 testing::Return(false)));
+    reactor->manageMCTPDevice("/test/recfail", device);
+    reactor->unmanageMCTPDevice("/test/recfail");
+}
+
+TEST(MCTPReactor, usbRecoveryDisabledAtRuntimeSkipsClearHalt)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
+    reactor->setAutoUSBRecoveryEnabled(false); // disabled at runtime
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-disabled", 1);
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+    // Threshold reached but recovery disabled -> clearBulkOutHalt not called.
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt(testing::_, testing::_))
+        .Times(0);
+    reactor->manageMCTPDevice("/test/disabled", device);
+    reactor->unmanageMCTPDevice("/test/disabled");
+}
+
+TEST(MCTPReactor, usbSetupFailureEmptyInterfaceSkipsTracking)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
+    reactor->setAutoUSBRecoveryEnabled(true);
+    auto device =
+        std::make_shared<TestUSBMCTPDDevice>("", 1); // empty interface
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+    // Empty interface -> handleUSBSetupFailure returns before any recovery.
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt(testing::_, testing::_))
+        .Times(0);
+    reactor->manageMCTPDevice("/test/empty-iface", device);
+    reactor->unmanageMCTPDevice("/test/empty-iface");
+}
+
+TEST(MCTPReactor, usbRecoveryThresholdZeroDisablesTracking)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
+    reactor->setAutoUSBRecoveryEnabled(true);
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-thr0", 0); // thr 0
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt(testing::_, testing::_))
+        .Times(0);
+    reactor->manageMCTPDevice("/test/thr0", device);
+    reactor->tick();
+    reactor->unmanageMCTPDevice("/test/thr0");
+}
+
+// ===========================================================================
+// onMctpdEndpointInterfacesAdded() + eidFromMctpdEndpointPath() coverage using
+// crafted InterfacesAdded signal messages (fake-bus construction technique).
+// ===========================================================================
+namespace
+{
+constexpr const char* kMctpdEndpointCtrlIface =
+    "au.com.codeconstruct.MCTP.Endpoint1";
+
+sd_bus_message* buildReactorIfacesAdded(
+    const std::string& path, const std::string& iface, bool includeIface)
+{
+    sd_bus* bus = nullptr;
+    (void)sd_bus_new(&bus);
+    (void)sd_bus_set_address(bus, "unix:abstract=dbus-sensors-test-fake");
+    (void)sd_bus_start(bus);
+    sd_bus_message* msg = nullptr;
+    (void)sd_bus_message_new_signal(bus, &msg, "/au/com/codeconstruct/mctp1",
+                                    "org.freedesktop.DBus.ObjectManager",
+                                    "InterfacesAdded");
+    (void)sd_bus_message_append_basic(msg, 'o', path.c_str());
+    (void)sd_bus_message_open_container(msg, 'a', "{sa{sv}}");
+    if (includeIface)
+    {
+        (void)sd_bus_message_open_container(msg, 'e', "sa{sv}");
+        (void)sd_bus_message_append_basic(msg, 's', iface.c_str());
+        (void)sd_bus_message_open_container(msg, 'a', "{sv}");
+        (void)sd_bus_message_close_container(msg);
+        (void)sd_bus_message_close_container(msg);
+    }
+    (void)sd_bus_message_close_container(msg);
+    (void)sd_bus_message_seal(msg, 1, 0);
+    (void)sd_bus_message_rewind(msg, 1);
+    sd_bus_unref(bus);
+    return msg;
+}
+
+void deliverIfacesAdded(const std::shared_ptr<MCTPReactor>& reactor,
+                        const std::string& path, const std::string& iface,
+                        bool includeIface)
+{
+    sd_bus_message* raw = buildReactorIfacesAdded(path, iface, includeIface);
+    ASSERT_NE(raw, nullptr);
+    sdbusplus::message_t msg(raw, std::false_type{});
+    reactor->onMctpdEndpointInterfacesAdded(msg);
+}
+} // namespace
+
+TEST(MCTPReactorIfacesAdded, ValidEndpointPathMarksDiscovered)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    EXPECT_NO_THROW(deliverIfacesAdded(
+        reactor, "/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
+        kMctpdEndpointCtrlIface, true));
+}
+
+TEST(MCTPReactorIfacesAdded, MissingEndpointInterfaceIgnored)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    EXPECT_NO_THROW(deliverIfacesAdded(
+        reactor, "/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
+        "some.Other.Interface", true));
+}
+
+TEST(MCTPReactorIfacesAdded, PathWithoutEndpointsSegmentIgnored)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    EXPECT_NO_THROW(
+        deliverIfacesAdded(reactor, "/au/com/codeconstruct/mctp1/networks/1",
+                           kMctpdEndpointCtrlIface, true));
+}
+
+TEST(MCTPReactorIfacesAdded, PathWithOutOfRangeEidIgnored)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    EXPECT_NO_THROW(deliverIfacesAdded(
+        reactor, "/au/com/codeconstruct/mctp1/networks/1/endpoints/999",
+        kMctpdEndpointCtrlIface, true));
+}
+
+TEST(MCTPReactorIfacesAdded, PathWithNonNumericEidIgnored)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    EXPECT_NO_THROW(deliverIfacesAdded(
+        reactor, "/au/com/codeconstruct/mctp1/networks/1/endpoints/abc",
+        kMctpdEndpointCtrlIface, true));
+}
+
+TEST(MCTPReactorIfacesAdded, EmptyInterfacesDictIgnored)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    EXPECT_NO_THROW(deliverIfacesAdded(
+        reactor, "/au/com/codeconstruct/mctp1/networks/1/endpoints/9", "",
+        false));
+}
+
+TEST(MCTPReactorIfacesAdded, NullMessageHandledGracefully)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW(reactor->onMctpdEndpointInterfacesAdded(msg));
+}

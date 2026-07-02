@@ -1,5 +1,22 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION &
+ * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include "MCTPBridgePoolDevice.hpp"
 
+#include "MCTPDefinitions.hpp"
 #include "MCTPEndpoint.hpp"
 #include "Utils.hpp"
 
@@ -29,19 +46,9 @@
 
 PHOSPHOR_LOG2_USING;
 
-namespace
-{
-constexpr const char* mctpdBusName = "au.com.codeconstruct.MCTP1";
-constexpr const char* mctpdControlPath = "/au/com/codeconstruct/mctp1";
-constexpr const char* mctpdEndpointControlInterface =
-    "au.com.codeconstruct.MCTP.Endpoint1";
-constexpr const char* mctpdBridgeInterface =
-    "au.com.codeconstruct.MCTP.Bridge1";
-constexpr const char* associationInterface = "xyz.openbmc_project.Association";
-
 // Parse the network id from a mctpd endpoint path of the form
 // /au/com/codeconstruct/mctp1/networks/<N>/endpoints/<EID>.
-std::optional<int> networkFromMctpdEndpointPath(const std::string& path)
+static std::optional<int> networkFromMctpdEndpointPath(const std::string& path)
 {
     constexpr std::string_view networks = "/networks/";
     constexpr std::string_view endpoints = "/endpoints/";
@@ -65,7 +72,6 @@ std::optional<int> networkFromMctpdEndpointPath(const std::string& path)
     }
     return v;
 }
-} // namespace
 
 BridgePoolMCTPDevice::BridgePoolMCTPDevice(
     const std::shared_ptr<sdbusplus::asio::connection>& connection,
@@ -265,12 +271,14 @@ bool BridgePoolMCTPDevice::resolveBridge()
             reply.read(value);
             poolEnd = std::get<uint8_t>(value);
         }
-        catch (const std::exception& e)
+        catch (const std::exception&)
         {
-            // PoolEnd is optional for resolution; only used for bounds check.
+            // PoolStart and PoolEnd are published together by mctpd; if PoolEnd
+            // is not present yet, defer so the bounds check below always runs.
             debug(
-                "BridgePoolMCTPDevice {NAME}: PoolEnd unavailable on {BRIDGE}: {ERROR}",
-                "NAME", name, "BRIDGE", bridgeName, "ERROR", e.what());
+                "BridgePoolMCTPDevice {NAME}: Bridge1.PoolEnd not yet present, deferring",
+                "NAME", name);
+            return false;
         }
 
         auto net = networkFromMctpdEndpointPath(bridgePath);
@@ -283,17 +291,16 @@ bool BridgePoolMCTPDevice::resolveBridge()
         }
 
         // Bounds check: PoolIndex must fall within [0, PoolEnd - PoolStart].
-        if (poolEnd)
+        // Both PoolStart and PoolEnd are required (resolution is deferred above
+        // if either is unavailable), so this check always runs.
+        if (*poolEnd < *poolStart || poolIndex > (*poolEnd - *poolStart))
         {
-            if (*poolEnd < *poolStart || poolIndex > (*poolEnd - *poolStart))
-            {
-                error(
-                    "BridgePoolMCTPDevice {NAME}: PoolIndex {INDEX} out of range for bridge {BRIDGE} (PoolStart {START}, PoolEnd {END}); skipping",
-                    "NAME", name, "INDEX", static_cast<int>(poolIndex),
-                    "BRIDGE", bridgeName, "START", static_cast<int>(*poolStart),
-                    "END", static_cast<int>(*poolEnd));
-                return false;
-            }
+            error(
+                "BridgePoolMCTPDevice {NAME}: PoolIndex {INDEX} out of range for bridge {BRIDGE} (PoolStart {START}, PoolEnd {END}); skipping",
+                "NAME", name, "INDEX", static_cast<int>(poolIndex), "BRIDGE",
+                bridgeName, "START", static_cast<int>(*poolStart), "END",
+                static_cast<int>(*poolEnd));
+            return false;
         }
 
         networkId = net;
@@ -368,7 +375,7 @@ void BridgePoolMCTPDevice::setup(
     if (!resolveBridge())
     {
         // Defer: report failure so the reactor retries on the next tick /
-        // subsequent EM/mctpd InterfacesAdded cycle (SADD §3.3.3).
+        // subsequent EM/mctpd InterfacesAdded cycle.
         auto cb = std::exchange(setupCallback, nullptr);
         if (cb)
         {
@@ -391,9 +398,10 @@ void BridgePoolMCTPDevice::setup(
             mctpdBusName, predicted.c_str(),
             "org.freedesktop.DBus.Introspectable", "Introspect");
         auto reply = connection->call(method);
-        std::string xml;
-        reply.read(xml);
-        present = xml.find(mctpdEndpointControlInterface) != std::string::npos;
+        std::string introspectData;
+        reply.read(introspectData);
+        present = introspectData.find(mctpdEndpointControlInterface) !=
+                  std::string::npos;
     }
     catch (const std::exception& e)
     {
@@ -455,7 +463,7 @@ void BridgePoolMCTPDevice::onEndpointRemoved(sdbusplus::message_t& msg)
         "NAME", name, "PATH", path.str);
 
     // Notify the reactor so it disassociates configured_by; the watch stays
-    // armed for re-publication when the endpoint reappears (SADD §3.3.3).
+    // armed for re-publication when the endpoint reappears.
     if (notifyRemoved)
     {
         notifyRemoved(shared_from_this());

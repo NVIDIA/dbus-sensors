@@ -5746,3 +5746,221 @@ TEST(USBGadgetMCTPDevice, G308udcAlreadySetBranchSkippedNoIfstreamMock)
            "/sys/kernel/config/usb_gadget/g_multi/UDC via std::ifstream; "
            "no linker-wrap for std::ifstream exists in sd_bus_wrappers.cpp.";
 }
+
+// ===========================================================================
+// USBGadgetMCTPDevice::setup() deep-walk coverage. With every sysfs write,
+// directory creation, system() call, symlink and the setRoleEndpoint D-Bus
+// call mocked to succeed, setup() runs to completion, exercising the long
+// success chain and the netfilter/address branches.
+// ===========================================================================
+class UsbGadgetSetupWalk : public ::testing::Test
+{
+  protected:
+    std::array<int, 2> fds{-1, -1};
+    boost::asio::io_context io;
+    std::shared_ptr<sdbusplus::asio::connection> conn;
+
+    void SetUp() override
+    {
+        ASSERT_EQ(pipe(fds.data()), 0);
+        gFakeSdBusFd = fds[0];
+        conn = std::make_shared<sdbusplus::asio::connection>(io, nullptr);
+        gMockSystem = true;
+        gSystemRetval = 0;
+        gSystemCallCount = 0;
+        gSystemFailOnCall = -1;
+        gSystemFailErrno = 0;
+        gMockCreateDirectories = true;
+        gCreateDirectoriesRetval = true;
+        gCreateDirectoriesFailOnCall = -1;
+        gCreateDirectoriesCallCount = 0;
+        gMockWriteSysfsFile = true;
+        gWriteSysfsFileRetval = true;
+        gWriteSysfsFileFailOnCall = -1;
+        gWriteSysfsFileCallCount = 0;
+        gMockSymlink = true;
+        gSymlinkRetval = 0;
+        gMockSdBusCallSuccess = true;
+    }
+
+    void TearDown() override
+    {
+        io.restart();
+        io.poll();
+        conn.reset();
+        io.stop();
+        close(fds[0]);
+        close(fds[1]);
+        gFakeSdBusFd = -1;
+        gMockSystem = false;
+        gSystemFailOnCall = -1;
+        gSystemFailErrno = 0;
+        gMockCreateDirectories = false;
+        gCreateDirectoriesFailOnCall = -1;
+        gMockWriteSysfsFile = false;
+        gWriteSysfsFileFailOnCall = -1;
+        gMockSymlink = false;
+        gMockSdBusCallSuccess = false;
+    }
+};
+
+TEST_F(UsbGadgetSetupWalk, fullSuccessReachesSetupComplete)
+{
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    bool called = false;
+    std::error_code ec2{std::make_error_code(std::errc::io_error)};
+    try
+    {
+        dev->setup([&](const std::error_code& ec,
+                       const std::shared_ptr<MCTPEndpoint>&) {
+            called = true;
+            ec2 = ec;
+        });
+    }
+    catch (const std::exception& e)
+    {
+        GTEST_LOG_(INFO) << "tolerated exception: " << e.what();
+    }
+    EXPECT_TRUE(called);
+    // Full success chain: setRoleEndpoint (mocked call) succeeds -> isSetup.
+    EXPECT_TRUE(dev->isSetup);
+    EXPECT_FALSE(ec2);
+}
+
+TEST_F(UsbGadgetSetupWalk, writeSysfsFailMidChainReportsError)
+{
+    // Fail the 3rd writeSysfsFile (bcdDevice) to exercise a mid-chain error.
+    gWriteSysfsFileFailOnCall = 2;
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb1", 11);
+    bool called = false;
+    std::error_code ec2;
+    dev->setup(
+        [&](const std::error_code& ec, const std::shared_ptr<MCTPEndpoint>&) {
+            called = true;
+            ec2 = ec;
+        });
+    EXPECT_TRUE(called);
+    EXPECT_TRUE(ec2);
+    EXPECT_FALSE(dev->isSetup);
+}
+
+TEST_F(UsbGadgetSetupWalk, netfilterCommandFailureBreaksLoopButCompletes)
+{
+    // Make one of the nft netfilter system() commands fail. setup() only warns
+    // and breaks the loop, then continues to the MCTP address / role steps.
+    gSystemFailOnCall = 7; // a later system() call (an nft rule)
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb2", 12);
+    bool called = false;
+    try
+    {
+        dev->setup(
+            [&](const std::error_code&, const std::shared_ptr<MCTPEndpoint>&) {
+                called = true;
+            });
+    }
+    catch (const std::exception& e)
+    {
+        GTEST_LOG_(INFO) << "tolerated exception: " << e.what();
+    }
+    EXPECT_TRUE(called);
+}
+
+TEST_F(UsbGadgetSetupWalk, mctpAddrExistsErrnoContinues)
+{
+    // mctp addr add fails with EEXIST -> setup logs and continues (does not
+    // abort). Target a late system() call with errno EEXIST.
+    gSystemFailOnCall = 9;
+    gSystemFailErrno = EEXIST;
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb3", 13);
+    bool called = false;
+    try
+    {
+        dev->setup(
+            [&](const std::error_code&, const std::shared_ptr<MCTPEndpoint>&) {
+                called = true;
+            });
+    }
+    catch (const std::exception& e)
+    {
+        GTEST_LOG_(INFO) << "tolerated exception: " << e.what();
+    }
+    EXPECT_TRUE(called);
+}
+
+// ===========================================================================
+// setup() per-step failure branches: fail each writeSysfsFile() and each
+// create_directories() call in turn so every error/createMCTPLogEntry branch
+// in the gadget-provisioning chain is exercised.
+// ===========================================================================
+TEST_F(UsbGadgetSetupWalk, writeSysfsFailAtEachStepReportsError)
+{
+    for (int failAt = 0; failAt <= 8; ++failAt)
+    {
+        gWriteSysfsFileFailOnCall = failAt;
+        gWriteSysfsFileCallCount = 0;
+        gSystemCallCount = 0;
+        gCreateDirectoriesCallCount = 0;
+        auto dev = std::make_shared<USBGadgetMCTPDevice>(
+            conn, "wsf" + std::to_string(failAt), 10);
+        bool called = false;
+        std::error_code ec2;
+        dev->setup([&](const std::error_code& ec,
+                       const std::shared_ptr<MCTPEndpoint>&) {
+            called = true;
+            ec2 = ec;
+        });
+        EXPECT_TRUE(called) << "failAt=" << failAt;
+        EXPECT_TRUE(ec2) << "failAt=" << failAt;
+        EXPECT_FALSE(dev->isSetup) << "failAt=" << failAt;
+    }
+}
+
+TEST_F(UsbGadgetSetupWalk, createDirsFailAtEachStepReportsError)
+{
+    for (int failAt = 0; failAt <= 4; ++failAt)
+    {
+        gCreateDirectoriesFailOnCall = failAt;
+        gCreateDirectoriesCallCount = 0;
+        gWriteSysfsFileCallCount = 0;
+        gSystemCallCount = 0;
+        auto dev = std::make_shared<USBGadgetMCTPDevice>(
+            conn, "cd" + std::to_string(failAt), 10);
+        bool called = false;
+        std::error_code ec2;
+        dev->setup([&](const std::error_code& ec,
+                       const std::shared_ptr<MCTPEndpoint>&) {
+            called = true;
+            ec2 = ec;
+        });
+        EXPECT_TRUE(called) << "failAt=" << failAt;
+        EXPECT_TRUE(ec2) << "failAt=" << failAt;
+    }
+}
+
+// A netfilter (nft) system() command failing only warns and breaks the loop;
+// setup still proceeds. Exercise each of the 5 nft commands failing in turn.
+TEST_F(UsbGadgetSetupWalk, netfilterFailAtEachRuleTolerated)
+{
+    // The nft commands are system() calls after modprobe (call 0), the mctp
+    // link-set (call 1) and the nft delete-table (call 2); the 5 add-rule
+    // commands are calls 3..7.
+    for (int failAt = 3; failAt <= 7; ++failAt)
+    {
+        gSystemFailOnCall = failAt;
+        gSystemCallCount = 0;
+        gWriteSysfsFileCallCount = 0;
+        gCreateDirectoriesCallCount = 0;
+        auto dev = std::make_shared<USBGadgetMCTPDevice>(
+            conn, "nft" + std::to_string(failAt), 10);
+        bool called = false;
+        try
+        {
+            dev->setup(
+                [&](const std::error_code&,
+                    const std::shared_ptr<MCTPEndpoint>&) { called = true; });
+        }
+        catch (const std::exception&) // NOLINT(bugprone-empty-catch)
+        {}
+        EXPECT_TRUE(called) << "failAt=" << failAt;
+    }
+}

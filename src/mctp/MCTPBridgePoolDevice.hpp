@@ -1,3 +1,19 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION &
+ * AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
 
 #include "MCTPEndpoint.hpp"
@@ -26,7 +42,7 @@
  * @c configured_by association so that bridge-downstream endpoints become
  * indistinguishable from direct-attach endpoints to every consumer (pldmd).
  *
- * Flow (SADD §3.3.1):
+ * Flow:
  *  1. Resolve @c BridgeName → the sibling bridge's EM object → its mctpd
  *     @c Endpoint1. If the bridge is not set up yet, defer.
  *  2. Read @c au.com.codeconstruct.MCTP.Bridge1.PoolStart (and the network id)

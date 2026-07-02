@@ -1,5 +1,6 @@
 #include "MCTPBridgePoolDevice.hpp"
 #include "MCTPCustomDevices.hpp"
+#include "MCTPDefinitions.hpp"
 #include "MCTPEndpoint.hpp"
 #include "MCTPEndpointUtils.hpp"
 #include "MCTPReactor.hpp"
@@ -541,11 +542,8 @@ int main()
         std::bind_front(handleGeneralErrorSignal, systemBus, reactor));
     info("GeneralError signal match registered");
 
-    constexpr const char* mctpdDBusName = "au.com.codeconstruct.MCTP1";
-    constexpr const char* mctpdNetworksSubtree =
-        "/au/com/codeconstruct/mctp1/networks/";
     const std::string mctpdEndpointIfaceAddedSpec =
-        rules::sender(mctpdDBusName) +
+        rules::sender(mctpdBusName) +
         rules::interfacesAddedAtPath(mctpdNetworksSubtree);
 
     auto mctpdEndpointIfaceAddedMatch = sdbusplus::bus::match_t(

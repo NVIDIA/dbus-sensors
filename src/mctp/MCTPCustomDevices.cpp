@@ -1,5 +1,6 @@
 #include "MCTPCustomDevices.hpp"
 
+#include "MCTPDefinitions.hpp"
 #include "MCTPEndpoint.hpp"
 #include "MCTPEndpointUtils.hpp"
 #include "Utils.hpp"
@@ -39,21 +40,6 @@
 #include <vector>
 
 PHOSPHOR_LOG2_USING;
-
-static const char* mctpdObjectManagerInterface =
-    "org.freedesktop.DBus.ObjectManager";
-
-// MCTP D-Bus constants
-static constexpr const char* mctpdBusName = "au.com.codeconstruct.MCTP1";
-static constexpr const char* mctpdControlPath = "/au/com/codeconstruct/mctp1";
-static constexpr const char* mctpdEndpointPath =
-    "/au/com/codeconstruct/mctp1/networks/1/endpoints/";
-static constexpr const char* mctpdNetwork1Path =
-    "/au/com/codeconstruct/mctp1/networks/1";
-static constexpr const char* mctpdEndpointControlInterface =
-    "au.com.codeconstruct.MCTP.Endpoint1";
-static constexpr const char* mctpdNetworkInterface =
-    "au.com.codeconstruct.MCTP.Network1";
 
 /* MCTP USBGadget */
 
@@ -554,7 +540,7 @@ void USBGadgetMCTPDevice::subscribe([[maybe_unused]] Event&& degraded,
                 }
 
                 auto networkIt =
-                    objects.find(sdbusplus::object_path(mctpdNetwork1Path));
+                    objects.find(sdbusplus::object_path(mctpdNetworkPath));
                 if (networkIt != objects.end())
                 {
                     const auto& interfaces = networkIt->second;

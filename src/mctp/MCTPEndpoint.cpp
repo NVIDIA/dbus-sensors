@@ -1,5 +1,6 @@
 #include "MCTPEndpoint.hpp"
 
+#include "MCTPDefinitions.hpp"
 #include "MCTPEndpointUtils.hpp"
 #include "Utils.hpp"
 #include "VariantVisitors.hpp"
@@ -48,21 +49,6 @@ using nv::lg2::ErrorClass;
 
 // Global set of EIDs for suppressing errors during recovery or health check
 std::set<uint8_t> suppressedHealthCheckEids;
-
-static constexpr const char* mctpdBusName = "au.com.codeconstruct.MCTP1";
-static constexpr const char* mctpdControlPath = "/au/com/codeconstruct/mctp1";
-static constexpr const char* mctpdEndpointPath =
-    "/au/com/codeconstruct/mctp1/networks/1/endpoints/";
-static constexpr const char* mctpdControlInterface =
-    "au.com.codeconstruct.MCTP.BusOwner1";
-static constexpr const char* mctpdEndpointControlInterface =
-    "au.com.codeconstruct.MCTP.Endpoint1";
-static constexpr const char* mctpdNetworkInterface =
-    "au.com.codeconstruct.MCTP.Network1";
-static constexpr const char* mctpdNetworkPath =
-    "/au/com/codeconstruct/mctp1/networks/1";
-static constexpr const char* mctpdBridgeInterface =
-    "au.com.codeconstruct.MCTP.Bridge1";
 
 MCTPDDevice::MCTPDDevice(
     const std::shared_ptr<sdbusplus::asio::connection>& connection,
@@ -955,12 +941,6 @@ void MCTPDDevice::setup(
     }
     else
     {
-        // mctpd 2.5 AssignEndpoint has D-Bus signature "ay" (physaddr only);
-        // ignoreMessageTypes is not a per-endpoint argument on the dynamic path
-        // (it is a bus-owner-wide setting in mctpd.conf). Passing it here makes
-        // the call signature "ayay", which sd-bus rejects with InvalidArgs, so
-        // no EID is ever assigned. AssignEndpointStatic above keeps its 5-arg
-        // form ("ayyyayay"), which matches mctpd and is unaffected.
         connection->async_method_call(
             onSetup, mctpdBusName,
             mctpdControlPath + std::string("/interfaces/") + interface,

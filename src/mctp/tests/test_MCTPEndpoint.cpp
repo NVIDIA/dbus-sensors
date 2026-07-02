@@ -2,6 +2,7 @@
 #include "Utils.hpp"
 #include "async_test_helpers.hpp"
 
+#include <sys/stat.h>
 #include <systemd/sd-bus.h>
 
 #include <boost/asio/io_context.hpp>
@@ -14,13 +15,17 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -13266,4 +13271,710 @@ TEST_F(AsyncFixture, performHealthCheckBridgePoolSuccessCoversNestedLambda)
     catch (...) // NOLINT(bugprone-empty-catch)
     {}
     suppressedHealthCheckEids.clear();
+}
+
+// ===========================================================================
+// Additional function-coverage tests: SPI device methods, I2C/I3C destructors,
+// USB sysfs helper, and MCTPDEndpoint::subscribe.
+// ===========================================================================
+
+// SPIMCTPDDevice::id() is a pure hash of bus/chipselect.
+TEST(SPIMCTPDDevice, idHashesBusAndChipSelect)
+{
+    auto a = std::make_shared<SPIMCTPDDevice>(nullptr, "spi-a", 1, 0, "spi0");
+    auto b = std::make_shared<SPIMCTPDDevice>(nullptr, "spi-b", 1, 0, "spi0");
+    auto c = std::make_shared<SPIMCTPDDevice>(nullptr, "spi-c", 2, 1, "spi1");
+    EXPECT_EQ(a->id(), b->id());
+    EXPECT_NE(a->id(), c->id());
+}
+
+// SPIMCTPDDevice::setup() — with no SPI sysfs present, interfaceFromBusCs()
+// throws MCTPException; setup() reports no_such_device and returns.
+TEST_F(FakeConnFixture, spiSetupDefersWhenNetdevMissing)
+{
+    auto dev = std::make_shared<SPIMCTPDDevice>(conn, "spi-setup", 9, 9, "");
+    std::error_code captured;
+    bool invoked = false;
+    dev->setup([&](const std::error_code& ec,
+                   const std::shared_ptr<MCTPEndpoint>& ep) {
+        invoked = true;
+        captured = ec;
+        EXPECT_EQ(ep, nullptr);
+    });
+    EXPECT_TRUE(invoked);
+    EXPECT_EQ(captured, std::make_error_code(std::errc::no_such_device));
+}
+
+// SPIMCTPDDevice::onEndpointEstablished() latches interfaceConfirmed_ so a
+// subsequent setup() skips the sysfs re-walk (private members reachable via
+// -fno-access-control).
+TEST_F(FakeConnFixture, spiOnEndpointEstablishedLatchesConfirmed)
+{
+    auto dev =
+        std::make_shared<SPIMCTPDDevice>(conn, "spi-latch", 3, 1, "spi3");
+    EXPECT_FALSE(dev->interfaceConfirmed_);
+    dev->onEndpointEstablished();
+    EXPECT_TRUE(dev->interfaceConfirmed_);
+
+    // With interfaceConfirmed_ latched, setup() bypasses interfaceFromBusCs()
+    // and forwards straight to MCTPDDevice::setup() (null bus -> error).
+    bool invoked = false;
+    dev->setup([&](const std::error_code&,
+                   const std::shared_ptr<MCTPEndpoint>&) { invoked = true; });
+    EXPECT_TRUE(invoked);
+}
+
+// USBMCTPDDevice::interfaceFromRootHubPort() — walking a nonexistent controller
+// tree yields no bus number; the helper throws MCTPException. Exercises the
+// function body and its error path (reachable via -fno-access-control).
+TEST(USBMCTPDDevice, interfaceFromRootHubPortMissingTreeThrows)
+{
+    EXPECT_THROW(static_cast<void>(USBMCTPDDevice::interfaceFromRootHubPort(
+                     "/nonexistent/usb/roothub", "1", 1, 0)),
+                 MCTPException);
+}
+
+// MCTPDEndpoint::subscribe() — with a fake connection, the connectivity match
+// is created (sd_bus_add_match wrapped to succeed) and async_method_call posts
+// a handler; the function body is entered. Tolerate any fake-bus exception.
+TEST_F(FakeConnFixture, mctpdEndpointSubscribeCreatesMatch)
+{
+    auto device = std::make_shared<USBMCTPDDevice>(conn, "usb-sub", "usb0",
+                                                   std::vector<uint8_t>{0x20});
+    auto endpoint = std::make_shared<MCTPDEndpoint>(
+        device, conn, sdbusplus::object_path("/test/sub"), 1, 9);
+    try
+    {
+        endpoint->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                            [](const std::shared_ptr<MCTPEndpoint>&) {},
+                            [](const std::shared_ptr<MCTPEndpoint>&) {});
+    }
+    catch (const std::exception& e)
+    {
+        GTEST_LOG_(INFO) << "tolerated exception in " << test_info_->name()
+                         << ": " << e.what();
+    }
+    // Drain any posted async handler while conn is alive.
+    io.restart();
+    io.poll();
+}
+
+// ===========================================================================
+// USBMCTPDDevice::interfaceFromRootHubPort() + setup() sysfs-resolution paths.
+// The helper takes the root-hub path as an argument, so a real temporary sysfs-
+// shaped tree drives the full directory walk. POSIX mkdir is used because
+// std::filesystem::create_directories is intercepted by filesystem_wrappers.
+// ===========================================================================
+
+namespace
+{
+// Build
+// "<tmp>/usb<bus>/<bus>-<seg1>/<bus>-<seg1.seg2>/.../<bus>-<port>:<cfg>.<ifn>[/net/<netdev>]".
+// Returns the temp root-hub path. usbDirName lets callers inject a bad usb dir.
+std::string makeUsbSysfsTree(const std::string& port, int cfg, int ifn,
+                             bool withNet, const std::string& netdev,
+                             const char* usbDirName = "usb1", int bus = 1)
+{
+    std::string tmpl = "/tmp/mctp-usb-XXXXXX";
+    const char* root = mkdtemp(tmpl.data());
+    if (root == nullptr)
+    {
+        return {};
+    }
+    std::string path = root;
+    auto md = [](const std::string& p) { ::mkdir(p.c_str(), 0755); };
+    path += "/";
+    path += usbDirName;
+    md(path);
+    std::string prefix;
+    std::stringstream ss(port);
+    std::string seg;
+    while (std::getline(ss, seg, '.'))
+    {
+        if (!prefix.empty())
+        {
+            prefix += '.';
+        }
+        prefix += seg;
+        path += "/" + std::to_string(bus) + "-" + prefix;
+        md(path);
+    }
+    path += "/" + std::to_string(bus) + "-" + port + ":" + std::to_string(cfg) +
+            "." + std::to_string(ifn);
+    md(path);
+    if (withNet)
+    {
+        md(path + "/net");
+        md(path + "/net/" + netdev);
+    }
+    return root;
+}
+} // namespace
+
+TEST(USBMCTPDDeviceRootHub, interfaceFromRootHubPortResolvesNetdev)
+{
+    std::string root = makeUsbSysfsTree("1", 1, 0, true, "mctpusb0");
+    ASSERT_FALSE(root.empty());
+    EXPECT_EQ(USBMCTPDDevice::interfaceFromRootHubPort(root, "1", 1, 0),
+              "mctpusb0");
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST(USBMCTPDDeviceRootHub, interfaceFromRootHubPortMultiSegmentPort)
+{
+    std::string root = makeUsbSysfsTree("1.2", 1, 0, true, "musb1_2");
+    ASSERT_FALSE(root.empty());
+    EXPECT_EQ(USBMCTPDDevice::interfaceFromRootHubPort(root, "1.2", 1, 0),
+              "musb1_2");
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST(USBMCTPDDeviceRootHub, interfaceFromRootHubPortNonNumericUsbDirThrows)
+{
+    // usb dir present but suffix is non-numeric -> from_chars fails -> no bus.
+    std::string root = makeUsbSysfsTree("1", 1, 0, true, "mctpusb0", "usbXY");
+    ASSERT_FALSE(root.empty());
+    EXPECT_THROW(static_cast<void>(
+                     USBMCTPDDevice::interfaceFromRootHubPort(root, "1", 1, 0)),
+                 MCTPException);
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST(USBMCTPDDeviceRootHub, interfaceFromRootHubPortNoNetThrows)
+{
+    // Interface dir exists but has no net/ subdir -> throw.
+    std::string root = makeUsbSysfsTree("1", 1, 0, false, "");
+    ASSERT_FALSE(root.empty());
+    EXPECT_THROW(static_cast<void>(
+                     USBMCTPDDevice::interfaceFromRootHubPort(root, "1", 1, 0)),
+                 MCTPException);
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}
+
+// setup() with a RootHubPath resolves the netdev via the sysfs walk, then
+// forwards to MCTPDDevice::setup (null bus -> error callback). Covers the
+// rootHubPath_ resolution branch and the netdev-name-change logging.
+TEST_F(FakeConnFixture, usbSetupResolvesViaRootHubPort)
+{
+    std::string root = makeUsbSysfsTree("1", 1, 0, true, "musb1_1");
+    ASSERT_FALSE(root.empty());
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(conn, "usb-roothub", "",
+                                                    std::vector<uint8_t>{0x20});
+    dev->rootHubPath_ = root;
+    dev->port_ = "1";
+    dev->configuration_ = 1;
+    dev->interfaceNum_ = 0;
+    // setup() resolves the netdev then calls onDiscoveryMatchRule(); on the
+    // plain fake connection the subsequent match/async setup may throw. The
+    // resolution (interface assignment at MCTPEndpoint.cpp ~2217) happens
+    // first, so tolerate any later exception and assert the interface was
+    // resolved.
+    try
+    {
+        dev->setup([](const std::error_code&,
+                      const std::shared_ptr<MCTPEndpoint>&) {});
+    }
+    catch (const std::exception& e)
+    {
+        GTEST_LOG_(INFO) << "tolerated exception in " << test_info_->name()
+                         << ": " << e.what();
+    }
+    // interface should have been resolved from the sysfs tree.
+    EXPECT_EQ(dev->interface, "musb1_1");
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}
+
+// setup() when the netdev is not yet visible: interfaceFromRootHubPort throws,
+// setup reports no_such_device.
+TEST_F(FakeConnFixture, usbSetupRootHubNetdevMissingDefers)
+{
+    std::string root = makeUsbSysfsTree("1", 1, 0, false, "");
+    ASSERT_FALSE(root.empty());
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(conn, "usb-roothub2", "",
+                                                    std::vector<uint8_t>{0x20});
+    dev->rootHubPath_ = root;
+    dev->port_ = "1";
+    std::error_code captured;
+    dev->setup([&](const std::error_code& ec,
+                   const std::shared_ptr<MCTPEndpoint>&) { captured = ec; });
+    EXPECT_EQ(captured, std::make_error_code(std::errc::no_such_device));
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}
+
+// setup() once interfaceConfirmed_ is latched skips the sysfs walk entirely.
+TEST_F(FakeConnFixture, usbSetupInterfaceConfirmedSkipsWalk)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-confirmed", "musbX", std::vector<uint8_t>{0x20});
+    dev->rootHubPath_ = "/nonexistent";
+    dev->port_ = "1";
+    dev->interfaceConfirmed_ = true; // skip walk -> straight to base setup
+    bool called = false;
+    dev->setup([&](const std::error_code&,
+                   const std::shared_ptr<MCTPEndpoint>&) { called = true; });
+    EXPECT_TRUE(called);
+}
+
+// ===========================================================================
+// USBMCTPDDevice::from() config-parsing branch coverage: RecoveryThreshold,
+// IgnoreEIDs / IgnoreMessageTypes token handling, and bridge-pool parse errors.
+// ===========================================================================
+
+namespace
+{
+SensorBaseConfigMap usbBaseConfig()
+{
+    return SensorBaseConfigMap{{"Type", std::string("MCTPUSBDevice")},
+                               {"Name", std::string("usb-cfg")},
+                               {"Interface", std::string("usb0")}};
+}
+} // namespace
+
+TEST(USBMCTPDDeviceCfg, recoveryThresholdValid)
+{
+    auto iface = usbBaseConfig();
+    iface["RecoveryThreshold"] = std::string("5");
+    auto dev = USBMCTPDDevice::from({}, iface);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(dev->getRecoveryThreshold(), 5);
+}
+
+TEST(USBMCTPDDeviceCfg, recoveryThresholdOutOfRangeThrows)
+{
+    auto iface = usbBaseConfig();
+    iface["RecoveryThreshold"] = std::string("11"); // > 10
+    EXPECT_THROW(USBMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(USBMCTPDDeviceCfg, recoveryThresholdNonNumericThrows)
+{
+    auto iface = usbBaseConfig();
+    iface["RecoveryThreshold"] = std::string("abc");
+    EXPECT_THROW(USBMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(USBMCTPDDeviceCfg, recoveryThresholdTrailingGarbageThrows)
+{
+    auto iface = usbBaseConfig();
+    iface["RecoveryThreshold"] = std::string("5x"); // trailing non-digit
+    EXPECT_THROW(USBMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(USBMCTPDDeviceCfg, ignoreEidsWithWhitespaceAndValidEntries)
+{
+    auto iface = usbBaseConfig();
+    iface["IgnoreEIDs"] = std::string(" 10 , 20 ,");
+    auto dev = USBMCTPDDevice::from({}, iface);
+    EXPECT_NE(dev, nullptr);
+}
+
+TEST(USBMCTPDDeviceCfg, ignoreEidsOutOfRangeEntrySkipped)
+{
+    auto iface = usbBaseConfig();
+    iface["IgnoreEIDs"] = std::string("300"); // > 255 -> warned, skipped
+    auto dev = USBMCTPDDevice::from({}, iface);
+    EXPECT_NE(dev, nullptr);
+}
+
+TEST(USBMCTPDDeviceCfg, ignoreEidsInvalidEntryTolerated)
+{
+    auto iface = usbBaseConfig();
+    iface["IgnoreEIDs"] = std::string("xyz"); // non-numeric -> caught
+    auto dev = USBMCTPDDevice::from({}, iface);
+    EXPECT_NE(dev, nullptr);
+}
+
+TEST(USBMCTPDDeviceCfg, ignoreEidsEmptyString)
+{
+    auto iface = usbBaseConfig();
+    iface["IgnoreEIDs"] = std::string("");
+    auto dev = USBMCTPDDevice::from({}, iface);
+    EXPECT_NE(dev, nullptr);
+}
+
+TEST(USBMCTPDDeviceCfg, ignoreMessageTypesMixedEntries)
+{
+    auto iface = usbBaseConfig();
+    iface["IgnoreMessageTypes"] = std::string("1, 300, foo, 5");
+    auto dev = USBMCTPDDevice::from({}, iface);
+    EXPECT_NE(dev, nullptr);
+}
+
+TEST(USBMCTPDDeviceCfg, ignoreMessageTypesEmptyString)
+{
+    auto iface = usbBaseConfig();
+    iface["IgnoreMessageTypes"] = std::string("");
+    auto dev = USBMCTPDDevice::from({}, iface);
+    EXPECT_NE(dev, nullptr);
+}
+
+TEST(USBMCTPDDeviceCfg, badBridgePoolStartThrows)
+{
+    auto iface = usbBaseConfig();
+    iface["BridgePoolStartEID"] = std::string("bad");
+    EXPECT_THROW(USBMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(USBMCTPDDeviceCfg, badBridgePoolEndThrows)
+{
+    auto iface = usbBaseConfig();
+    iface["BridgePoolEndEID"] = std::string("bad");
+    EXPECT_THROW(USBMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+TEST(USBMCTPDDeviceCfg, staticEidWithBridgePoolStart)
+{
+    auto iface = usbBaseConfig();
+    iface["StaticEndpointID"] = std::string("30");
+    iface["BridgePoolStartEID"] = std::string("40");
+    iface["BridgePoolEndEID"] = std::string("50");
+    auto dev = USBMCTPDDevice::from({}, iface);
+    EXPECT_NE(dev, nullptr);
+}
+
+// from() via physical USB topology (no "Interface" key): resolves the netdev
+// from a real temporary sysfs tree, covering the RootHubPath resolution block.
+TEST(USBMCTPDDeviceCfg, fromRootHubPathResolvesInterface)
+{
+    std::string root = makeUsbSysfsTree("1", 1, 0, true, "musbcfg");
+    ASSERT_FALSE(root.empty());
+    SensorBaseConfigMap iface{
+        {"Type", std::string("MCTPUSBDevice")},
+        {"Name", std::string("usb-topo")},
+        {"RootHubPath", root},
+        {"Port", std::string("1")},
+        {"Configuration", uint64_t{1}},
+        {"InterfaceNum", uint64_t{0}}};
+    auto dev = USBMCTPDDevice::from({}, iface);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(dev->getInterface(), "musbcfg");
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST(USBMCTPDDeviceCfg, fromRootHubPathMissingKeysThrows)
+{
+    SensorBaseConfigMap iface{{"Type", std::string("MCTPUSBDevice")},
+                              {"Name", std::string("usb-topo2")},
+                              {"RootHubPath", std::string("/tmp/x")},
+                              {"Port", std::string("1")}};
+    // Missing Configuration + InterfaceNum -> schema violation.
+    EXPECT_THROW(USBMCTPDDevice::from({}, iface), std::invalid_argument);
+}
+
+// ===========================================================================
+// MCTPDEndpoint::subscribe() connectivity async-callback coverage: drive the
+// Properties.Get(Connectivity) reply through Degraded / Available / Unknown to
+// exercise updateEndpointConnectivity()'s branches.
+// ===========================================================================
+TEST_F(AsyncFixture, subscribeConnectivityDegradedNotifies)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(conn, "usb-sub-deg", "usb0",
+                                                    std::vector<uint8_t>{0x20});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    bool degraded = false;
+    ep->subscribe(
+        [&](const std::shared_ptr<MCTPEndpoint>&) { degraded = true; },
+        [](const std::shared_ptr<MCTPEndpoint>&) {},
+        [](const std::shared_ptr<MCTPEndpoint>&) {});
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallStringVariant("Degraded");
+    EXPECT_TRUE(degraded);
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+}
+
+TEST_F(AsyncFixture, subscribeConnectivityAvailableNotifies)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-sub-avail", "usb0", std::vector<uint8_t>{0x20});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    bool available = false;
+    ep->subscribe(
+        [](const std::shared_ptr<MCTPEndpoint>&) {},
+        [&](const std::shared_ptr<MCTPEndpoint>&) { available = true; },
+        [](const std::shared_ptr<MCTPEndpoint>&) {});
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallStringVariant("Available");
+    EXPECT_TRUE(available);
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+}
+
+TEST_F(AsyncFixture, subscribeConnectivityUnknownIgnored)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(conn, "usb-sub-unk", "usb0",
+                                                    std::vector<uint8_t>{0x20});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    bool any = false;
+    ep->subscribe([&](const std::shared_ptr<MCTPEndpoint>&) { any = true; },
+                  [&](const std::shared_ptr<MCTPEndpoint>&) { any = true; },
+                  [](const std::shared_ptr<MCTPEndpoint>&) {});
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallStringVariant("SomethingElse");
+    EXPECT_FALSE(any); // unrecognised state -> no notify
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+}
+
+// subscribe() async callback error path: the Properties.Get reply is an error
+// -> the "if (ec)" branch logs and returns without updating connectivity.
+TEST_F(AsyncFixture, subscribeConnectivityErrorReplyHandled)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(conn, "usb-sub-err", "usb0",
+                                                    std::vector<uint8_t>{0x20});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    bool any = false;
+    ep->subscribe([&](const std::shared_ptr<MCTPEndpoint>&) { any = true; },
+                  [&](const std::shared_ptr<MCTPEndpoint>&) { any = true; },
+                  [](const std::shared_ptr<MCTPEndpoint>&) {});
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallError();
+    EXPECT_FALSE(any);
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+}
+
+// ===========================================================================
+// Health-monitoring helper branch coverage: startHealthMonitoring(),
+// markDiscoveredMctpEid(), armRecoveryTimeout(), onRecoveryTimeout().
+// ===========================================================================
+namespace
+{
+std::shared_ptr<TestUSBMCTPDDevice> makeHealthDev(
+    const std::shared_ptr<sdbusplus::asio::connection>& conn,
+    const std::string& name, std::optional<uint8_t> staticEid,
+    std::optional<uint8_t> polling)
+{
+    return std::make_shared<TestUSBMCTPDDevice>(
+        conn, name, "usb0", std::vector<uint8_t>{0x20}, staticEid, std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt, polling);
+}
+} // namespace
+
+TEST_F(FakeConnFixture, startHealthMonitoringNoPollingReturnsEarly)
+{
+    auto dev = makeHealthDev(conn, "hm-nopoll", std::nullopt, std::nullopt);
+    EXPECT_NO_THROW(dev->startHealthMonitoring());
+    EXPECT_EQ(dev->healthTimer, nullptr);
+}
+
+TEST_F(FakeConnFixture, startHealthMonitoringArmsTimer)
+{
+    auto dev = makeHealthDev(conn, "hm-arm", std::optional<uint8_t>(9),
+                             std::optional<uint8_t>(1));
+    EXPECT_NO_THROW(dev->startHealthMonitoring());
+    EXPECT_NE(dev->healthTimer, nullptr);
+    if (dev->healthTimer)
+    {
+        dev->healthTimer->cancel();
+    }
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+}
+
+TEST_F(FakeConnFixture, startHealthMonitoringEidMismatchReturns)
+{
+    auto dev = makeHealthDev(conn, "hm-mismatch", std::optional<uint8_t>(9),
+                             std::optional<uint8_t>(1));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/7"),
+        1, 7); // eid 7 != staticEID 9
+    dev->setEndpointForTest(ep);
+    EXPECT_NO_THROW(dev->startHealthMonitoring());
+}
+
+TEST_F(FakeConnFixture, markDiscoveredMctpEidManagedAndUnmanaged)
+{
+    auto dev = makeHealthDev(conn, "mark", std::optional<uint8_t>(9),
+                             std::optional<uint8_t>(1));
+    dev->markDiscoveredMctpEid(9);   // managed -> inserted
+    dev->markDiscoveredMctpEid(9);   // duplicate -> insert().second false
+    dev->markDiscoveredMctpEid(200); // not managed -> early return
+    EXPECT_TRUE(dev->discoveredMctpEids.contains(9));
+    EXPECT_FALSE(dev->discoveredMctpEids.contains(200));
+}
+
+TEST_F(FakeConnFixture, armRecoveryTimeoutNoPollingReturnsEarly)
+{
+    auto dev = makeHealthDev(conn, "art-nopoll", std::nullopt, std::nullopt);
+    EXPECT_NO_THROW(dev->armRecoveryTimeout());
+    EXPECT_EQ(dev->recoveryTimer, nullptr);
+}
+
+TEST_F(FakeConnFixture, armRecoveryTimeoutCreatesTimer)
+{
+    auto dev = makeHealthDev(conn, "art-arm", std::optional<uint8_t>(9),
+                             std::optional<uint8_t>(1));
+    EXPECT_NO_THROW(dev->armRecoveryTimeout());
+    EXPECT_NE(dev->recoveryTimer, nullptr);
+    if (dev->recoveryTimer)
+    {
+        dev->recoveryTimer->cancel();
+    }
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+}
+
+TEST_F(FakeConnFixture, onRecoveryTimeoutNotInRecoveryReturns)
+{
+    auto dev = makeHealthDev(conn, "ort-norec", std::optional<uint8_t>(9),
+                             std::optional<uint8_t>(1));
+    dev->inHealthRecoveryMode = false;
+    EXPECT_NO_THROW(dev->onRecoveryTimeout());
+}
+
+TEST_F(FakeConnFixture, onRecoveryTimeoutInRecoveryWithEndpointRestarts)
+{
+    auto dev = makeHealthDev(conn, "ort-rec", std::optional<uint8_t>(9),
+                             std::optional<uint8_t>(1));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->inHealthRecoveryMode = true;
+    EXPECT_NO_THROW(dev->onRecoveryTimeout());
+    EXPECT_FALSE(dev->inHealthRecoveryMode);
+    if (dev->healthTimer)
+    {
+        dev->healthTimer->cancel();
+    }
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+}
+
+// ===========================================================================
+// Bridge-pool health-check coverage: pool-EID ping success after being marked
+// unresponsive triggers LearnEndpoint; repeated failure reaches threshold and
+// marks the EID unresponsive + attempts recover().
+// ===========================================================================
+TEST_F(AsyncFixture, bridgePoolPingSuccessAfterUnresponsiveLearnsEndpoint)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "bp-learn", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::optional<uint8_t>(40),
+        std::optional<uint8_t>(40), std::nullopt, std::nullopt,
+        std::optional<uint8_t>(1));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+    dev->discoveryNeeded = false;
+    dev->unresponsiveBridgePoolEids.insert(40);
+
+    EXPECT_NO_THROW(dev->performHealthCheck());
+    // Oldest pending: main-device ping (EID 9), then pool ping (EID 40).
+    int guard = 0;
+    while (!gPendingAsyncCalls.empty() && guard++ < 8)
+    {
+        driveAsyncCallSuccess();
+    }
+    // Pool EID 40 became responsive -> removed from unresponsive set.
+    EXPECT_FALSE(dev->unresponsiveBridgePoolEids.contains(40));
+    dev->healthTimer->cancel();
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
+}
+
+TEST_F(AsyncFixture, bridgePoolPingFailureThresholdMarksUnresponsive)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "bp-fail", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::optional<uint8_t>(41),
+        std::optional<uint8_t>(41), std::nullopt, std::nullopt,
+        std::optional<uint8_t>(1));
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+    dev->discoveredMctpEids.insert(41);  // so recover() proceeds
+    dev->bridgePoolPingFailures[41] = 2; // one below threshold (3)
+
+    EXPECT_NO_THROW(dev->performHealthCheck());
+    // Drive main ping (9) success, then pool ping (41) error -> threshold hit.
+    int guard = 0;
+    while (!gPendingAsyncCalls.empty() && guard++ < 8)
+    {
+        // Fire the main-device ping successfully, the pool ping as an error.
+        if (guard == 2)
+        {
+            driveAsyncCallError();
+        }
+        else
+        {
+            driveAsyncCallSuccess();
+        }
+    }
+    EXPECT_TRUE(dev->unresponsiveBridgePoolEids.contains(41));
+    dev->healthTimer->cancel();
+    try
+    {
+        io.poll();
+    }
+    catch (...) // NOLINT(bugprone-empty-catch)
+    {}
 }
