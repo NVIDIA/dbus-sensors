@@ -12674,7 +12674,7 @@ TEST_F(AsyncFixture,
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     dev->setEndpointForTest(ep);
@@ -13318,7 +13318,7 @@ TEST(MCTPDEndpointSecurity, securityOnMctpEndpointChangeNonStringConnectivity)
         std::optional<uint8_t>(9));
     auto ep = std::make_shared<MCTPDEndpoint>(
         dev, conn,
-        sdbusplus::message::object_path(
+        sdbusplus::object_path(
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
 

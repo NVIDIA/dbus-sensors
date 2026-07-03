@@ -211,13 +211,6 @@ class CountingMCTPEndpoint : public MCTPEndpoint
     std::shared_ptr<MCTPDevice> owner;
 };
 
-bool __attribute__((weak)) LibusbUSBRecovery::clearBulkOutHalt(
-    const std::string&, std::string& status)
-{
-    status = "USB recovery unavailable in this unit test";
-    return false;
-}
-
 namespace
 {
 constexpr const char* kMctpdEndpointControlIface =
@@ -524,7 +517,10 @@ TEST_F(MCTPReactorFixture, manageMockDevice)
     EXPECT_CALL(assoc,
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation));
-    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+    EXPECT_CALL(
+        assoc,
+        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
+        .Times(1);
 
     EXPECT_CALL(*endpoint, remove()).WillOnce([&]() {
         removeHandler(endpoint);
@@ -549,7 +545,10 @@ TEST_F(MCTPReactorFixture, manageMockDeviceDeferredSetup)
     EXPECT_CALL(assoc,
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation));
-    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+    EXPECT_CALL(
+        assoc,
+        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
+        .Times(1);
 
     EXPECT_CALL(*endpoint, remove()).WillOnce([&]() {
         removeHandler(endpoint);
@@ -581,7 +580,10 @@ TEST_F(MCTPReactorFixture, manageMockDeviceRemoved)
 
     // state is Recovered — unmanageMCTPDevice is a no-op (no second
     // disassociate).
-    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+    EXPECT_CALL(
+        assoc,
+        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
+        .Times(1);
 
     EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_))
         .Times(2)
@@ -643,7 +645,10 @@ TEST_F(MCTPReactorFixture, removedCallbackForForeignDeviceDoesNotDeferSetup)
     EXPECT_CALL(assoc,
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation));
-    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+    EXPECT_CALL(
+        assoc,
+        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
+        .Times(1);
 
     // Fixture's device() is registered first; gmock uses the first matching
     // expectation, so we must clear and re-establish before a custom action.
@@ -719,7 +724,10 @@ TEST_F(MCTPReactorFixture, removedCallbackAfterUnmanageDoesNotRequeueSetup)
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation))
         .Times(1);
-    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+    EXPECT_CALL(
+        assoc,
+        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
+        .Times(1);
 
     EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_))
         .WillOnce(testing::SaveArg<2>(&removeHandler));
@@ -3327,9 +3335,9 @@ TEST_F(MCTPReactorFixture,
     removeHandler(endpoint);
 }
 
-// G213: Removed callback fires when the device is NOT in the repository.
-// Tests the `if (self->devices.contains(ep->device()))` branch → false,
-// so deferSetup is NOT called (no re-queue).
+// G213: The current endpoint callback owns and untracks its path, then resolves
+// a device that is NOT in the repository. The membership check rejects the
+// callback before it can mutate device state or queue another setup.
 // This is a fixture-based complement to
 // removedCallbackForForeignDeviceDoesNotDeferSetup, using a second endpoint
 // whose device() returns an unregistered pointer.
@@ -3352,7 +3360,10 @@ TEST_F(MCTPReactorFixture, G213trackEndpointRemovedDeviceNotInRepoNoDeferSetup)
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation))
         .Times(1);
-    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+    EXPECT_CALL(
+        assoc,
+        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
+        .Times(1);
 
     // Replace the fixture's endpoint->device() expectation: trackEndpoint
     // calls ep->device() multiple times (states lookup, next(), inventoryFor)
@@ -3383,8 +3394,9 @@ TEST_F(MCTPReactorFixture, G213trackEndpointRemovedDeviceNotInRepoNoDeferSetup)
     reactor->manageMCTPDevice("/test/g213", device);
     ASSERT_TRUE(static_cast<bool>(removeHandler));
 
-    // Fire removed callback: ep->device() returns foreignDevice, which is not
-    // in the repository, so the stale callback is ignored before untrack.
+    // The token is current, so the callback first untracks the endpoint path.
+    // ep->device() then returns foreignDevice; repository membership fails and
+    // the callback returns without mutating either device's state.
     removeHandler(endpoint);
 
     // tick() must NOT call setup again (nothing was deferred).
@@ -3491,6 +3503,8 @@ TEST(MCTPReactor, securityStaleRemovedCallbackDoesNotDemoteReplacement)
     reactor->manageMCTPDevice("/test/security-replace", replacement);
     ASSERT_TRUE(static_cast<bool>(oldRemove));
 
+    reactor->tick();
+    ASSERT_TRUE(static_cast<bool>(newRemove));
     oldRemove(oldEp);
     reactor->tick();
 

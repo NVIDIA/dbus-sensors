@@ -115,16 +115,13 @@ void MCTPReactor::clearUsbSetupFailureTracking(
     usbSetupFailureCounts.erase(dev);
 }
 
-void MCTPReactor::untrackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep)
-{
-    server.disassociate(MCTPDEndpoint::path(ep));
-}
-
 void MCTPReactor::trackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep)
 {
     info("Added MCTP endpoint to device: [ {MCTP_ENDPOINT} ]", "MCTP_ENDPOINT",
          ep->describe());
 
+    const auto endpointPath = MCTPDEndpoint::path(ep);
+    const auto generation = std::make_shared<EndpointGeneration>();
     ep->subscribe(
         // Degraded
         [](const std::shared_ptr<MCTPEndpoint>& ep) {
@@ -137,21 +134,31 @@ void MCTPReactor::trackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep)
                   "MCTP_ENDPOINT", ep->describe());
         },
         // Removed
-        [weak{weak_from_this()}](const std::shared_ptr<MCTPEndpoint>& ep) {
+        [weak{weak_from_this()}, endpointPath,
+         generation](const std::shared_ptr<MCTPEndpoint>& ep) {
             info("Removed MCTP endpoint from device: [ {MCTP_ENDPOINT} ]",
                  "MCTP_ENDPOINT", ep->describe());
             if (auto self = weak.lock())
             {
-                auto dev = ep->device();
-                if (!dev || !self->devices.contains(dev))
+                auto current =
+                    self->trackedEndpointGenerations.find(endpointPath);
+                if (current == self->trackedEndpointGenerations.end() ||
+                    current->second != generation)
                 {
                     info(
-                        "Ignoring stale endpoint removal for untracked device: [ {MCTP_ENDPOINT} ]",
+                        "Ignoring stale endpoint removal for superseded endpoint: [ {MCTP_ENDPOINT} ]",
                         "MCTP_ENDPOINT", ep->describe());
                     return;
                 }
 
-                self->untrackEndpoint(ep);
+                self->trackedEndpointGenerations.erase(current);
+                self->server.disassociate(endpointPath);
+                auto dev = ep->device();
+                if (!dev || !self->devices.contains(dev))
+                {
+                    return;
+                }
+
                 switch (self->states[dev->id()])
                 {
                     case MCTPDeviceState::Unmanaged:
@@ -235,7 +242,8 @@ void MCTPReactor::trackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep)
     }
     std::vector<Association> associations{
         {"configured_by", "configures", *item}};
-    server.associate(MCTPDEndpoint::path(ep), associations);
+    server.associate(endpointPath, associations);
+    trackedEndpointGenerations[endpointPath] = generation;
 }
 
 void MCTPReactor::setupEndpoint(const std::shared_ptr<MCTPDevice>& dev)

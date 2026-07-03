@@ -59,13 +59,6 @@ class SecurityMockMCTPEndpoint : public MCTPEndpoint
     MOCK_METHOD(std::shared_ptr<MCTPDevice>, device, (), (const, override));
 };
 
-bool __attribute__((weak)) LibusbUSBRecovery::clearBulkOutHalt(
-    const std::string&, std::string& status)
-{
-    status = "USB recovery unavailable in this unit test";
-    return false;
-}
-
 TEST(DeviceFromConfig, emptyConfigReturnsNull)
 {
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
@@ -2989,7 +2982,8 @@ TEST(MCTPDeviceRepository, removeUnknownDeviceThrowsNoSuchDevice)
     }
 }
 
-TEST(MCTPReactorSecurity, staleQuarantineRemovalDoesNotThrow)
+TEST(MCTPReactorSecurity,
+     currentQuarantineRemovalForUntrackedDeviceCleansAssociation)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
@@ -3001,7 +2995,10 @@ TEST(MCTPReactorSecurity, staleQuarantineRemovalDoesNotThrow)
                 associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
                           requiredAssociation))
         .Times(1);
-    EXPECT_CALL(server, disassociate(testing::_)).Times(0);
+    EXPECT_CALL(
+        server,
+        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
+        .Times(1);
 
     auto ep = std::make_shared<SecurityMockMCTPEndpoint>();
     auto dev = std::make_shared<SecurityMockMCTPDevice>();

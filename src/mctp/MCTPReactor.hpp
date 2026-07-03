@@ -113,6 +113,9 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
     void onMctpdEndpointInterfacesAdded(sdbusplus::message_t& msg);
 
   private:
+    struct EndpointGeneration
+    {};
+
     static std::optional<std::string> findSMBusInterface(int bus);
 
     AssociationServer& server;
@@ -122,13 +125,14 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
     // Map to track failure counts for each device
     std::map<std::shared_ptr<MCTPDevice>, int> failureCounts;
     std::map<std::shared_ptr<MCTPDevice>, int> usbSetupFailureCounts;
+    std::map<std::string, std::shared_ptr<EndpointGeneration>>
+        trackedEndpointGenerations;
 
     void deferSetup(const std::shared_ptr<MCTPDevice>& dev);
     void trackUsbSetupFailure(const std::shared_ptr<MCTPDevice>& dev);
     void clearUsbSetupFailureTracking(const std::shared_ptr<MCTPDevice>& dev);
     void setupEndpoint(const std::shared_ptr<MCTPDevice>& dev);
     void trackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep);
-    void untrackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep);
     void addDevice(const std::string& path,
                    const std::shared_ptr<MCTPDevice>& device);
     void next(const std::shared_ptr<MCTPDevice>& dev, MCTPDeviceState next);

@@ -697,8 +697,8 @@ void MCTPDDevice::performHealthCheck()
             suppressedHealthCheckEids.erase(eid);
 
             // Suppress errors before and after the threshold attempt. The
-            // threshold ping is left unsuppressed so injected TransportErrors
-            // produce one RF log.
+            // threshold ping is left unsuppressed so injected
+            // TransportErrors produce one RF log.
             if (bridgePoolPingFailures[eid] < pingFailureThreshold - 1 ||
                 bridgePoolPingFailures[eid] >= pingFailureThreshold)
             {
