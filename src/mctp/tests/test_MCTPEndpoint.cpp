@@ -2,16 +2,20 @@
 #include "Utils.hpp"
 #include "async_test_helpers.hpp"
 
+#include <dlfcn.h>
 #include <sys/stat.h>
+#include <systemd/sd-bus-protocol.h>
 #include <systemd/sd-bus.h>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <sdbusplus/bus.hpp>
+#include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
 
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -19,6 +23,7 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -31,11 +36,62 @@
 #include <system_error>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 extern std::set<uint8_t> suppressedHealthCheckEids;
+
+namespace
+{
+
+// Keep the production /sys paths intact while allowing these tests to supply
+// deterministic directory contents.  This interposes only the test
+// executable's std::filesystem directory-iterator constructor and forwards
+// every non-redirected path to libstdc++ unchanged.
+auto& testDirectoryIteratorRedirects()
+{
+    static std::map<std::filesystem::path, std::filesystem::path> redirects;
+    return redirects;
+}
+
+using DirectoryIteratorConstructor =
+    void (*)(std::filesystem::directory_iterator*, const std::filesystem::path&,
+             std::filesystem::directory_options, std::error_code*);
+
+DirectoryIteratorConstructor realDirectoryIteratorConstructor()
+{
+    static const auto constructor = [] {
+        constexpr const char* symbol =
+            "_ZNSt10filesystem7__cxx1118directory_iteratorC2ERKNS0_4pathENS_17directory_optionsEPSt10error_code";
+        auto* address = dlsym(RTLD_NEXT, symbol);
+        if (address == nullptr)
+        {
+            std::terminate();
+        }
+        static_assert(sizeof(address) == sizeof(DirectoryIteratorConstructor));
+        return std::bit_cast<DirectoryIteratorConstructor>(address);
+    }();
+    return constructor;
+}
+
+} // namespace
+
+namespace std::filesystem // NOLINT(cert-dcl58-cpp)
+{
+
+directory_iterator::directory_iterator(
+    const path& requested, directory_options options, error_code* ec)
+{
+    const auto redirect = testDirectoryIteratorRedirects().find(requested);
+    const auto& actual = redirect == testDirectoryIteratorRedirects().end()
+                             ? requested
+                             : redirect->second;
+    realDirectoryIteratorConstructor()(this, actual, options, ec);
+}
+
+} // namespace std::filesystem
 
 // ---- I2CMCTPDDevice tests ----
 
@@ -711,6 +767,7 @@ TEST(PCIeMCTPDDevice, fromBadIfaceBadAddresses)
         "01:gg.0",
         "zzzz:01:00.0",
         "0000:gg:00.0",
+        "0000:01:00.0junk",
         "100:00.0",
         "01:20.0",
         "01:00.8",
@@ -2645,6 +2702,18 @@ TEST(MCTPDDevice, performDiscoveryWithoutEndpointAndNoCallbackReturnsEarly)
     EXPECT_EQ(dev->describe(), "interface: usb0, address: 0x [ 20 ]");
 }
 
+TEST(MCTPDDevice, performDiscoveryPropagatesRequestSetupCallbackException)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "usb-perfdisc-throw", "usb0", std::vector<uint8_t>{0x20});
+    dev->setRequestSetupCallback([](const std::shared_ptr<MCTPDDevice>&) {
+        throw std::runtime_error("request setup callback failed");
+    });
+
+    EXPECT_THROW(dev->performDiscovery(), std::runtime_error);
+    EXPECT_EQ(dev->endpoint, nullptr);
+}
+
 TEST(MCTPDDevice, onDiscoveryNotifyWithoutEndpointAndCallbackCallsDiscovery)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
@@ -2699,11 +2768,8 @@ class FakeConnFixture : public ::testing::Test
     {
         ASSERT_EQ(pipe(fds.data()), 0);
         gFakeSdBusFd = fds[0];
-        // Construct without TestSdBusInterface so that sd_bus_add_match and
-        // other virtual calls go through the real SdBusImpl (via libsdbusplus).
-        // For tests that need async mocking, AsyncFixture replaces conn with a
-        // TestSdBusInterface-backed connection in its own SetUp.
-        conn = std::make_shared<sdbusplus::asio::connection>(io, nullptr);
+        conn = std::make_shared<sdbusplus::asio::connection>(
+            io, sdbusplus::bus_t(nullptr, &gTestSdBusInterface));
     }
 
     void TearDown() override
@@ -2741,6 +2807,19 @@ TEST_F(FakeConnFixture, setupCallsAddedWithErrorOnNullBus)
     EXPECT_TRUE(called);
 }
 
+TEST_F(FakeConnFixture, setupPropagatesAddedCallbackException)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-setup-throw", "usb0", std::vector<uint8_t>{0x20});
+
+    EXPECT_THROW(dev->setup([](const std::error_code&,
+                               const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("setup callback failed");
+    }),
+                 std::runtime_error);
+    EXPECT_EQ(dev->endpoint, nullptr);
+}
+
 // 2. finaliseEndpoint() — call directly (private, accessible via
 // -fno-access-control). sd_bus_add_match is now wrapped to return success,
 // so match creation succeeds, endpoint is created and added() is invoked.
@@ -2772,6 +2851,28 @@ TEST_F(FakeConnFixture, finaliseEndpointCreatesEndpointAndCallsAdded)
         GTEST_LOG_(INFO) << "tolerated exception in " << test_info_->name()
                          << ": " << e.what();
     }
+}
+
+TEST_F(FakeConnFixture, finaliseEndpointPropagatesAddedCallbackException)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-finalise-throw", "usb0", std::vector<uint8_t>{0x20});
+    std::function<void(const std::error_code&,
+                       const std::shared_ptr<MCTPEndpoint>&)>
+        added =
+            [](const std::error_code&, const std::shared_ptr<MCTPEndpoint>&) {
+                throw std::runtime_error("endpoint added callback failed");
+            };
+
+    EXPECT_THROW(
+        dev->finaliseEndpoint(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9", 9, 1, added),
+        std::runtime_error);
+    ASSERT_NE(dev->endpoint, nullptr);
+    EXPECT_EQ(dev->endpoint->eid(), 9);
+    EXPECT_TRUE(dev->discoveredMctpEids.contains(9));
+
+    dev->setEndpointForTest(nullptr);
 }
 
 // 3. onDiscoveryMatchRule() — sd_bus_add_match is wrapped to return success,
@@ -5546,6 +5647,11 @@ TEST(MCTPInterface, spaceshipOperatorCoversAllComparisonBranches)
     EXPECT_FALSE(a <= d);
     EXPECT_TRUE(a > d);
     EXPECT_TRUE(a >= d);
+
+    // Exercise the reverse ordering paths generated by the defaulted
+    // comparator: a greater name and a lesser transport value.
+    EXPECT_TRUE(c > a);
+    EXPECT_TRUE(d < a);
 }
 
 // --- Uncovered function 2: MCTPDEndpoint move constructor ---
@@ -11915,6 +12021,54 @@ TEST_F(AsyncFixture,
     {}
 }
 
+namespace
+{
+
+class NonMctpdTestDevice final : public MCTPDevice
+{
+  public:
+    void setup(std::function<void(const std::error_code&,
+                                  const std::shared_ptr<MCTPEndpoint>&)>&&
+                   callback) override
+    {
+        static_cast<void>(std::move(callback));
+    }
+
+    void remove() override {}
+
+    std::string describe() const override
+    {
+        return "non-mctpd test device";
+    }
+
+    std::size_t id() const override
+    {
+        return 1;
+    }
+};
+
+class EndpointWithAlternateDevice final : public MCTPDEndpoint
+{
+  public:
+    explicit EndpointWithAlternateDevice(
+        std::shared_ptr<MCTPDevice> alternateDevice) :
+        MCTPDEndpoint(std::shared_ptr<MCTPDDevice>{},
+                      std::shared_ptr<sdbusplus::asio::connection>{},
+                      sdbusplus::object_path("/test/non-mctpd-device"), 1, 42),
+        alternateDevice(std::move(alternateDevice))
+    {}
+
+    std::shared_ptr<MCTPDevice> device() const override
+    {
+        return alternateDevice;
+    }
+
+  private:
+    std::shared_ptr<MCTPDevice> alternateDevice;
+};
+
+} // namespace
+
 // ===========================================================================
 // Group G326–G330: updateEndpointConnectivity() branch coverage
 //
@@ -12005,6 +12159,31 @@ TEST(MCTPDEndpointConnectivity, G329_availableNoCallbackNocrash)
     EXPECT_NO_THROW(ep->updateEndpointConnectivity("Available"));
 }
 
+TEST(MCTPDEndpointConnectivity, eventCallbacksPropagateExceptions)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "usb-event-throw", "usb0", std::vector<uint8_t>{0x20});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, nullptr, sdbusplus::object_path("/test/event-throw"), 1, 13);
+
+    ep->notifyDegraded = [](const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("degraded callback failed");
+    };
+    EXPECT_THROW(ep->updateEndpointConnectivity("Degraded"),
+                 std::runtime_error);
+
+    ep->notifyAvailable = [](const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("available callback failed");
+    };
+    EXPECT_THROW(ep->updateEndpointConnectivity("Available"),
+                 std::runtime_error);
+
+    ep->notifyRemoved = [](const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("removed callback failed");
+    };
+    EXPECT_THROW(ep->removed(), std::runtime_error);
+}
+
 // G330 — Unrecognised connectivity string hits the else branch.
 // Covers: line 776 TRUE (else — debug log only).
 TEST(MCTPDEndpointConnectivity, G330_unknownConnectivityHitsElseBranch)
@@ -12016,6 +12195,30 @@ TEST(MCTPDEndpointConnectivity, G330_unknownConnectivityHitsElseBranch)
         dev, nullptr, sdbusplus::object_path("/test/g330"), 1, 14);
 
     EXPECT_NO_THROW(ep->updateEndpointConnectivity("UnknownState"));
+}
+
+TEST(MCTPDEndpointConnectivity, degradedAndAvailableIgnoreNullOrNonMctpdDevices)
+{
+    auto nullDeviceEndpoint = std::make_shared<MCTPDEndpoint>(
+        std::shared_ptr<MCTPDDevice>{},
+        std::shared_ptr<sdbusplus::asio::connection>{},
+        sdbusplus::object_path("/test/null-device"), 1, 41);
+    auto nonMctpdDevice = std::make_shared<NonMctpdTestDevice>();
+    auto alternateDeviceEndpoint =
+        std::make_shared<EndpointWithAlternateDevice>(nonMctpdDevice);
+
+    const std::array<std::string, 2> connectivities{"Degraded", "Available"};
+    for (const std::string& connectivity : connectivities)
+    {
+        SCOPED_TRACE(connectivity);
+        EXPECT_NO_THROW(
+            nullDeviceEndpoint->updateEndpointConnectivity(connectivity));
+        EXPECT_NO_THROW(
+            alternateDeviceEndpoint->updateEndpointConnectivity(connectivity));
+    }
+
+    EXPECT_EQ(nullDeviceEndpoint->device(), nullptr);
+    EXPECT_EQ(alternateDeviceEndpoint->device(), nonMctpdDevice);
 }
 
 // ===========================================================================
@@ -13365,9 +13568,12 @@ TEST_F(AsyncFixture, G361_subscribeAsyncCallbackDeviceDestroyedBeforeCallback)
 // Build a PropertiesChanged sd_bus_message with body "sa{sv}as".
 // ifaceName: the interface name in the first field.
 // connectivityValue: if non-null, adds "Connectivity"->variant<string> to
-//   the changed map; if null, the changed map is empty.
-static sd_bus_message* buildPropertiesChangedMsg(const char* ifaceName,
-                                                 const char* connectivityValue)
+//   the changed map. connectivityNumber supplies a deliberately mismatched
+//   uint32 variant for malformed-signal coverage. If both are null, the
+//   changed map is empty.
+static sd_bus_message* buildPropertiesChangedMsg(
+    const char* ifaceName, const char* connectivityValue,
+    const uint32_t* connectivityNumber = nullptr)
 {
     sd_bus* bus = nullptr;
     (void)sd_bus_new(&bus);
@@ -13385,13 +13591,20 @@ static sd_bus_message* buildPropertiesChangedMsg(const char* ifaceName,
 
     // field 2: changed properties a{sv}
     (void)sd_bus_message_open_container(msg, 'a', "{sv}");
-    if (connectivityValue != nullptr)
+    if (connectivityValue != nullptr || connectivityNumber != nullptr)
     {
         (void)sd_bus_message_open_container(msg, 'e', "sv");
         (void)sd_bus_message_append_basic(msg, 's', "Connectivity");
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
-        (void)sd_bus_message_open_container(msg, 'v', "s");
-        (void)sd_bus_message_append_basic(msg, 's', connectivityValue);
+        if (connectivityValue != nullptr)
+        {
+            (void)sd_bus_message_open_container(msg, 'v', "s");
+            (void)sd_bus_message_append_basic(msg, 's', connectivityValue);
+        }
+        else
+        {
+            (void)sd_bus_message_open_container(msg, 'v', "u");
+            (void)sd_bus_message_append_basic(msg, 'u', connectivityNumber);
+        }
         (void)sd_bus_message_close_container(msg); // v
         (void)sd_bus_message_close_container(msg); // e
     }
@@ -14631,4 +14844,749 @@ TEST_F(AsyncFixture, bridgeResetScenarioOnlyNewEidsArePingedAfterReconnect)
     {
         driveAsyncCallSuccess();
     }
+}
+
+TEST(MCTPDDevice, idIsStableAndIncludesInterfaceAndPhysicalAddress)
+{
+    auto original = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "primary", "mctp-usb0", std::vector<uint8_t>{0x20, 0x30});
+    auto sameIdentity = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "different-name", "mctp-usb0",
+        std::vector<uint8_t>{0x20, 0x30});
+    auto differentInterface = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "primary", "mctp-usb1", std::vector<uint8_t>{0x20, 0x30});
+    auto differentAddress = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "primary", "mctp-usb0", std::vector<uint8_t>{0x20, 0x31});
+    auto emptyAddress = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "primary", "mctp-usb0", std::vector<uint8_t>{});
+
+    EXPECT_EQ(original->id(), original->id());
+    EXPECT_EQ(original->id(), sameIdentity->id());
+    EXPECT_NE(original->id(), differentInterface->id());
+    EXPECT_NE(original->id(), differentAddress->id());
+    EXPECT_NE(original->id(), emptyAddress->id());
+}
+
+TEST(MCTPDDevice, onDiscoveryMatchRuleWithoutConnectionReturnsEarly)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "usb-no-connection", "mctp-usb0", std::vector<uint8_t>{0x20});
+
+    EXPECT_NO_THROW(dev->onDiscoveryMatchRule());
+    EXPECT_EQ(dev->discoveryNotifyMatch, nullptr);
+    EXPECT_EQ(dev->discoveryCheckTimer, nullptr);
+}
+
+TEST(MCTPDDevice, performHealthCheckWithoutInitializedTimerReturnsEarly)
+{
+    constexpr uint8_t eid = 71;
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "usb-no-health-timer", "mctp-usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(eid), std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::optional<uint8_t>(1));
+    suppressedHealthCheckEids.erase(eid);
+
+    EXPECT_EQ(dev->healthTimer, nullptr);
+    EXPECT_NO_THROW(dev->performHealthCheck());
+    EXPECT_FALSE(suppressedHealthCheckEids.contains(eid));
+}
+
+TEST_F(AsyncFixture, performHealthCheckSkipsIgnoredBridgePoolEid)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-ignore-bridge-eid", "mctp-usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::optional<uint8_t>(10),
+        std::optional<uint8_t>(12),
+        std::optional<std::vector<uint8_t>>(std::vector<uint8_t>{11}),
+        std::nullopt, std::optional<uint8_t>(1),
+        std::vector<std::string>{"usb-ignore-bridge-eid", "bridge-10",
+                                 "bridge-11", "bridge-12"});
+    auto ep = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    dev->setEndpointForTest(ep);
+    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+
+    EXPECT_TRUE(dev->unresponsiveBridgePoolEids.contains(10));
+    EXPECT_FALSE(dev->unresponsiveBridgePoolEids.contains(11));
+    EXPECT_TRUE(dev->unresponsiveBridgePoolEids.contains(12));
+
+    dev->performHealthCheck();
+
+    // The main EID and the two non-ignored bridge EIDs are pinged.
+    EXPECT_EQ(gPendingAsyncCalls.size(), 3U);
+    EXPECT_TRUE(dev->bridgePoolPingFailures.contains(10));
+    EXPECT_FALSE(dev->bridgePoolPingFailures.contains(11));
+    EXPECT_TRUE(dev->bridgePoolPingFailures.contains(12));
+
+    while (!gPendingAsyncCalls.empty())
+    {
+        driveAsyncCallError();
+    }
+    dev->healthTimer->cancel();
+    io.poll();
+    suppressedHealthCheckEids.clear();
+}
+
+TEST(MCTPDDevice, recoveryTimeoutOutsideRecoveryModeIsNoop)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "usb-not-recovering", "mctp-usb0", std::vector<uint8_t>{0x20});
+    dev->inHealthRecoveryMode = false;
+
+    EXPECT_NO_THROW(dev->onRecoveryTimeout());
+    EXPECT_FALSE(dev->inHealthRecoveryMode);
+    EXPECT_EQ(dev->healthTimer, nullptr);
+}
+
+TEST_F(AsyncFixture, armRecoveryTimeoutReusesExistingTimer)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-rearm-recovery", "mctp-usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::optional<uint8_t>(1));
+
+    dev->armRecoveryTimeout();
+    ASSERT_NE(dev->recoveryTimer, nullptr);
+    auto* const originalTimer = dev->recoveryTimer.get();
+
+    dev->armRecoveryTimeout();
+    EXPECT_EQ(dev->recoveryTimer.get(), originalTimer);
+
+    dev->cancelRecoveryTimeout();
+    io.poll();
+}
+
+TEST_F(AsyncFixture, healthMonitoringTimerExpiryPerformsHealthCheck)
+{
+    constexpr uint8_t eid = 73;
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-health-timer-expiry", "mctp-usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(eid), std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt, std::optional<uint8_t>(1));
+
+    dev->startHealthMonitoring();
+    ASSERT_NE(dev->healthTimer, nullptr);
+
+    io.run_for(std::chrono::milliseconds(1100));
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallSuccess();
+
+    dev->stopHealthMonitoring();
+    io.poll();
+    suppressedHealthCheckEids.erase(eid);
+}
+
+TEST_F(AsyncFixture, healthTimerCallbacksIgnoreExpiredDevices)
+{
+    constexpr uint8_t startTimerEid = 74;
+    auto startTimerDevice = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-start-timer-expired", "mctp-usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(startTimerEid),
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+        std::optional<uint8_t>(1));
+    startTimerDevice->startHealthMonitoring();
+    ASSERT_NE(startTimerDevice->healthTimer, nullptr);
+    auto startTimer = std::move(startTimerDevice->healthTimer);
+    startTimerDevice.reset();
+
+    constexpr uint8_t rescheduleTimerEid = 75;
+    auto rescheduleTimerDevice = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-reschedule-timer-expired", "mctp-usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(rescheduleTimerEid),
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+        std::optional<uint8_t>(1));
+    rescheduleTimerDevice->healthTimer =
+        std::make_unique<boost::asio::steady_timer>(io);
+    rescheduleTimerDevice->performHealthCheck();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    auto rescheduleTimer = std::move(rescheduleTimerDevice->healthTimer);
+    rescheduleTimerDevice.reset();
+
+    // Release the pending EndpointPing callback after its device has expired.
+    driveAsyncCallSuccess();
+    io.restart();
+    EXPECT_GE(io.run_for(std::chrono::milliseconds(1100)), 2U);
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+
+    suppressedHealthCheckEids.erase(startTimerEid);
+    suppressedHealthCheckEids.erase(rescheduleTimerEid);
+}
+
+namespace
+{
+
+std::shared_ptr<MCTPDEndpoint> attachEndpointForBranchCoverage(
+    const std::shared_ptr<TestUSBMCTPDDevice>& dev,
+    const std::shared_ptr<sdbusplus::asio::connection>& conn, uint8_t eid)
+{
+    auto endpoint = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/" +
+            std::to_string(eid)),
+        1, eid);
+    dev->setEndpointForTest(endpoint);
+    return endpoint;
+}
+
+void driveAsyncCallNamedError(const char* errorName)
+{
+    ASSERT_FALSE(gPendingAsyncCalls.empty());
+    PendingAsync pending = gPendingAsyncCalls.front();
+    gPendingAsyncCalls.erase(gPendingAsyncCalls.begin());
+
+    sd_bus_message* reply = nullptr;
+    const sd_bus_error error{errorName, "Mock failure", 0};
+    ASSERT_GE(sd_bus_message_new_method_error(pending.request, &reply, &error),
+              0);
+    static uint64_t replySerial = 10000;
+    ASSERT_GE(sd_bus_message_seal(reply, ++replySerial, 0), 0);
+    EXPECT_GE(pending.callback(reply, pending.userdata, nullptr), 0);
+
+    sd_bus_message_unref(reply);
+    sd_bus_message_unref(pending.request);
+}
+
+} // namespace
+
+TEST_F(FakeConnFixture, discoveryNotifyMatchCallbackDispatchesWhileDeviceAlive)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-discovery-match-alive", "usb0", std::vector<uint8_t>{0x20});
+    bool setupRequested = false;
+    dev->setRequestSetupCallback(
+        [&setupRequested](const std::shared_ptr<MCTPDDevice>&) {
+            setupRequested = true;
+        });
+
+    dev->onDiscoveryMatchRule();
+    ASSERT_NE(dev->discoveryNotifyMatch, nullptr);
+    ASSERT_NE(dev->discoveryNotifyMatch->_callback, nullptr);
+
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW((*dev->discoveryNotifyMatch->_callback)(msg));
+    EXPECT_TRUE(setupRequested);
+}
+
+TEST_F(FakeConnFixture, discoveryNotifyMatchCallbackIgnoresExpiredDevice)
+{
+    decltype(std::declval<sdbusplus::bus::match_t>()._callback) callback;
+    std::weak_ptr<TestUSBMCTPDDevice> weakDevice;
+    {
+        auto dev = std::make_shared<TestUSBMCTPDDevice>(
+            conn, "usb-discovery-match-expired", "usb0",
+            std::vector<uint8_t>{0x20});
+        weakDevice = dev;
+        dev->onDiscoveryMatchRule();
+        ASSERT_NE(dev->discoveryNotifyMatch, nullptr);
+        callback = std::move(dev->discoveryNotifyMatch->_callback);
+    }
+    ASSERT_NE(callback, nullptr);
+    ASSERT_TRUE(weakDevice.expired());
+
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW((*callback)(msg));
+}
+
+TEST_F(AsyncFixture, connectivityMatchCallbackDispatchesWhileEndpointAlive)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-connectivity-match-alive", "usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(9));
+    auto endpoint = std::make_shared<MCTPDEndpoint>(
+        dev, conn,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+        1, 9);
+    bool degraded = false;
+    endpoint->subscribe(
+        [&degraded](const std::shared_ptr<MCTPEndpoint>&) { degraded = true; },
+        [](const std::shared_ptr<MCTPEndpoint>&) {},
+        [](const std::shared_ptr<MCTPEndpoint>&) {});
+    auto& connectivityMatch = endpoint->connectivityMatch;
+    if (!connectivityMatch.has_value())
+    {
+        ADD_FAILURE() << "subscribe did not create a connectivity match";
+        return;
+    }
+    auto& matchCallback = connectivityMatch->_callback;
+    ASSERT_NE(matchCallback, nullptr);
+
+    sd_bus_message* raw =
+        buildPropertiesChangedMsg(kMctpdEndpointControlIface, "Degraded");
+    ASSERT_NE(raw, nullptr);
+    sdbusplus::message_t msg(raw, std::false_type{});
+    EXPECT_NO_THROW((*matchCallback)(msg));
+    EXPECT_TRUE(degraded);
+}
+
+TEST_F(AsyncFixture, connectivityMatchCallbackIgnoresExpiredEndpoint)
+{
+    decltype(std::declval<sdbusplus::bus::match_t>()._callback) callback;
+    std::weak_ptr<MCTPDEndpoint> weakEndpoint;
+    {
+        auto dev = std::make_shared<TestUSBMCTPDDevice>(
+            conn, "usb-connectivity-match-expired", "usb0",
+            std::vector<uint8_t>{0x20}, std::optional<uint8_t>(9));
+        auto endpoint = std::make_shared<MCTPDEndpoint>(
+            dev, conn,
+            sdbusplus::object_path(
+                "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
+            1, 9);
+        weakEndpoint = endpoint;
+        endpoint->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                            [](const std::shared_ptr<MCTPEndpoint>&) {},
+                            [](const std::shared_ptr<MCTPEndpoint>&) {});
+        auto& connectivityMatch = endpoint->connectivityMatch;
+        if (!connectivityMatch.has_value())
+        {
+            ADD_FAILURE() << "subscribe did not create a connectivity match";
+            return;
+        }
+        callback = std::move(connectivityMatch->_callback);
+    }
+    ASSERT_NE(callback, nullptr);
+    ASSERT_TRUE(weakEndpoint.expired());
+
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW((*callback)(msg));
+}
+
+TEST_F(AsyncFixture,
+       performDiscoveryRequestsSetupIfEndpointDisappearsDuringProbe)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-discovery-endpoint-race", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto endpoint = attachEndpointForBranchCoverage(dev, conn, 9);
+    bool setupRequested = false;
+    dev->setRequestSetupCallback(
+        [&setupRequested](const std::shared_ptr<MCTPDDevice>&) {
+            setupRequested = true;
+        });
+
+    dev->performDiscovery();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    dev->setEndpointForTest(nullptr);
+    endpoint.reset();
+
+    driveAsyncCallSuccess();
+    EXPECT_TRUE(setupRequested);
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture, performDiscoveryProbeIgnoresExpiredDevice)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-discovery-probe-expired", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto endpoint = attachEndpointForBranchCoverage(dev, conn, 9);
+
+    dev->performDiscovery();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    std::weak_ptr<TestUSBMCTPDDevice> weakDevice = dev;
+    dev->setEndpointForTest(nullptr);
+    endpoint.reset();
+    dev.reset();
+    ASSERT_TRUE(weakDevice.expired());
+
+    EXPECT_NO_THROW(driveAsyncCallSuccess());
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture, performDiscoveryLearnEndpointIgnoresExpiredDevice)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-discovery-learn-expired", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto endpoint = attachEndpointForBranchCoverage(dev, conn, 9);
+    dev->setRequestSetupCallback([](const std::shared_ptr<MCTPDDevice>&) {});
+
+    dev->performDiscovery();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallUnknownInterface();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    std::weak_ptr<TestUSBMCTPDDevice> weakDevice = dev;
+    dev->setEndpointForTest(nullptr);
+    endpoint.reset();
+    dev.reset();
+    ASSERT_TRUE(weakDevice.expired());
+    EXPECT_NO_THROW(driveAsyncCallAssignEndpoint(0, 1, "", false));
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture, performDiscoveryWithoutCallbackStopsBeforeLearnEndpoint)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-discovery-no-callback", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto endpoint = attachEndpointForBranchCoverage(dev, conn, 9);
+
+    dev->performDiscovery();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallUnknownInterface();
+
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+    EXPECT_EQ(dev->endpoint, endpoint);
+}
+
+TEST_F(AsyncFixture, performDiscoveryTreatsInvalidArgsAsAbsentBridgeInterface)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-discovery-invalid-args", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto endpoint = attachEndpointForBranchCoverage(dev, conn, 9);
+    dev->setRequestSetupCallback([](const std::shared_ptr<MCTPDDevice>&) {});
+
+    dev->performDiscovery();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallNamedError(SD_BUS_ERROR_INVALID_ARGS);
+
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallError();
+    EXPECT_EQ(dev->endpoint, endpoint);
+}
+
+TEST_F(AsyncFixture, performDiscoveryChecksEveryLearnEndpointResetCondition)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-discovery-reset-conditions", "usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(9));
+    auto endpoint = attachEndpointForBranchCoverage(dev, conn, 9);
+    int setupRequests = 0;
+    dev->setRequestSetupCallback(
+        [&setupRequests](const std::shared_ptr<MCTPDDevice>&) {
+            ++setupRequests;
+        });
+
+    dev->performDiscovery();
+    driveAsyncCallUnknownInterface();
+    driveAsyncCallAssignEndpoint(0, 1, "", true);
+    EXPECT_EQ(setupRequests, 0);
+
+    dev->performDiscovery();
+    driveAsyncCallUnknownInterface();
+    driveAsyncCallAssignEndpoint(
+        0, 1, "/au/com/codeconstruct/mctp1/networks/1/endpoints/0", false);
+    EXPECT_EQ(setupRequests, 0);
+    EXPECT_EQ(dev->endpoint, endpoint);
+}
+
+TEST_F(AsyncFixture, bridgeLearnEndpointErrorRestoresUnresponsiveState)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-bridge-learn-error", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::optional<uint8_t>(10),
+        std::optional<uint8_t>(10), std::nullopt, std::nullopt,
+        std::optional<uint8_t>(1));
+    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+
+    dev->performHealthCheck();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 2U);
+    driveAsyncCallSuccess();
+    driveAsyncCallSuccess();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    EXPECT_FALSE(dev->unresponsiveBridgePoolEids.contains(10));
+
+    driveAsyncCallError();
+    EXPECT_TRUE(dev->unresponsiveBridgePoolEids.contains(10));
+    dev->healthTimer->cancel();
+}
+
+TEST_F(AsyncFixture, bridgeLearnEndpointCallbackIgnoresExpiredDevice)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-bridge-learn-expired", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::optional<uint8_t>(10),
+        std::optional<uint8_t>(10), std::nullopt, std::nullopt,
+        std::optional<uint8_t>(1));
+    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+
+    dev->performHealthCheck();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 2U);
+    driveAsyncCallSuccess();
+    driveAsyncCallSuccess();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    std::weak_ptr<TestUSBMCTPDDevice> weakDevice = dev;
+    dev.reset();
+    ASSERT_TRUE(weakDevice.expired());
+    EXPECT_NO_THROW(driveAsyncCallSuccess());
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(AsyncFixture, mainTimedOutPingWithoutDiscoverySkipsErrorLog)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-main-undiscovered-timeout", "usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(9), std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt, std::optional<uint8_t>(1));
+    auto endpoint = attachEndpointForBranchCoverage(dev, conn, 9);
+    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+    dev->consecutivePingFailures = dev->pingFailureThreshold - 1;
+
+    dev->performHealthCheck();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallErrorTimedOut();
+
+    EXPECT_EQ(dev->consecutivePingFailures, dev->pingFailureThreshold);
+    EXPECT_FALSE(dev->inHealthRecoveryMode);
+    EXPECT_EQ(dev->endpoint, endpoint);
+    dev->healthTimer->cancel();
+}
+
+TEST_F(AsyncFixture, bridgeTimedOutPingWithoutDiscoverySkipsErrorLog)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-bridge-undiscovered-timeout", "usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(9),
+        std::optional<uint8_t>(10), std::optional<uint8_t>(10), std::nullopt,
+        std::nullopt, std::optional<uint8_t>(1));
+    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+    dev->bridgePoolPingFailures[10] = dev->pingFailureThreshold - 1;
+
+    dev->performHealthCheck();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 2U);
+    driveAsyncCallSuccess();
+    driveAsyncCallErrorTimedOut();
+
+    EXPECT_EQ(dev->bridgePoolPingFailures[10], dev->pingFailureThreshold);
+    EXPECT_TRUE(dev->unresponsiveBridgePoolEids.contains(10));
+    dev->healthTimer->cancel();
+}
+
+TEST_F(AsyncFixture, bridgeRecoveryDefersLearnEndpointDuringDiscovery)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-bridge-discovery-pending", "usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(9),
+        std::optional<uint8_t>(10), std::optional<uint8_t>(10), std::nullopt,
+        std::nullopt, std::optional<uint8_t>(1));
+    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+    dev->discoveryNeeded = true;
+
+    dev->performHealthCheck();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 2U);
+    driveAsyncCallSuccess();
+    driveAsyncCallSuccess();
+
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+    EXPECT_FALSE(dev->unresponsiveBridgePoolEids.contains(10));
+    dev->healthTimer->cancel();
+}
+
+TEST(MCTPDDevice, armRecoveryTimeoutWithoutConnectionIsNoop)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "usb-recovery-no-connection", "usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(9), std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt, std::optional<uint8_t>(1));
+
+    dev->armRecoveryTimeout();
+    EXPECT_EQ(dev->recoveryTimer, nullptr);
+}
+
+TEST_F(AsyncFixture, setupNotAllocatedWithoutEndpointStillFinalisesEndpoint)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-setup-unallocated-new", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    std::shared_ptr<MCTPEndpoint> addedEndpoint;
+
+    dev->setup([&addedEndpoint](const std::error_code& ec,
+                                const std::shared_ptr<MCTPEndpoint>& endpoint) {
+        EXPECT_FALSE(ec);
+        addedEndpoint = endpoint;
+    });
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    driveAsyncCallAssignEndpoint(
+        9, 1, "/au/com/codeconstruct/mctp1/networks/1/endpoints/9", false);
+
+    EXPECT_NE(addedEndpoint, nullptr);
+    EXPECT_EQ(dev->endpoint, addedEndpoint);
+    dev->setEndpointForTest(nullptr);
+    addedEndpoint.reset();
+}
+
+class InterfaceResolverTempDirTest : public ::testing::Test
+{
+  protected:
+    std::filesystem::path root;
+
+    static void createDirectory(const std::filesystem::path& path)
+    {
+        ASSERT_EQ(mkdir(path.c_str(), 0700), 0);
+    }
+
+    void redirect(const std::filesystem::path& requested)
+    {
+        testDirectoryIteratorRedirects().insert_or_assign(requested, root);
+    }
+
+    void SetUp() override
+    {
+        const auto* info =
+            ::testing::UnitTest::GetInstance()->current_test_info();
+        ASSERT_NE(info, nullptr);
+        root = std::filesystem::temp_directory_path() /
+               ("mctp-interface-resolver-" + std::to_string(getpid()) + "-" +
+                info->name());
+        std::filesystem::remove_all(root);
+        createDirectory(root);
+    }
+
+    void TearDown() override
+    {
+        testDirectoryIteratorRedirects().clear();
+        std::filesystem::remove_all(root);
+    }
+};
+
+TEST_F(InterfaceResolverTempDirTest, I2cReturnsFirstNetworkInterface)
+{
+    redirect("/sys/bus/i2c/devices/i2c-7/net");
+    createDirectory(root / "mctpi2c-test");
+    EXPECT_EQ(I2CMCTPDDevice::interfaceFromBus(7), "mctpi2c-test");
+}
+
+TEST_F(InterfaceResolverTempDirTest, I2cRejectsEmptyNetworkDirectory)
+{
+    redirect("/sys/bus/i2c/devices/i2c-7/net");
+    EXPECT_THROW(I2CMCTPDDevice::interfaceFromBus(7), MCTPException);
+}
+
+TEST_F(InterfaceResolverTempDirTest, SpiReturnsFirstNetworkInterface)
+{
+    redirect("/sys/bus/spi/devices/spi3.2/net");
+    createDirectory(root / "mctpspi-test");
+    EXPECT_EQ(SPIMCTPDDevice::interfaceFromBusCs(3, 2), "mctpspi-test");
+}
+
+TEST_F(InterfaceResolverTempDirTest, SpiRejectsEmptyNetworkDirectory)
+{
+    redirect("/sys/bus/spi/devices/spi3.2/net");
+    EXPECT_THROW(SPIMCTPDDevice::interfaceFromBusCs(3, 2), MCTPException);
+}
+
+TEST_F(InterfaceResolverTempDirTest, I3cSkipsRegularFileAndReportsNoMatch)
+{
+    redirect("/sys/devices/virtual/net");
+    std::ofstream(root / "mctpi3c7") << "not a network directory";
+    EXPECT_THROW(I3CMCTPDDevice::interfaceFromBus(7), MCTPException);
+}
+
+TEST_F(InterfaceResolverTempDirTest, I3cSkipsDirectoryWithWrongName)
+{
+    redirect("/sys/devices/virtual/net");
+    createDirectory(root / "mctpi3c8");
+    EXPECT_THROW(I3CMCTPDDevice::interfaceFromBus(7), MCTPException);
+}
+
+TEST_F(InterfaceResolverTempDirTest, I3cReturnsMatchingDirectory)
+{
+    redirect("/sys/devices/virtual/net");
+    createDirectory(root / "mctpi3c7");
+    EXPECT_EQ(I3CMCTPDDevice::interfaceFromBus(7), "mctpi3c7");
+}
+
+TEST_F(InterfaceResolverTempDirTest, I3cRejectsEmptyNetworkDirectory)
+{
+    redirect("/sys/devices/virtual/net");
+    EXPECT_THROW(I3CMCTPDDevice::interfaceFromBus(7), MCTPException);
+}
+
+TEST_F(InterfaceResolverTempDirTest, I3cRejectsMissingNetworkDirectory)
+{
+    testDirectoryIteratorRedirects().insert_or_assign(
+        "/sys/devices/virtual/net", root / "does-not-exist");
+    EXPECT_THROW(I3CMCTPDDevice::interfaceFromBus(7), MCTPException);
+}
+
+TEST_F(InterfaceResolverTempDirTest, I2cFactoryCreatesEveryEndpointIdLayout)
+{
+    redirect("/sys/bus/i2c/devices/i2c-7/net");
+    createDirectory(root / "test-i2c-7");
+    const SensorBaseConfigMap base{{"Type", std::string("MCTPI2CTarget")},
+                                   {"Name", std::string("i2c-main,i2c-bridge")},
+                                   {"Address", std::string("32")},
+                                   {"Bus", std::string("7")}};
+
+    auto withoutStaticEid = I2CMCTPDDevice::from({}, base);
+    ASSERT_NE(withoutStaticEid, nullptr);
+    EXPECT_EQ(withoutStaticEid->getInterface(), "test-i2c-7");
+    EXPECT_FALSE(withoutStaticEid->getEid().has_value());
+
+    auto staticConfig = base;
+    staticConfig.insert_or_assign("StaticEndpointID", std::string("9"));
+    auto withStaticEid = I2CMCTPDDevice::from({}, staticConfig);
+    ASSERT_NE(withStaticEid, nullptr);
+    EXPECT_EQ(withStaticEid->getEid(), std::optional<uint8_t>{9});
+    EXPECT_TRUE(withStaticEid->managesEid(9));
+
+    auto bridgeConfig = staticConfig;
+    bridgeConfig.insert_or_assign("BridgePoolStartEid", std::string("10"));
+    bridgeConfig.insert_or_assign("BridgePoolEndEID", std::string("10"));
+    auto bridge = I2CMCTPDDevice::from({}, bridgeConfig);
+    ASSERT_NE(bridge, nullptr);
+    EXPECT_TRUE(bridge->managesEid(10));
+    EXPECT_EQ(bridge->getNameForEid(10),
+              std::optional<std::string>{"i2c-bridge"});
+}
+
+TEST_F(InterfaceResolverTempDirTest, I3cFactoryCreatesEveryEndpointIdLayout)
+{
+    redirect("/sys/devices/virtual/net");
+    createDirectory(root / "mctpi3c8");
+    const SensorBaseConfigMap base{{"Type", std::string("MCTPI3CTarget")},
+                                   {"Name", std::string("i3c-main,i3c-bridge")},
+                                   {"Address", std::vector<uint64_t>{0x22}},
+                                   {"Bus", std::string("8")}};
+
+    auto withoutStaticEid = I3CMCTPDDevice::from({}, base);
+    ASSERT_NE(withoutStaticEid, nullptr);
+    EXPECT_EQ(withoutStaticEid->getInterface(), "mctpi3c8");
+    EXPECT_FALSE(withoutStaticEid->getEid().has_value());
+
+    auto staticConfig = base;
+    staticConfig.insert_or_assign("StaticEndpointID", std::string("11"));
+    auto withStaticEid = I3CMCTPDDevice::from({}, staticConfig);
+    ASSERT_NE(withStaticEid, nullptr);
+    EXPECT_EQ(withStaticEid->getEid(), std::optional<uint8_t>{11});
+    EXPECT_TRUE(withStaticEid->managesEid(11));
+
+    auto bridgeConfig = staticConfig;
+    bridgeConfig.insert_or_assign("BridgePoolStartEid", std::string("12"));
+    bridgeConfig.insert_or_assign("BridgePoolEndEID", std::string("12"));
+    auto bridge = I3CMCTPDDevice::from({}, bridgeConfig);
+    ASSERT_NE(bridge, nullptr);
+    EXPECT_TRUE(bridge->managesEid(12));
+    EXPECT_EQ(bridge->getNameForEid(12),
+              std::optional<std::string>{"i3c-bridge"});
+}
+
+TEST_F(InterfaceResolverTempDirTest,
+       SpiFactoryCreatesWithAndWithoutStaticEndpointId)
+{
+    redirect("/sys/bus/spi/devices/spi3.2/net");
+    createDirectory(root / "test-spi-3.2");
+    const SensorBaseConfigMap base{{"Type", std::string("MCTPSPIDevice")},
+                                   {"Name", std::string("spi-main")},
+                                   {"Bus", std::string("3")},
+                                   {"ChipSelect", std::string("2")}};
+
+    auto withoutStaticEid = SPIMCTPDDevice::from({}, base);
+    ASSERT_NE(withoutStaticEid, nullptr);
+    EXPECT_EQ(withoutStaticEid->getInterface(), "test-spi-3.2");
+    EXPECT_FALSE(withoutStaticEid->getEid().has_value());
+
+    auto staticConfig = base;
+    staticConfig.insert_or_assign("StaticEndpointID", std::string("13"));
+    auto withStaticEid = SPIMCTPDDevice::from({}, staticConfig);
+    ASSERT_NE(withStaticEid, nullptr);
+    EXPECT_EQ(withStaticEid->getEid(), std::optional<uint8_t>{13});
+    EXPECT_TRUE(withStaticEid->managesEid(13));
 }

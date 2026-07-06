@@ -65,9 +65,20 @@ socket_wrap_link_args = sd_bus_wrap_link_args + [
     '-Wl,--wrap,sd_bus_call_async',
 ]
 
+heartbeat_wrap_link_args = socket_wrap_link_args + [
+    '-Wl,--wrap,sd_event_new',
+    '-Wl,--wrap,sd_event_add_time_relative',
+]
+
 # Additional wrap for tests that link MCTPCustomDevices.cpp (defines writeSysfsFile)
 custom_devices_wrap_link_args = socket_wrap_link_args + [
     '-Wl,--wrap,_Z14writeSysfsFileRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEES6_',
+]
+
+reactor_main_wrap_link_args = custom_devices_wrap_link_args + [
+    '-Wl,--wrap,main',
+    '-Wl,--wrap,uname',
+    '-Wl,--wrap,_ZNSt10filesystem6statusERKNS_7__cxx114pathE',
 ]
 
 test(
@@ -102,6 +113,12 @@ usb_recovery_wrap_link_args = [
     '-Wl,--wrap,libusb_claim_interface',
     '-Wl,--wrap,libusb_release_interface',
     '-Wl,--wrap,libusb_clear_halt',
+    '-Wl,--wrap,libusb_init',
+    '-Wl,--wrap,libusb_close',
+    '-Wl,--wrap,libusb_exit',
+    '-Wl,--wrap,open',
+    '-Wl,--wrap,open64',
+    '-Wl,--wrap,_ZNSt10filesystem16weakly_canonicalERKNS_7__cxx114pathERSt10error_code',
 ]
 
 test(
@@ -157,9 +174,10 @@ test(
     executable(
         'test_MCTPEndpointUtils',
         'test_MCTPEndpointUtils.cpp',
-        '../MCTPEndpointUtils.cpp',
+        'sd_bus_wrappers.cpp',
         'phosphor_logging_drain.cpp',
         cpp_args: boost_asio_test_backend_args,
+        link_args: socket_wrap_link_args,
         dependencies: [ut_deps_list, utils_dep],
         implicit_include_directories: false,
         include_directories: '..',
@@ -178,7 +196,9 @@ test(
         'filesystem_wrappers.cpp',
         'phosphor_logging_drain.cpp',
         cpp_args: boost_asio_test_backend_args + ['-fno-access-control'],
-        link_args: custom_devices_wrap_link_args,
+        link_args: custom_devices_wrap_link_args + [
+            '-Wl,--wrap,_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode',
+        ],
         dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
         include_directories: '..',
@@ -217,12 +237,13 @@ test(
         '../MCTPBridgePoolDevice.cpp',
         'sd_bus_wrappers.cpp',
         'filesystem_wrappers.cpp',
+        'reactor_main_interposers.cpp',
         'phosphor_logging_drain.cpp',
         cpp_args: subobject_linkage_disable_args + boost_asio_test_backend_args + [
             '-fno-access-control',
         ],
-        link_args: custom_devices_wrap_link_args,
-        dependencies: [gmock_dep, ut_deps_list, utils_dep, libusb_dep],
+        link_args: reactor_main_wrap_link_args,
+        dependencies: [gmock_dep, default_deps, utils_dep, libusb_dep],
         implicit_include_directories: false,
         include_directories: '..',
     ),
@@ -236,12 +257,14 @@ test(
         'sd_bus_wrappers.cpp',
         cpp_args: subobject_linkage_disable_args + boost_asio_test_backend_args + [
             '-fno-access-control',
-            '-DMCTP_HEARTBEAT_RESTART_NOTIFICATION=false',
+            '-DMCTP_HEARTBEAT_RESTART_NOTIFICATION=' + (
+                get_option('mctp-heartbeat-restart-notification').enabled() ? 'true' : 'false'
+            ),
         ],
-        link_args: socket_wrap_link_args,
+        link_args: heartbeat_wrap_link_args,
         dependencies: [gmock_dep, ut_deps_list, utils_dep],
         implicit_include_directories: false,
         include_directories: '..',
     ),
-    timeout: 120,
+    timeout: 180,
 )

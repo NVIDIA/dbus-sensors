@@ -873,6 +873,79 @@ TEST(MCTPReactor, onMctpdEndpointInterfacesAddedIgnoresBadEndpointPath)
     EXPECT_NO_THROW(reactor->onMctpdEndpointInterfacesAdded(msg));
 }
 
+TEST(MCTPReactor,
+     onMctpdEndpointInterfacesAddedIgnoresPathWithoutEndpointsSegment)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto observer =
+        std::make_shared<TestReactorMCTPDDevice>(nullptr, 0, 0, 255);
+    reactor->manageMCTPDevice("/invalid-path-observer", observer);
+    ASSERT_TRUE(observer->discoveredMctpEids.empty());
+    const auto statesBefore = reactor->states;
+
+    sd_bus_message* rawMsg = buildReactorInterfacesAddedMessage(
+        "/au/com/codeconstruct/mctp1/networks/1", kMctpdEndpointControlIface,
+        true);
+    if (rawMsg == nullptr)
+    {
+        GTEST_SKIP() << "sd_bus_message_new_signal requires an initialized bus";
+    }
+
+    sdbusplus::message_t msg(rawMsg, std::false_type{});
+    EXPECT_NO_THROW(reactor->onMctpdEndpointInterfacesAdded(msg));
+    EXPECT_TRUE(observer->discoveredMctpEids.empty());
+    EXPECT_EQ(reactor->states, statesBefore);
+}
+
+TEST(MCTPReactor, onMctpdEndpointInterfacesAddedIgnoresOutOfRangeEid)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto observer =
+        std::make_shared<TestReactorMCTPDDevice>(nullptr, 0, 0, 255);
+    reactor->manageMCTPDevice("/invalid-eid-observer", observer);
+    ASSERT_TRUE(observer->discoveredMctpEids.empty());
+    const auto statesBefore = reactor->states;
+
+    sd_bus_message* rawMsg = buildReactorInterfacesAddedMessage(
+        "/au/com/codeconstruct/mctp1/networks/1/endpoints/999",
+        kMctpdEndpointControlIface, true);
+    if (rawMsg == nullptr)
+    {
+        GTEST_SKIP() << "sd_bus_message_new_signal requires an initialized bus";
+    }
+
+    sdbusplus::message_t msg(rawMsg, std::false_type{});
+    EXPECT_NO_THROW(reactor->onMctpdEndpointInterfacesAdded(msg));
+    EXPECT_TRUE(observer->discoveredMctpEids.empty());
+    EXPECT_EQ(reactor->states, statesBefore);
+}
+
+TEST(MCTPReactor, onMctpdEndpointInterfacesAddedIgnoresTrailingEidGarbage)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto observer =
+        std::make_shared<TestReactorMCTPDDevice>(nullptr, 0, 0, 255);
+    reactor->manageMCTPDevice("/trailing-eid-observer", observer);
+    ASSERT_TRUE(observer->discoveredMctpEids.empty());
+    const auto statesBefore = reactor->states;
+
+    sd_bus_message* rawMsg = buildReactorInterfacesAddedMessage(
+        "/au/com/codeconstruct/mctp1/networks/1/endpoints/9junk",
+        kMctpdEndpointControlIface, true);
+    if (rawMsg == nullptr)
+    {
+        GTEST_SKIP() << "sd_bus_message_new_signal requires an initialized bus";
+    }
+
+    sdbusplus::message_t msg(rawMsg, std::false_type{});
+    EXPECT_NO_THROW(reactor->onMctpdEndpointInterfacesAdded(msg));
+    EXPECT_TRUE(observer->discoveredMctpEids.empty());
+    EXPECT_EQ(reactor->states, statesBefore);
+}
+
 TEST(MCTPReactor, onMctpdEndpointInterfacesAddedIgnoresMissingControlInterface)
 {
     MockAssociationServer assoc{};
@@ -4561,29 +4634,6 @@ TEST_F(MCTPReactorFixture, degradedAndAvailableCallbacksAreInvokable)
     reactor->unmanageMCTPDevice("/test");
 }
 
-// ===========================================================================
-// handleUSBSetupFailure() recovery-branch coverage.
-// ===========================================================================
-TEST(MCTPReactor, usbRecoveryBackendFailureAtThresholdWarns)
-{
-    MockAssociationServer assoc{};
-    auto recovery = std::make_unique<MockUSBRecovery>();
-    auto* recoveryPtr = recovery.get();
-    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
-    reactor->setAutoUSBRecoveryEnabled(true);
-    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-recfail", 1);
-    device->setupHandler = [](auto&& added) {
-        std::forward<decltype(added)>(
-            added)(std::make_error_code(std::errc::timed_out), nullptr);
-    };
-    // Threshold reached on first failure; backend recovery fails -> warning.
-    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt("usb-recfail", testing::_))
-        .WillOnce(testing::DoAll(testing::SetArgReferee<1>("clear-halt failed"),
-                                 testing::Return(false)));
-    reactor->manageMCTPDevice("/test/recfail", device);
-    reactor->unmanageMCTPDevice("/test/recfail");
-}
-
 TEST(MCTPReactor, usbRecoveryDisabledAtRuntimeSkipsClearHalt)
 {
     MockAssociationServer assoc{};
@@ -4751,3 +4801,415 @@ TEST(MCTPReactorIfacesAdded, NullMessageHandledGracefully)
     sdbusplus::message_t msg(nullptr);
     EXPECT_NO_THROW(reactor->onMctpdEndpointInterfacesAdded(msg));
 }
+
+namespace
+{
+struct RemovedCallbackStateCase
+{
+    MCTPDeviceState initial;
+    std::optional<MCTPDeviceState> expected;
+    const char* name;
+};
+
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline void PrintTo(const RemovedCallbackStateCase& testCase, std::ostream* os)
+{
+    *os << testCase.name;
+}
+
+class RemovedCallbackStateTest :
+    public MCTPReactorFixture,
+    public testing::WithParamInterface<RemovedCallbackStateCase>
+{};
+
+TEST_P(RemovedCallbackStateTest, HandlesEveryDeviceState)
+{
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> removed;
+
+    EXPECT_CALL(assoc,
+                associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
+                          testing::_));
+    EXPECT_CALL(
+        assoc,
+        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"));
+    EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_))
+        .WillOnce(testing::SaveArg<2>(&removed));
+    EXPECT_CALL(*device, setup(testing::_))
+        .WillOnce(testing::InvokeArgument<0>(std::error_code(), endpoint));
+
+    reactor->manageMCTPDevice("/removed-state", device);
+    ASSERT_TRUE(static_cast<bool>(removed));
+
+    const RemovedCallbackStateCase& testCase = GetParam();
+    reactor->states[device->id()] = testCase.initial;
+    removed(endpoint);
+
+    const auto state = reactor->states.find(device->id());
+    if (testCase.expected)
+    {
+        ASSERT_NE(state, reactor->states.end());
+        EXPECT_EQ(state->second, *testCase.expected);
+        EXPECT_TRUE(reactor->devices.contains(device));
+    }
+    else
+    {
+        EXPECT_EQ(state, reactor->states.end());
+        EXPECT_FALSE(reactor->devices.contains(device));
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MCTPDeviceStates, RemovedCallbackStateTest,
+    testing::Values(
+        RemovedCallbackStateCase{MCTPDeviceState::Unmanaged,
+                                 MCTPDeviceState::Unmanaged, "Unmanaged"},
+        RemovedCallbackStateCase{MCTPDeviceState::Assigning,
+                                 MCTPDeviceState::Assigning, "Assigning"},
+        RemovedCallbackStateCase{MCTPDeviceState::Unassigned,
+                                 MCTPDeviceState::Unassigned, "Unassigned"},
+        RemovedCallbackStateCase{MCTPDeviceState::Assigned,
+                                 MCTPDeviceState::Lost, "Assigned"},
+        RemovedCallbackStateCase{MCTPDeviceState::Quarantine, std::nullopt,
+                                 "Quarantine"},
+        RemovedCallbackStateCase{MCTPDeviceState::Lost, MCTPDeviceState::Lost,
+                                 "Lost"},
+        RemovedCallbackStateCase{MCTPDeviceState::Recovering,
+                                 MCTPDeviceState::Recovering, "Recovering"},
+        RemovedCallbackStateCase{MCTPDeviceState::Recovered,
+                                 MCTPDeviceState::Lost, "Recovered"},
+        RemovedCallbackStateCase{MCTPDeviceState::Removing, std::nullopt,
+                                 "Removing"},
+        RemovedCallbackStateCase{MCTPDeviceState::Pending,
+                                 MCTPDeviceState::Unassigned, "Pending"}),
+    [](const testing::TestParamInfo<RemovedCallbackStateCase>& info) {
+        return info.param.name;
+    });
+} // namespace
+
+TEST(MCTPReactor, usbRecoveryBackendFailureAtThresholdWarns)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
+    reactor->setAutoUSBRecoveryEnabled(true);
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-recfail", 1);
+
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt("usb-recfail", testing::_))
+        .WillOnce(testing::DoAll(testing::SetArgReferee<1>("clear-halt failed"),
+                                 testing::Return(false)));
+    EXPECT_CALL(assoc, associate(testing::_, testing::_)).Times(0);
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+
+    reactor->manageMCTPDevice("/test/recfail", device);
+    reactor->unmanageMCTPDevice("/test/recfail");
+}
+
+namespace
+{
+struct TrackEndpointStateCase
+{
+    MCTPDeviceState initial;
+    const char* name;
+};
+
+class TrackEndpointRecoveredStateTest :
+    public MCTPReactorFixture,
+    public testing::WithParamInterface<TrackEndpointStateCase>
+{};
+
+TEST_P(TrackEndpointRecoveredStateTest, TransitionsToRecoveredAndAssociates)
+{
+    reactor->devices.add("/track-recovered", device);
+    reactor->states[device->id()] = GetParam().initial;
+
+    EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_));
+    EXPECT_CALL(assoc,
+                associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
+                          testing::_));
+    EXPECT_CALL(assoc, disassociate(testing::_)).Times(0);
+
+    reactor->trackEndpoint(endpoint);
+
+    ASSERT_TRUE(reactor->states.contains(device->id()));
+    EXPECT_EQ(reactor->states.at(device->id()), MCTPDeviceState::Recovered);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RecoverySources, TrackEndpointRecoveredStateTest,
+    testing::Values(
+        TrackEndpointStateCase{MCTPDeviceState::Unassigned, "Unassigned"},
+        TrackEndpointStateCase{MCTPDeviceState::Assigned, "Assigned"},
+        TrackEndpointStateCase{MCTPDeviceState::Quarantine, "Quarantine"}),
+    [](const testing::TestParamInfo<TrackEndpointStateCase>& info) {
+        return info.param.name;
+    });
+
+struct ManageStateCase
+{
+    MCTPDeviceState initial;
+    MCTPDeviceState expected;
+    bool initiallyRegistered;
+    const char* name;
+};
+
+class ManageStateBranchTest :
+    public MCTPReactorFixture,
+    public testing::WithParamInterface<ManageStateCase>
+{};
+
+TEST_P(ManageStateBranchTest, HandlesExistingState)
+{
+    const ManageStateCase& testCase = GetParam();
+    if (testCase.initiallyRegistered)
+    {
+        reactor->devices.add("/manage-state", device);
+    }
+    reactor->states[device->id()] = testCase.initial;
+
+    EXPECT_CALL(*device, setup(testing::_)).Times(0);
+    EXPECT_CALL(*device, remove()).Times(0);
+
+    reactor->manageMCTPDevice("/manage-state", device);
+
+    EXPECT_EQ(reactor->states.at(device->id()), testCase.expected);
+    EXPECT_TRUE(reactor->devices.contains(device));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ExistingStates, ManageStateBranchTest,
+    testing::Values(
+        ManageStateCase{MCTPDeviceState::Quarantine, MCTPDeviceState::Assigning,
+                        true, "Quarantine"},
+        ManageStateCase{MCTPDeviceState::Lost, MCTPDeviceState::Lost, true,
+                        "Lost"},
+        ManageStateCase{MCTPDeviceState::Recovering,
+                        MCTPDeviceState::Recovering, true, "Recovering"},
+        ManageStateCase{MCTPDeviceState::Recovered, MCTPDeviceState::Assigned,
+                        true, "Recovered"},
+        ManageStateCase{MCTPDeviceState::Removing, MCTPDeviceState::Pending,
+                        false, "Removing"},
+        ManageStateCase{MCTPDeviceState::Pending, MCTPDeviceState::Pending,
+                        true, "Pending"}),
+    [](const testing::TestParamInfo<ManageStateCase>& info) {
+        return info.param.name;
+    });
+} // namespace
+
+TEST(MCTPReactor, setupCallbackReturnsWhenDeviceExpires)
+{
+    MockAssociationServer assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*device, id()).WillRepeatedly(testing::Return(41U));
+    EXPECT_CALL(*device, describe())
+        .WillRepeatedly(testing::Return("expiring device"));
+
+    std::function<void(const std::error_code&,
+                       const std::shared_ptr<MCTPEndpoint>&)>
+        setupComplete;
+    EXPECT_CALL(*device, setup(testing::_))
+        .WillOnce([&setupComplete](auto&& callback) {
+            setupComplete = std::forward<decltype(callback)>(callback);
+        });
+
+    reactor->manageMCTPDevice("/expiring-device", device);
+    ASSERT_TRUE(static_cast<bool>(setupComplete));
+
+    reactor->devices.remove(device);
+    reactor->states.erase(device->id());
+    std::weak_ptr<MCTPDevice> weakDevice = device;
+    device.reset();
+    ASSERT_TRUE(weakDevice.expired());
+
+    setupComplete({}, nullptr);
+}
+
+TEST_F(MCTPReactorFixture, setupFailureWhileQuarantinedTerminatesDevice)
+{
+    std::function<void(const std::error_code&,
+                       const std::shared_ptr<MCTPEndpoint>&)>
+        setupComplete;
+    EXPECT_CALL(*device, setup(testing::_))
+        .WillOnce([&setupComplete](auto&& callback) {
+            setupComplete = std::forward<decltype(callback)>(callback);
+        });
+    EXPECT_CALL(*device, remove()).Times(0);
+
+    reactor->manageMCTPDevice("/quarantined-setup", device);
+    ASSERT_TRUE(static_cast<bool>(setupComplete));
+    reactor->states[device->id()] = MCTPDeviceState::Quarantine;
+
+    setupComplete(std::make_error_code(std::errc::timed_out), nullptr);
+
+    EXPECT_FALSE(reactor->states.contains(device->id()));
+    EXPECT_FALSE(reactor->devices.contains(device));
+    EXPECT_TRUE(reactor->failureCounts.contains(device));
+}
+
+TEST_F(MCTPReactorFixture, manageAssignedStateWithMissingInventoryReturns)
+{
+    reactor->states[device->id()] = MCTPDeviceState::Assigned;
+    EXPECT_CALL(*device, setup(testing::_)).Times(0);
+    EXPECT_CALL(*device, remove()).Times(0);
+
+    reactor->manageMCTPDevice("/missing-inventory", device);
+
+    EXPECT_EQ(reactor->states.at(device->id()), MCTPDeviceState::Assigned);
+    EXPECT_FALSE(reactor->devices.contains(device));
+}
+
+TEST_F(MCTPReactorFixture, unmanageUnknownInventoryInvokesCompletion)
+{
+    bool completed = false;
+    std::function<void()> completion = [&completed] { completed = true; };
+
+    reactor->unmanageMCTPDevice("/unknown-with-completion",
+                                std::move(completion));
+
+    EXPECT_TRUE(completed);
+}
+
+TEST_F(MCTPReactorFixture, unmanageRecoveringDeviceQuarantinesIt)
+{
+    reactor->devices.add("/recovering-device", device);
+    reactor->states[device->id()] = MCTPDeviceState::Recovering;
+    EXPECT_CALL(*device, remove()).Times(0);
+
+    reactor->unmanageMCTPDevice("/recovering-device");
+
+    EXPECT_EQ(reactor->states.at(device->id()), MCTPDeviceState::Quarantine);
+    EXPECT_TRUE(reactor->devices.contains(device));
+}
+
+TEST(MCTPReactor, replacementRemoveCallbackReturnsWhenReactorExpires)
+{
+    testing::NiceMock<MockAssociationServer> assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto initial = std::make_shared<CountingMCTPDevice>("expired-initial");
+    auto replacement =
+        std::make_shared<CountingMCTPDevice>("expired-replacement");
+
+    reactor->manageMCTPDevice("/replacement-expired", initial);
+    reactor->manageMCTPDevice("/replacement-expired", replacement);
+    ASSERT_EQ(initial->removeCalls, 1);
+
+    std::weak_ptr<MCTPReactor> weakReactor = reactor;
+    reactor.reset();
+    ASSERT_TRUE(weakReactor.expired());
+    initial->completeRemove();
+
+    EXPECT_EQ(replacement->setupCalls, 0);
+}
+
+TEST(MCTPReactor, replacementRemoveCallbackHandlesMissingState)
+{
+    testing::NiceMock<MockAssociationServer> assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto initial =
+        std::make_shared<CountingMCTPDevice>("missing-state-initial");
+    auto replacement =
+        std::make_shared<CountingMCTPDevice>("missing-state-replacement");
+
+    reactor->manageMCTPDevice("/replacement-missing-state", initial);
+    reactor->manageMCTPDevice("/replacement-missing-state", replacement);
+    ASSERT_EQ(reactor->states.at(replacement->id()), MCTPDeviceState::Pending);
+
+    reactor->states.erase(replacement->id());
+    initial->completeRemove();
+
+    EXPECT_FALSE(reactor->states.contains(replacement->id()));
+    EXPECT_EQ(reactor->devices.deviceFor("/replacement-missing-state"),
+              replacement);
+}
+
+TEST(MCTPReactor, replacementRemoveCallbackLeavesNonPendingStateUnchanged)
+{
+    testing::NiceMock<MockAssociationServer> assoc{};
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto initial =
+        std::make_shared<CountingMCTPDevice>("non-pending-state-initial");
+    auto replacement =
+        std::make_shared<CountingMCTPDevice>("non-pending-state-replacement");
+
+    reactor->manageMCTPDevice("/replacement-non-pending", initial);
+    reactor->manageMCTPDevice("/replacement-non-pending", replacement);
+    ASSERT_EQ(reactor->states.at(replacement->id()), MCTPDeviceState::Pending);
+
+    reactor->states[replacement->id()] = MCTPDeviceState::Recovered;
+    initial->completeRemove();
+
+    EXPECT_EQ(reactor->states.at(replacement->id()),
+              MCTPDeviceState::Recovered);
+    EXPECT_EQ(reactor->devices.deviceFor("/replacement-non-pending"),
+              replacement);
+}
+
+class TrackEndpointTerminalStateTest :
+    public testing::TestWithParam<MCTPDeviceState>
+{};
+
+TEST_P(TrackEndpointTerminalStateTest, returnsWithoutPublishingAssociation)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    auto endpoint = std::make_shared<testing::NiceMock<MockMCTPEndpoint>>();
+
+    ON_CALL(*device, id()).WillByDefault(testing::Return(0U));
+    ON_CALL(*endpoint, device()).WillByDefault(testing::Return(device));
+    EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_));
+    EXPECT_CALL(assoc, associate(testing::_, testing::_)).Times(0);
+
+    reactor->states[device->id()] = GetParam();
+    reactor->trackEndpoint(endpoint);
+
+    EXPECT_EQ(reactor->states.at(device->id()), GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TerminalStates, TrackEndpointTerminalStateTest,
+    testing::Values(MCTPDeviceState::Lost, MCTPDeviceState::Recovered,
+                    MCTPDeviceState::Removing, MCTPDeviceState::Pending));
+
+class SetupFailureNoTransitionStateTest :
+    public testing::TestWithParam<MCTPDeviceState>
+{};
+
+TEST_P(SetupFailureNoTransitionStateTest, preservesState)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    std::function<void(const std::error_code&,
+                       const std::shared_ptr<MCTPEndpoint>&)>
+        setupComplete;
+
+    ON_CALL(*device, id()).WillByDefault(testing::Return(0U));
+    ON_CALL(*device, describe())
+        .WillByDefault(testing::Return("state coverage device"));
+    EXPECT_CALL(*device, setup(testing::_))
+        .WillOnce([&setupComplete](auto&& callback) {
+            setupComplete = std::forward<decltype(callback)>(callback);
+        });
+
+    reactor->states[device->id()] = GetParam();
+    reactor->setupEndpoint(device);
+    ASSERT_TRUE(static_cast<bool>(setupComplete));
+    setupComplete(std::make_error_code(std::errc::io_error), nullptr);
+
+    EXPECT_EQ(reactor->states.at(device->id()), GetParam());
+    EXPECT_EQ(reactor->failureCounts.at(device), 1);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    NoTransitionStates, SetupFailureNoTransitionStateTest,
+    testing::Values(MCTPDeviceState::Unmanaged, MCTPDeviceState::Unassigned,
+                    MCTPDeviceState::Assigned, MCTPDeviceState::Lost,
+                    MCTPDeviceState::Recovered, MCTPDeviceState::Removing,
+                    MCTPDeviceState::Pending));

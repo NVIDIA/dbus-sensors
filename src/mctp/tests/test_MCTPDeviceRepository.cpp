@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -156,6 +157,27 @@ TEST(MCTPDeviceRepository, DR09largeRepoLifecycleLookupStaysSynchronized)
               "/inv/dr09/duplicateB");
 }
 
+class ThrowingDescribeMCTPDevice : public MCTPDevice
+{
+  public:
+    void setup(std::function<void(const std::error_code&,
+                                  const std::shared_ptr<MCTPEndpoint>&)>&&
+               /*added*/) override
+    {}
+
+    void remove() override {}
+
+    std::string describe() const override
+    {
+        throw std::runtime_error("describe failed");
+    }
+
+    std::size_t id() const override
+    {
+        return 0;
+    }
+};
+
 TEST(MCTPDeviceRepository, addAndContains)
 {
     MCTPDeviceRepository repo;
@@ -208,6 +230,18 @@ TEST(MCTPDeviceRepository, addDifferentDeviceToExistingKeyThrows)
     EXPECT_EQ(repo.inventoryFor(device1).value_or(""), "/test/inventory");
 }
 
+TEST(MCTPDeviceRepository, addConflictPropagatesDescribeFailure)
+{
+    MCTPDeviceRepository repo;
+    auto existing = std::make_shared<MockMCTPDevice>();
+    auto conflicting = std::make_shared<ThrowingDescribeMCTPDevice>();
+
+    repo.add("/test/inventory", existing);
+
+    EXPECT_THROW(repo.add("/test/inventory", conflicting), std::runtime_error);
+    EXPECT_EQ(repo.deviceFor("/test/inventory"), existing);
+}
+
 TEST(MCTPDeviceRepository, removeKnownDevice)
 {
     MCTPDeviceRepository repo;
@@ -219,6 +253,36 @@ TEST(MCTPDeviceRepository, removeKnownDevice)
     EXPECT_TRUE(repo.contains(device));
 
     repo.remove(device);
+    EXPECT_FALSE(repo.contains(device));
+}
+
+TEST(MCTPDeviceRepository, removeUnknownDeviceThrowsNoSuchDevice)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*device, describe())
+        .WillOnce(testing::Return("unknown device"));
+
+    try
+    {
+        repo.remove(device);
+        FAIL() << "Removing an unknown device should throw";
+    }
+    catch (const std::system_error& error)
+    {
+        EXPECT_EQ(error.code(),
+                  std::make_error_code(std::errc::no_such_device));
+    }
+
+    EXPECT_FALSE(repo.contains(device));
+}
+
+TEST(MCTPDeviceRepository, removeUnknownPropagatesDescribeFailure)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<ThrowingDescribeMCTPDevice>();
+
+    EXPECT_THROW(repo.remove(device), std::runtime_error);
     EXPECT_FALSE(repo.contains(device));
 }
 
@@ -855,24 +919,6 @@ TEST(MCTPDeviceRepository, G562inventoryForAfterRemove)
     repo.remove(device);
     EXPECT_FALSE(repo.inventoryFor(device).has_value());
 }
-
-// ===========================================================================
-// Group G300: remove() unknown-device branch + MCTPDDevice inline functions
-// ===========================================================================
-
-// G300 (removed): remove() of an unknown device invokes UB (dereferences
-// end() iterator).  EXPECT_DEATH with Google Test's "fast" fork style runs
-// the death-test body under the same Valgrind instance, so Valgrind reports
-// the expected crash as an error and the test suite exits non-zero.
-// The branch is already exercised indirectly; the explicit death test is
-// omitted to keep Valgrind clean.
-
-// G301 (removed): remove() of an unknown device invokes UB (dereferences
-// end() iterator).  EXPECT_DEATH with Google Test's "fast" fork style runs
-// the death-test body under the same Valgrind instance, so Valgrind reports
-// the expected crash as an error and the test suite exits non-zero.
-// The branch is already exercised indirectly; the explicit death test is
-// omitted to keep Valgrind clean.
 
 // G302: getNameForEid() with a bridge pool where the queried EID is strictly
 // below the pool start — exercises the `eid >= *bridgePoolStartEid` false
