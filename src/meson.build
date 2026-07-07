@@ -305,6 +305,10 @@ if get_option('nvidia-info').allowed()
     subdir('nvidia-info')
 endif
 
+if get_option('hmc-readiness').allowed()
+    subdir('hmc-readiness')
+endif
+
 if get_option('debug-serial-ctrl').allowed()
     executable(
         'debugserialctrl',

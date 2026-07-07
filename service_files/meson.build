@@ -44,6 +44,7 @@ unit_files = [
     ['port-ctrl', 'xyz.openbmc_project.portctrl.service'],
     ['nvidia-fw-write-protect', 'com.nvidia.fwwriteprotect.service'],
     ['debug-serial-ctrl', 'xyz.openbmc_project.debugserialctrl.service'],
+    ['hmc-readiness', 'xyz.openbmc_project.State.HMCReady.service'],
 ]
 
 fs = import('fs')

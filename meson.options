@@ -270,3 +270,9 @@ option(
     value: 'disabled',
     description: 'Build fuzz targets (clang+Linux only).',
 )
+option(
+    'hmc-readiness',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable HMC readiness FeatureReady publisher (vr-nvl-bmc).',
+)
