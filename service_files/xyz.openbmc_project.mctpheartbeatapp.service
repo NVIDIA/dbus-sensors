@@ -4,6 +4,7 @@ Requires=xyz.openbmc_project.EntityManager.service
 After=xyz.openbmc_project.EntityManager.service
 Requires=mctpd.service
 After=mctpd.service
+PartOf=mctpd.service
 Requires=xyz.openbmc_project.mctpreactor.service
 After=xyz.openbmc_project.mctpreactor.service
 
