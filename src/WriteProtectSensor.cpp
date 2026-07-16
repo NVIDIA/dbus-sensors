@@ -36,6 +36,13 @@ namespace write_protect
 void WriteProtect::addObj(const std::string& name, const Config& config)
 {
     objIfaces[name] = {config};
+
+    if (settingsIfPtr)
+    {
+        settingsIfPtr->set_property(
+            write_protect::properties::propertyWriteProtected,
+            std::filesystem::exists(writeProtectFile));
+    }
 }
 
 void WriteProtect::removeObj(const std::string& name)
