@@ -490,8 +490,11 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
             next(device, MCTPDeviceState::Assigned);
             break;
         case MCTPDeviceState::Removing:
+            // The endpoint removal may have already completed before this
+            // re-add arrived, leaving no callback to advance out of Pending.
+            // Re-add to the repo so tick() can drive re-discovery regardless.
             addDevice(path, device);
-            next(device, MCTPDeviceState::Pending);
+            next(device, MCTPDeviceState::Unassigned);
             break;
         case MCTPDeviceState::Pending:
             break;
