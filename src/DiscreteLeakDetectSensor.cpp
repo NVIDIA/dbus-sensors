@@ -341,8 +341,16 @@ std::string DiscreteLeakDetectSensor::getLeakLevelStateString(
 void DiscreteLeakDetectSensor::monitor()
 {
     waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
-    waitTimer.async_wait([this, sensorName = name](
+    std::weak_ptr<DiscreteLeakDetectSensor> weak = weak_from_this();
+    waitTimer.async_wait([weak, sensorName = name](
                              const boost::system::error_code& ec) {
+        // Bail out if the sensor was destroyed while this expired timer
+        // handler was already queued: cancel() cannot un-queue it (UAF).
+        auto self = weak.lock();
+        if (!self)
+        {
+            return; // sensor already destroyed
+        }
         if (ec == boost::asio::error::operation_aborted)
         {
             std::cerr << "DiscreteLeakDetectSensor " << sensorName
@@ -357,7 +365,7 @@ void DiscreteLeakDetectSensor::monitor()
             return;
         }
 
-        int ret = getLeakInfo();
+        int ret = self->getLeakInfo();
         if (ret < 0)
         {
             std::cerr << "DiscreteLeakDetectSensor " << sensorName
@@ -365,7 +373,7 @@ void DiscreteLeakDetectSensor::monitor()
         }
 
         // Start read for next leakage status
-        monitor();
+        self->monitor();
     });
 }
 
@@ -417,13 +425,21 @@ void DiscreteLeakDetectSensor::startShutdown()
 
         startedShutdownTimer = true;
         shutdownTimer.expires_after(std::chrono::seconds(delaySec));
-        shutdownTimer.async_wait([this, gen, sensorName = name](
+        std::weak_ptr<DiscreteLeakDetectSensor> weak = weak_from_this();
+        shutdownTimer.async_wait([weak, gen, sensorName = name](
                                      const boost::system::error_code& ec) {
-            if (gen != shutdownTimerGeneration_)
+            // Bail out if the sensor was destroyed while this expired timer
+            // handler was already queued: cancel() cannot un-queue it (UAF).
+            auto self = weak.lock();
+            if (!self)
+            {
+                return; // sensor already destroyed
+            }
+            if (gen != self->shutdownTimerGeneration_)
             {
                 return;
             }
-            startedShutdownTimer = false;
+            self->startedShutdownTimer = false;
             if (ec == boost::asio::error::operation_aborted)
             {
                 std::cout << "DiscreteLeakDetectSensor " << sensorName
@@ -439,7 +455,7 @@ void DiscreteLeakDetectSensor::startShutdown()
                 return;
             }
 
-            executeShutdown();
+            self->executeShutdown();
         });
     }
     else
