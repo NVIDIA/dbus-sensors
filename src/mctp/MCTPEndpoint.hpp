@@ -299,7 +299,8 @@ class MCTPDDevice :
                 const std::optional<std::vector<uint8_t>>& ignoreEids,
                 const std::optional<std::vector<uint8_t>>& ignoreMessageTypes,
                 std::optional<std::uint8_t> pollingInterval = std::nullopt,
-                const std::vector<std::string>& deviceNames = {});
+                const std::vector<std::string>& deviceNames = {},
+                bool indeterministicPoolSpace = false);
     MCTPDDevice(const MCTPDDevice& other) = delete;
     MCTPDDevice(MCTPDDevice&& other) = delete;
     ~MCTPDDevice() override;
@@ -430,6 +431,7 @@ class MCTPDDevice :
     const std::optional<std::vector<uint8_t>> ignoreEids;
     const std::optional<std::vector<uint8_t>> ignoreMessageTypes;
     const std::optional<std::uint8_t> pollingInterval;
+    const bool indeterministicPoolSpace;
     std::unique_ptr<sdbusplus::bus::match_t> removeMatch;
     std::unique_ptr<sdbusplus::bus::match_t> discoveryNotifyMatch;
     bool discoveryNeeded = false;
@@ -492,11 +494,12 @@ class I2CMCTPDDevice : public MCTPDDevice
         const std::optional<std::vector<uint8_t>>& ignoreMessageTypes =
             std::nullopt,
         std::optional<uint8_t> pollingInterval = std::nullopt,
-        const std::vector<std::string>& deviceNames = {}) :
+        const std::vector<std::string>& deviceNames = {},
+        bool indeterministicPoolSpace = false) :
         MCTPDDevice(connection, name, interfaceFromBus(bus), {physaddr},
                     staticEID, bridgePoolStartEid, bridgePoolEndEid,
                     std::nullopt, ignoreMessageTypes, pollingInterval,
-                    deviceNames)
+                    deviceNames, indeterministicPoolSpace)
     {}
     ~I2CMCTPDDevice() override = default;
 
@@ -523,10 +526,12 @@ class I3CMCTPDDevice : public MCTPDDevice
         std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
         std::optional<uint8_t> bridgePoolEndEid = std::nullopt,
         std::optional<uint8_t> pollingInterval = std::nullopt,
-        const std::vector<std::string>& deviceNames = {}) :
+        const std::vector<std::string>& deviceNames = {},
+        bool indeterministicPoolSpace = false) :
         MCTPDDevice(connection, name, interfaceFromBus(bus), physaddr,
                     staticEID, bridgePoolStartEid, bridgePoolEndEid,
-                    std::nullopt, std::nullopt, pollingInterval, deviceNames)
+                    std::nullopt, std::nullopt, pollingInterval, deviceNames,
+                    indeterministicPoolSpace)
     {}
     ~I3CMCTPDDevice() override = default;
 
@@ -558,10 +563,12 @@ class USBMCTPDDevice : public MCTPDDevice
             std::nullopt,
         uint8_t recoveryThreshold = 0,
         std::optional<uint8_t> pollingInterval = std::nullopt,
-        const std::vector<std::string>& deviceNames = {}) :
+        const std::vector<std::string>& deviceNames = {},
+        bool indeterministicPoolSpace = false) :
         MCTPDDevice(connection, name, interface, physaddr, staticEID,
                     bridgePoolStartEid, bridgePoolEndEid, ignoreEids,
-                    ignoreMessageTypes, pollingInterval, deviceNames),
+                    ignoreMessageTypes, pollingInterval, deviceNames,
+                    indeterministicPoolSpace),
         recoveryThreshold(recoveryThreshold)
     {}
     // Backward-compatible overload for call sites that still provide
@@ -575,10 +582,12 @@ class USBMCTPDDevice : public MCTPDDevice
         const std::optional<std::vector<uint8_t>>& ignoreEids,
         const std::optional<std::vector<uint8_t>>& ignoreMessageTypes,
         std::optional<uint8_t> pollingInterval,
-        const std::vector<std::string>& deviceNames = {}) :
+        const std::vector<std::string>& deviceNames = {},
+        bool indeterministicPoolSpace = false) :
         USBMCTPDDevice(connection, name, interface, physaddr, staticEID,
                        bridgePoolStartEid, bridgePoolEndEid, ignoreEids,
-                       ignoreMessageTypes, 0, pollingInterval, deviceNames)
+                       ignoreMessageTypes, 0, pollingInterval, deviceNames,
+                       indeterministicPoolSpace)
     {}
     ~USBMCTPDDevice() override = default;
 
@@ -607,11 +616,12 @@ class SPIMCTPDDevice : public MCTPDDevice
         const std::string& name, int bus, int chipselect,
         std::optional<uint8_t> staticEID = std::nullopt,
         std::optional<uint8_t> pollingInterval = std::nullopt,
-        const std::vector<std::string>& deviceNames = {}) :
+        const std::vector<std::string>& deviceNames = {},
+        bool indeterministicPoolSpace = false) :
         MCTPDDevice(connection, name, interfaceFromBusCs(bus, chipselect),
                     std::vector<uint8_t>{}, staticEID, std::nullopt,
                     std::nullopt, std::nullopt, std::nullopt, pollingInterval,
-                    deviceNames)
+                    deviceNames, indeterministicPoolSpace)
     {}
     ~SPIMCTPDDevice() override = default;
 
@@ -636,10 +646,12 @@ class XROTMCTPDDevice : public MCTPDDevice
         const std::string& name, const std::string& interface,
         std::optional<std::uint8_t> staticEID = std::nullopt,
         std::optional<std::uint8_t> pollingInterval = std::nullopt,
-        const std::vector<std::string>& deviceNames = {}) :
+        const std::vector<std::string>& deviceNames = {},
+        bool indeterministicPoolSpace = false) :
         MCTPDDevice(connection, name, interface, std::vector<uint8_t>{},
                     staticEID, std::nullopt, std::nullopt, std::nullopt,
-                    std::nullopt, pollingInterval, deviceNames)
+                    std::nullopt, pollingInterval, deviceNames,
+                    indeterministicPoolSpace)
     {}
     ~XROTMCTPDDevice() override = default;
 
@@ -664,11 +676,14 @@ class PCIeMCTPDDevice : public MCTPDDevice
         std::optional<uint8_t> staticEID = std::nullopt,
         std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
         std::optional<uint8_t> bridgePoolEndEid = std::nullopt,
+        const std::optional<std::vector<uint8_t>>& ignoreEids = std::nullopt,
         std::optional<uint8_t> pollingInterval = std::nullopt,
-        const std::vector<std::string>& deviceNames = {}) :
+        const std::vector<std::string>& deviceNames = {},
+        bool indeterministicPoolSpace = false) :
         MCTPDDevice(connection, name, interface, physaddr, staticEID,
-                    bridgePoolStartEid, bridgePoolEndEid, std::nullopt,
-                    std::nullopt, pollingInterval, deviceNames)
+                    bridgePoolStartEid, bridgePoolEndEid, ignoreEids,
+                    std::nullopt, pollingInterval, deviceNames,
+                    indeterministicPoolSpace)
     {}
     ~PCIeMCTPDDevice() override = default;
 
