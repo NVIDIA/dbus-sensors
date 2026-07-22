@@ -174,8 +174,9 @@ DiscreteLeakDetectSensor::DiscreteLeakDetectSensor(
         return;
     }
 
-    // This is asynchronous, ensuring the io_context is available.
-    boost::asio::post(waitTimer.get_executor(), [this]() { monitor(); });
+    // Note: the poll loop (monitor()) is started by the owner after
+    // construction, once a shared_ptr owns this object, so the kick-off can be
+    // guarded by weak_from_this() against early destruction.
 
     std::cout << "Created DiscreteLeakDetectSensor for " << name << " with uid "
               << uid << "\n";
