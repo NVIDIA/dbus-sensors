@@ -61,12 +61,14 @@ MCTPDDevice::MCTPDDevice(
     const std::optional<std::vector<uint8_t>>& ignoreEids,
     const std::optional<std::vector<uint8_t>>& ignoreMessageTypes,
     std::optional<std::uint8_t> pollingInterval,
-    const std::vector<std::string>& deviceNames) :
+    const std::vector<std::string>& deviceNames,
+    bool indeterministicPoolSpace) :
     connection(connection), name(name), deviceNames(deviceNames),
     interface(interface), physaddr(physaddr), staticEID(staticEID),
     bridgePoolStartEid(bridgePoolStartEid), bridgePoolEndEid(bridgePoolEndEid),
     ignoreEids(ignoreEids), ignoreMessageTypes(ignoreMessageTypes),
-    pollingInterval(pollingInterval)
+    pollingInterval(pollingInterval),
+    indeterministicPoolSpace(indeterministicPoolSpace)
 {
     if (bridgePoolStartEid.has_value() && bridgePoolEndEid.has_value())
     {
@@ -694,6 +696,15 @@ void MCTPDDevice::performHealthCheck()
                 continue;
             }
 
+            // NEW: routing table gate — skip EIDs not confirmed by mctpd
+            if (indeterministicPoolSpace && !discoveredMctpEids.contains(eid))
+            {
+                debug(
+                    "IndeterministicPoolSpace: skipping EID {EID} not in routing table",
+                    "EID", eid);
+                continue;
+            }
+
             std::string deviceName = getNameForEid(eid).value_or("");
 
             // Reset suppression state for this EID
@@ -1006,6 +1017,14 @@ void MCTPDDevice::endpointRemoved()
     {
         cancelRecoveryTimeout();
     }
+
+    // Bridge endpoint gone — reset downstream EID tracking so that
+    // IndeterministicPoolSpace filtering starts fresh when the bridge
+    // reconnects. There is no point pinging pool EIDs while the bridge
+    // itself is absent, and old routing-table entries are stale after a
+    // bridge reset.
+    discoveredMctpEids.clear();
+    bridgePoolPingFailures.clear();
 
     if (endpoint)
     {
@@ -1458,6 +1477,7 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
     auto mStaticEndpointID = iface.find("StaticEndpointID");
     auto mbridgePoolStartEid = iface.find("BridgePoolStartEid");
     auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
+    auto mIndeterministicPoolSpace = iface.find("IndeterministicPoolSpace");
     if (mAddress == iface.end() || mBus == iface.end() || mName == iface.end())
     {
         throw std::invalid_argument(
@@ -1550,6 +1570,15 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
                       std::format("I2C device [ bus: {}, address: {} ]", bus,
                                   static_cast<int>(address)));
 
+    bool indeterministicPoolSpace = false;
+    if (mIndeterministicPoolSpace != iface.end())
+    {
+        auto sVal = std::visit(VariantToStringVisitor(),
+                               mIndeterministicPoolSpace->second);
+        indeterministicPoolSpace =
+            (sVal == "true" || sVal == "True" || sVal == "1");
+    }
+
     auto pollingInterval = getPollingInterval(iface);
 
     try
@@ -1559,17 +1588,20 @@ std::shared_ptr<I2CMCTPDDevice> I2CMCTPDDevice::from(
             return std::make_shared<I2CMCTPDDevice>(
                 connection, name, bus, address, staticEID.value(),
                 bridgePoolStartEid.value(), bridgePoolEndEid,
-                ignoreMessageTypes, pollingInterval, names);
+                ignoreMessageTypes, pollingInterval, names,
+                indeterministicPoolSpace);
         }
         if (staticEID.has_value())
         {
             return std::make_shared<I2CMCTPDDevice>(
                 connection, name, bus, address, staticEID.value(), std::nullopt,
-                bridgePoolEndEid, ignoreMessageTypes, pollingInterval, names);
+                bridgePoolEndEid, ignoreMessageTypes, pollingInterval, names,
+                indeterministicPoolSpace);
         }
         return std::make_shared<I2CMCTPDDevice>(
             connection, name, bus, address, std::nullopt, std::nullopt,
-            bridgePoolEndEid, ignoreMessageTypes, pollingInterval, names);
+            bridgePoolEndEid, ignoreMessageTypes, pollingInterval, names,
+            indeterministicPoolSpace);
     }
     catch (const MCTPException& ex)
     {
@@ -1603,6 +1635,7 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
     auto mStaticEndpointID = iface.find("StaticEndpointID");
     auto mbridgePoolStartEid = iface.find("BridgePoolStartEid");
     auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
+    auto mIndeterministicPoolSpace = iface.find("IndeterministicPoolSpace");
     if (mAddress == iface.end() || mBus == iface.end() || mName == iface.end())
     {
         throw std::invalid_argument(
@@ -1688,6 +1721,15 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
         bridgePoolEndEid = parsedbridgePoolEndEid;
     }
 
+    bool indeterministicPoolSpace = false;
+    if (mIndeterministicPoolSpace != iface.end())
+    {
+        auto sVal = std::visit(VariantToStringVisitor(),
+                               mIndeterministicPoolSpace->second);
+        indeterministicPoolSpace =
+            (sVal == "true" || sVal == "True" || sVal == "1");
+    }
+
     auto pollingInterval = getPollingInterval(iface);
 
     try
@@ -1697,17 +1739,18 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
             return std::make_shared<I3CMCTPDDevice>(
                 connection, name, bus, address, staticEID.value(),
                 bridgePoolStartEid.value(), bridgePoolEndEid, pollingInterval,
-                names);
+                names, indeterministicPoolSpace);
         }
         if (staticEID.has_value())
         {
             return std::make_shared<I3CMCTPDDevice>(
                 connection, name, bus, address, staticEID.value(), std::nullopt,
-                bridgePoolEndEid, pollingInterval, names);
+                bridgePoolEndEid, pollingInterval, names,
+                indeterministicPoolSpace);
         }
         return std::make_shared<I3CMCTPDDevice>(
             connection, name, bus, address, std::nullopt, std::nullopt,
-            bridgePoolEndEid, pollingInterval, names);
+            bridgePoolEndEid, pollingInterval, names, indeterministicPoolSpace);
     }
     catch (const MCTPException& ex)
     {
@@ -1791,6 +1834,7 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
     auto mIgnoreEids = iface.find("IgnoreEIDs");
     auto mIgnoreMessageTypes = iface.find("IgnoreMessageTypes");
     auto mRecoveryThreshold = iface.find("RecoveryThreshold");
+    auto mIndeterministicPoolSpace = iface.find("IndeterministicPoolSpace");
     if (mType == iface.end())
     {
         throw std::invalid_argument(
@@ -2104,6 +2148,15 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
             "USB_DEVICE", interface);
     }
 
+    bool indeterministicPoolSpace = false;
+    if (mIndeterministicPoolSpace != iface.end())
+    {
+        auto sVal = std::visit(VariantToStringVisitor(),
+                               mIndeterministicPoolSpace->second);
+        indeterministicPoolSpace =
+            (sVal == "true" || sVal == "True" || sVal == "1");
+    }
+
     auto pollingInterval = getPollingInterval(iface);
 
     try
@@ -2114,21 +2167,24 @@ std::shared_ptr<USBMCTPDDevice> USBMCTPDDevice::from(
             dev = std::make_shared<USBMCTPDDevice>(
                 connection, name, interface, address, staticEID.value(),
                 bridgePoolStartEid.value(), bridgePoolEndEid, ignoreEids,
-                ignoreMessageTypes, recoveryThreshold, pollingInterval, names);
+                ignoreMessageTypes, recoveryThreshold, pollingInterval, names,
+                indeterministicPoolSpace);
         }
         else if (staticEID.has_value())
         {
             dev = std::make_shared<USBMCTPDDevice>(
                 connection, name, interface, address, staticEID.value(),
                 std::nullopt, bridgePoolEndEid, std::nullopt,
-                ignoreMessageTypes, recoveryThreshold, pollingInterval, names);
+                ignoreMessageTypes, recoveryThreshold, pollingInterval, names,
+                indeterministicPoolSpace);
         }
         else
         {
             dev = std::make_shared<USBMCTPDDevice>(
                 connection, name, interface, address, std::nullopt,
                 std::nullopt, bridgePoolEndEid, std::nullopt,
-                ignoreMessageTypes, recoveryThreshold, pollingInterval, names);
+                ignoreMessageTypes, recoveryThreshold, pollingInterval, names,
+                indeterministicPoolSpace);
         }
         dev->rootHubPath_ = physicalRootHubPath;
         dev->port_ = physicalPort;
@@ -2333,6 +2389,7 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
     auto mBus = iface.find("Bus");
     auto mChipselect = iface.find("ChipSelect");
     auto mStaticEndpointID = iface.find("StaticEndpointID");
+    auto mIndeterministicPoolSpace = iface.find("IndeterministicPoolSpace");
     if (mChipselect == iface.end() || mBus == iface.end() ||
         mName == iface.end())
     {
@@ -2383,6 +2440,15 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
         staticEID = parsedEID;
     }
 
+    bool indeterministicPoolSpace = false;
+    if (mIndeterministicPoolSpace != iface.end())
+    {
+        auto sVal = std::visit(VariantToStringVisitor(),
+                               mIndeterministicPoolSpace->second);
+        indeterministicPoolSpace =
+            (sVal == "true" || sVal == "True" || sVal == "1");
+    }
+
     auto pollingInterval = getPollingInterval(iface);
 
     std::string interface;
@@ -2407,11 +2473,11 @@ std::shared_ptr<SPIMCTPDDevice> SPIMCTPDDevice::from(
         {
             return std::make_shared<SPIMCTPDDevice>(
                 connection, name, bus, chipselect, interface, staticEID.value(),
-                pollingInterval, names);
+                pollingInterval, names, indeterministicPoolSpace);
         }
         return std::make_shared<SPIMCTPDDevice>(
             connection, name, bus, chipselect, interface, std::nullopt,
-            pollingInterval, names);
+            pollingInterval, names, indeterministicPoolSpace);
     }
     catch (const MCTPException& ex)
     {
@@ -2541,6 +2607,7 @@ std::shared_ptr<XROTMCTPDDevice> XROTMCTPDDevice::from(
     auto mName = iface.find("Name");
     auto mStaticEndpointID = iface.find("StaticEndpointID");
     auto mInterface = iface.find("Interface");
+    auto mIndeterministicPoolSpace = iface.find("IndeterministicPoolSpace");
 
     if (mName == iface.end() || mInterface == iface.end())
     {
@@ -2575,6 +2642,15 @@ std::shared_ptr<XROTMCTPDDevice> XROTMCTPDDevice::from(
         staticEID = parsedEID;
     }
 
+    bool indeterministicPoolSpace = false;
+    if (mIndeterministicPoolSpace != iface.end())
+    {
+        auto sVal = std::visit(VariantToStringVisitor(),
+                               mIndeterministicPoolSpace->second);
+        indeterministicPoolSpace =
+            (sVal == "true" || sVal == "True" || sVal == "1");
+    }
+
     auto pollingInterval = getPollingInterval(iface);
 
     try
@@ -2583,10 +2659,11 @@ std::shared_ptr<XROTMCTPDDevice> XROTMCTPDDevice::from(
         {
             return std::make_shared<XROTMCTPDDevice>(
                 connection, name, interface, staticEID.value(), pollingInterval,
-                names);
+                names, indeterministicPoolSpace);
         }
         return std::make_shared<XROTMCTPDDevice>(
-            connection, name, interface, std::nullopt, pollingInterval, names);
+            connection, name, interface, std::nullopt, pollingInterval, names,
+            indeterministicPoolSpace);
     }
     catch (const MCTPException& ex)
     {
@@ -2723,6 +2800,8 @@ std::shared_ptr<PCIeMCTPDDevice> PCIeMCTPDDevice::from(
     auto mStaticEndpointID = iface.find("StaticEndpointID");
     auto mbridgePoolStartEid = iface.find("BridgePoolStartEID");
     auto mbridgePoolEndEid = iface.find("BridgePoolEndEID");
+    auto mIgnoreEids = iface.find("IgnoreEIDs");
+    auto mIndeterministicPoolSpace = iface.find("IndeterministicPoolSpace");
     if (mAddress == iface.end() || mInterface == iface.end() ||
         mName == iface.end())
     {
@@ -2801,6 +2880,74 @@ std::shared_ptr<PCIeMCTPDDevice> PCIeMCTPDDevice::from(
         bridgePoolEndEid = parsedbridgePoolEndEid;
     }
 
+    bool indeterministicPoolSpace = false;
+    if (mIndeterministicPoolSpace != iface.end())
+    {
+        auto sVal = std::visit(VariantToStringVisitor(),
+                               mIndeterministicPoolSpace->second);
+        indeterministicPoolSpace =
+            (sVal == "true" || sVal == "True" || sVal == "1");
+    }
+
+    std::optional<std::vector<std::uint8_t>> ignoreEids{};
+    if (mIgnoreEids != iface.end())
+    {
+        try
+        {
+            auto ignoreEidsStr =
+                std::visit(VariantToStringVisitor(), mIgnoreEids->second);
+            if (!ignoreEidsStr.empty())
+            {
+                ignoreEids = std::vector<std::uint8_t>{};
+                std::stringstream ss(ignoreEidsStr);
+                std::string token;
+                while (std::getline(ss, token, ','))
+                {
+                    token.erase(0, token.find_first_not_of(" \t"));
+                    token.erase(token.find_last_not_of(" \t") + 1);
+                    if (!token.empty())
+                    {
+                        try
+                        {
+                            int64_t intVal = std::stoll(token);
+                            if (intVal >= 0 && intVal <= 255)
+                            {
+                                ignoreEids->push_back(
+                                    static_cast<uint8_t>(intVal));
+                            }
+                            else
+                            {
+                                warning(
+                                    "IgnoreEIDs entry out of range (0-255): {EID}",
+                                    "EID", intVal);
+                            }
+                        }
+                        catch (const std::exception& e)
+                        {
+                            warning(
+                                "Invalid IgnoreEIDs entry: '{VALUE}' - {ERROR}",
+                                "VALUE", token, "ERROR", e.what());
+                        }
+                    }
+                }
+                info(
+                    "Successfully parsed {COUNT} IgnoreEIDs entries for PCIe device {PCIE_INTERFACE}",
+                    "COUNT", ignoreEids->size(), "PCIE_INTERFACE", interface);
+            }
+            else
+            {
+                ignoreEids = std::nullopt;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            warning(
+                "Failed to parse IgnoreEIDs: {ERROR} for PCIe device {PCIE_INTERFACE}",
+                "ERROR", e.what(), "PCIE_INTERFACE", interface);
+            ignoreEids = std::nullopt;
+        }
+    }
+
     auto pollingInterval = getPollingInterval(iface);
 
     try
@@ -2809,18 +2956,20 @@ std::shared_ptr<PCIeMCTPDDevice> PCIeMCTPDDevice::from(
         {
             return std::make_shared<PCIeMCTPDDevice>(
                 connection, name, interface, address, staticEID.value(),
-                bridgePoolStartEid.value(), bridgePoolEndEid, pollingInterval,
-                names);
+                bridgePoolStartEid.value(), bridgePoolEndEid, ignoreEids,
+                pollingInterval, names, indeterministicPoolSpace);
         }
         if (staticEID.has_value())
         {
             return std::make_shared<PCIeMCTPDDevice>(
                 connection, name, interface, address, staticEID.value(),
-                std::nullopt, bridgePoolEndEid, pollingInterval, names);
+                std::nullopt, bridgePoolEndEid, ignoreEids, pollingInterval,
+                names, indeterministicPoolSpace);
         }
         return std::make_shared<PCIeMCTPDDevice>(
             connection, name, interface, address, std::nullopt, std::nullopt,
-            bridgePoolEndEid, pollingInterval, names);
+            bridgePoolEndEid, ignoreEids, pollingInterval, names,
+            indeterministicPoolSpace);
     }
     catch (const MCTPException& ex)
     {

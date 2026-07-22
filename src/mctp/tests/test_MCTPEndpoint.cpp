@@ -807,6 +807,89 @@ TEST(PCIeMCTPDDevice, fromValidWithStaticEidBridgePoolAndPolling)
               "interface: mctp-pcie3, address: 0x [ 04 2e ]");
 }
 
+TEST(PCIeMCTPDDevice, fromIgnoreEidsValidMultipleValues)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},
+        {"Name", "pcie-ignore-valid"},
+        {"Interface", "mctp-pcie4"},
+        {"Address", "02:1f.7"},
+        {"IgnoreEIDs", std::string("10, 20, 30")},
+    };
+
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+}
+
+TEST(PCIeMCTPDDevice, fromIgnoreEidsOutOfRangeEntry)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},
+        {"Name", "pcie-ignore-oob"},
+        {"Interface", "mctp-pcie5"},
+        {"Address", "02:1f.7"},
+        {"IgnoreEIDs", std::string("5, 300")},
+    };
+
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+}
+
+TEST(PCIeMCTPDDevice, fromIgnoreEidsInvalidToken)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},
+        {"Name", "pcie-ignore-bad"},
+        {"Interface", "mctp-pcie6"},
+        {"Address", "02:1f.7"},
+        {"IgnoreEIDs", std::string("10, xyz, 20")},
+    };
+
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+}
+
+TEST(PCIeMCTPDDevice, fromIgnoreEidsEmptyString)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},      {"Name", "pcie-ignore-empty"},
+        {"Interface", "mctp-pcie7"},     {"Address", "02:1f.7"},
+        {"IgnoreEIDs", std::string("")},
+    };
+
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+}
+
+TEST(PCIeMCTPDDevice, fromIgnoreEidsWhitespaceAndTrailingComma)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},
+        {"Name", "pcie-ignore-ws"},
+        {"Interface", "mctp-pcie8"},
+        {"Address", "02:1f.7"},
+        {"IgnoreEIDs", std::string(" 10 , 20 ,")},
+    };
+
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+}
+
+TEST(PCIeMCTPDDevice, fromIgnoreEidsWrongVariantTypeUsesOuterCatch)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},
+        {"Name", "pcie-ignore-badvariant"},
+        {"Interface", "mctp-pcie9"},
+        {"Address", "02:1f.7"},
+        {"IgnoreEIDs", std::vector<uint8_t>{1, 2, 3}},
+    };
+    // VariantToStringVisitor on vector<uint8_t> throws -> outer catch sets
+    // ignoreEids = nullopt; device is still created.
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+}
+
 TEST(PCIeMCTPDDevice, fromValidWithoutStaticButWithBridgeEnd)
 {
     SensorBaseConfigMap iface{
@@ -1195,6 +1278,36 @@ TEST(I3CMCTPDDevice, fromValidUint64AddressWithStaticReturnsNullNoNetDevice)
     EXPECT_EQ(device, nullptr);
 }
 
+TEST(I2CMCTPDDevice, fromReadsIndeterministicPoolSpaceTrue)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPI2CTarget"},
+        {"Name", "i2c-test-device"},
+        {"Bus", "0"},
+        {"Address", "29"},
+        {"IndeterministicPoolSpace", std::string("true")},
+    };
+    // No netdevice present in the unit test environment, so from() returns
+    // null after constructing the device; the parsing branch under test
+    // still executes regardless of the later construction outcome.
+    auto device = I2CMCTPDDevice::from({}, iface);
+    EXPECT_EQ(device, nullptr);
+}
+
+TEST(I3CMCTPDDevice, fromReadsIndeterministicPoolSpaceTrue)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPI3CTarget"},
+        {"Name", "i3c-test-device"},
+        {"Bus", "0"},
+        {"Address", std::vector<uint64_t>{0x6a, 0x00, 0x00, 0x00, 0x00, 0x00}},
+        {"StaticEndpointID", "12"},
+        {"IndeterministicPoolSpace", std::string("true")},
+    };
+    auto device = I3CMCTPDDevice::from({}, iface);
+    EXPECT_EQ(device, nullptr);
+}
+
 TEST(SPIMCTPDDevice, fromValidShapeWithoutNetDeviceCreatesDeferredDevice)
 {
     SensorBaseConfigMap iface{
@@ -1208,6 +1321,43 @@ TEST(SPIMCTPDDevice, fromValidShapeWithoutNetDeviceCreatesDeferredDevice)
     // with an unresolved (empty) interface instead of returning null.
     ASSERT_NE(device, nullptr);
     EXPECT_TRUE(device->getInterface().empty());
+}
+
+TEST(SPIMCTPDDevice, fromReadsIndeterministicPoolSpaceTrue)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPSPIDevice"},
+        {"Name", "spi-test-device"},
+        {"Bus", "0"},
+        {"ChipSelect", "0"},
+        {"IndeterministicPoolSpace", std::string("true")},
+    };
+    auto device = SPIMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+}
+
+TEST(XROTMCTPDDevice, fromReadsIndeterministicPoolSpaceTrue)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPXROTTarget"},
+        {"Name", "xrot-test-device"},
+        {"Interface", "xrot0"},
+        {"IndeterministicPoolSpace", std::string("true")},
+    };
+    auto device = XROTMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+}
+
+TEST(USBMCTPDDevice, fromReadsIndeterministicPoolSpaceTrue)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPUSBDevice"},
+        {"Name", "usb-test-device"},
+        {"Interface", "usb0"},
+        {"IndeterministicPoolSpace", std::string("true")},
+    };
+    auto device = USBMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
 }
 
 TEST(I2CMCTPDDevice, fromBadStaticEndpointIdThrows)
@@ -14183,4 +14333,302 @@ TEST_F(AsyncFixture, bridgePoolPingFailureThresholdMarksUnresponsive)
     }
     catch (...) // NOLINT(bugprone-empty-catch)
     {}
+}
+
+// ===========================================================================
+// IndeterministicPoolSpace tests
+//
+// Covers:
+//   - PCIeMCTPDDevice::from() reads IndeterministicPoolSpace from EM config
+//   - markDiscoveredMctpEid() inserts EIDs inside pool range only
+//   - endpointRemoved() clears discoveredMctpEids and bridgePoolPingFailures
+//   - performHealthCheck() with IndeterministicPoolSpace=true only pings EIDs
+//     present in discoveredMctpEids (not the entire pool range)
+//   - performHealthCheck() with IndeterministicPoolSpace=false (default) pings
+//     all pool EIDs (backward compatible behaviour unchanged)
+//   - PCIe bridge reset scenario: after endpointRemoved() and re-discovery,
+//     only the new routing-table EIDs are pinged
+// ===========================================================================
+
+// Helper: build a PCIeMCTPDDevice with pool 131-162, staticEID=130,
+// pollingInterval=1, and configurable IndeterministicPoolSpace flag.
+static std::shared_ptr<PCIeMCTPDDevice> makePCIePoolDevice(
+    const std::shared_ptr<sdbusplus::asio::connection>& conn,
+    bool indeterministicPoolSpace)
+{
+    return std::make_shared<PCIeMCTPDDevice>(
+        conn,
+        /*name=*/"vera-pcie-bridge",
+        /*interface=*/"mctppcie0",
+        /*physaddr=*/std::vector<uint8_t>{0x00, 0x00, 0x00, 0x00},
+        /*staticEID=*/std::optional<uint8_t>(130),
+        /*bridgePoolStartEid=*/std::optional<uint8_t>(131),
+        /*bridgePoolEndEid=*/std::optional<uint8_t>(162),
+        /*ignoreEids=*/std::nullopt,
+        /*pollingInterval=*/std::optional<uint8_t>(1),
+        /*deviceNames=*/std::vector<std::string>{},
+        /*indeterministicPoolSpace=*/indeterministicPoolSpace);
+}
+
+// ---------------------------------------------------------------------------
+// from() factory: reads IndeterministicPoolSpace property
+// ---------------------------------------------------------------------------
+
+TEST(PCIeMCTPDDevice, fromReadsIndeterministicPoolSpaceTrue)
+{
+    SensorBaseConfigMap iface{
+        {"Type", std::string("MCTPPCIeTarget")},
+        {"Name", std::string("vera-pcie-bridge")},
+        {"Interface", std::string("mctppcie0")},
+        {"Address", std::string("0000:00:00.0")},
+        {"StaticEndpointID", std::string("130")},
+        {"BridgePoolStartEID", std::string("131")},
+        {"BridgePoolEndEID", std::string("162")},
+        {"IndeterministicPoolSpace", std::string("true")},
+    };
+    auto dev = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_TRUE(dev->indeterministicPoolSpace);
+}
+
+TEST(PCIeMCTPDDevice, fromIndeterministicPoolSpaceAbsentDefaultsFalse)
+{
+    SensorBaseConfigMap iface{
+        {"Type", std::string("MCTPPCIeTarget")},
+        {"Name", std::string("vera-pcie-bridge")},
+        {"Interface", std::string("mctppcie0")},
+        {"Address", std::string("0000:00:00.0")},
+        {"StaticEndpointID", std::string("130")},
+        {"BridgePoolStartEID", std::string("131")},
+        {"BridgePoolEndEID", std::string("162")},
+    };
+    auto dev = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_FALSE(dev->indeterministicPoolSpace);
+}
+
+TEST(PCIeMCTPDDevice, fromIndeterministicPoolSpaceFalseExplicit)
+{
+    SensorBaseConfigMap iface{
+        {"Type", std::string("MCTPPCIeTarget")},
+        {"Name", std::string("vera-pcie-bridge")},
+        {"Interface", std::string("mctppcie0")},
+        {"Address", std::string("0000:00:00.0")},
+        {"StaticEndpointID", std::string("130")},
+        {"BridgePoolStartEID", std::string("131")},
+        {"BridgePoolEndEID", std::string("162")},
+        {"IndeterministicPoolSpace", std::string("false")},
+    };
+    auto dev = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_FALSE(dev->indeterministicPoolSpace);
+}
+
+// ---------------------------------------------------------------------------
+// markDiscoveredMctpEid: EID membership
+// ---------------------------------------------------------------------------
+
+TEST_F(FakeConnFixture, markDiscoveredEidInPoolRangeIsInserted)
+{
+    auto dev = makePCIePoolDevice(conn, /*indeterministicPoolSpace=*/true);
+    // EID 145 is inside pool 131-162
+    dev->markDiscoveredMctpEid(145);
+    EXPECT_TRUE(dev->discoveredMctpEids.contains(145));
+}
+
+TEST_F(FakeConnFixture, markDiscoveredEidOutsidePoolRangeIsIgnored)
+{
+    auto dev = makePCIePoolDevice(conn, /*indeterministicPoolSpace=*/true);
+    // EID 200 is outside pool 131-162
+    dev->markDiscoveredMctpEid(200);
+    EXPECT_FALSE(dev->discoveredMctpEids.contains(200));
+    EXPECT_TRUE(dev->discoveredMctpEids.empty());
+}
+
+TEST_F(FakeConnFixture, markDiscoveredEidMultipleEidsAllTracked)
+{
+    auto dev = makePCIePoolDevice(conn, /*indeterministicPoolSpace=*/true);
+    dev->markDiscoveredMctpEid(131);
+    dev->markDiscoveredMctpEid(145);
+    dev->markDiscoveredMctpEid(162);
+    EXPECT_TRUE(dev->discoveredMctpEids.contains(131));
+    EXPECT_TRUE(dev->discoveredMctpEids.contains(145));
+    EXPECT_TRUE(dev->discoveredMctpEids.contains(162));
+    EXPECT_EQ(dev->discoveredMctpEids.size(), 3U);
+}
+
+// ---------------------------------------------------------------------------
+// endpointRemoved: clears discovered EID tracking (bridge reset)
+// ---------------------------------------------------------------------------
+
+TEST_F(FakeConnFixture, endpointRemovedClearsDiscoveredMctpEids)
+{
+    auto dev = makePCIePoolDevice(conn, /*indeterministicPoolSpace=*/true);
+    dev->markDiscoveredMctpEid(131);
+    dev->markDiscoveredMctpEid(145);
+    dev->markDiscoveredMctpEid(152);
+    ASSERT_EQ(dev->discoveredMctpEids.size(), 3U);
+
+    dev->endpointRemoved();
+
+    EXPECT_TRUE(dev->discoveredMctpEids.empty());
+}
+
+TEST_F(FakeConnFixture, endpointRemovedClearsBridgePoolPingFailures)
+{
+    auto dev = makePCIePoolDevice(conn, /*indeterministicPoolSpace=*/true);
+    dev->markDiscoveredMctpEid(145);
+    dev->bridgePoolPingFailures[145] = 2;
+    dev->bridgePoolPingFailures[152] = 1;
+    ASSERT_EQ(dev->bridgePoolPingFailures.size(), 2U);
+
+    dev->endpointRemoved();
+
+    EXPECT_TRUE(dev->bridgePoolPingFailures.empty());
+}
+
+TEST_F(FakeConnFixture, endpointRemovedClearsBothSetsAtomically)
+{
+    auto dev = makePCIePoolDevice(conn, /*indeterministicPoolSpace=*/true);
+    dev->markDiscoveredMctpEid(131);
+    dev->markDiscoveredMctpEid(145);
+    dev->bridgePoolPingFailures[131] = 3;
+    dev->bridgePoolPingFailures[145] = 1;
+
+    dev->endpointRemoved();
+
+    EXPECT_TRUE(dev->discoveredMctpEids.empty());
+    EXPECT_TRUE(dev->bridgePoolPingFailures.empty());
+}
+
+// ---------------------------------------------------------------------------
+// performHealthCheck with IndeterministicPoolSpace=true:
+// only pings EIDs present in discoveredMctpEids, not the full pool range
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncFixture,
+       performHealthCheckIndeterministicOnlyPingsDiscoveredPoolEids)
+{
+    // Pool 131-162 (32 EIDs). IndeterministicPoolSpace=true.
+    // Only EIDs 145 and 152 have been confirmed in the routing table.
+    auto dev = makePCIePoolDevice(conn, /*indeterministicPoolSpace=*/true);
+
+    dev->markDiscoveredMctpEid(145);
+    dev->markDiscoveredMctpEid(152);
+
+    dev->healthTimer =
+        std::make_unique<boost::asio::steady_timer>(conn->get_io_context());
+
+    EXPECT_NO_THROW(dev->performHealthCheck());
+
+    // Expected async calls:
+    //   1 × main device ping (staticEID=130)
+    //   2 × pool pings (145, 152 only — NOT the full 131-162 range)
+    EXPECT_EQ(gPendingAsyncCalls.size(), 3U);
+
+    while (!gPendingAsyncCalls.empty())
+    {
+        driveAsyncCallSuccess();
+    }
+}
+
+TEST_F(AsyncFixture,
+       performHealthCheckIndeterministicNoPingsWhenNoEidsDiscovered)
+{
+    // Pool 131-162 but nothing discovered yet.
+    // IndeterministicPoolSpace=true → 0 pool pings, only main device ping.
+    auto dev = makePCIePoolDevice(conn, /*indeterministicPoolSpace=*/true);
+    dev->healthTimer =
+        std::make_unique<boost::asio::steady_timer>(conn->get_io_context());
+
+    EXPECT_NO_THROW(dev->performHealthCheck());
+
+    // Only the main device ping (staticEID=130); no pool pings.
+    EXPECT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallSuccess();
+}
+
+// ---------------------------------------------------------------------------
+// performHealthCheck with IndeterministicPoolSpace=false (default):
+// pings every EID in the pool range (backward compatible behaviour)
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncFixture, performHealthCheckDeterministicPingsEntirePoolRange)
+{
+    // Pool 131-162 (32 EIDs). IndeterministicPoolSpace=false (default).
+    auto dev = makePCIePoolDevice(conn, /*indeterministicPoolSpace=*/false);
+    dev->healthTimer =
+        std::make_unique<boost::asio::steady_timer>(conn->get_io_context());
+
+    EXPECT_NO_THROW(dev->performHealthCheck());
+
+    // 1 main device ping + 32 pool pings = 33 total
+    EXPECT_EQ(gPendingAsyncCalls.size(), 33U);
+
+    while (!gPendingAsyncCalls.empty())
+    {
+        driveAsyncCallSuccess();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PCIe bridge reset scenario:
+//   Phase 1 — bridge up, EIDs 131/145/152 discovered
+//   Phase 2 — bridge resets: endpointRemoved() clears all tracking
+//   Phase 3 — bridge reconnects with new EIDs 132/147/155
+//             → only new EIDs are pinged, stale EIDs are not
+// ---------------------------------------------------------------------------
+
+TEST_F(AsyncFixture, bridgeResetScenarioOnlyNewEidsArePingedAfterReconnect)
+{
+    auto dev = makePCIePoolDevice(conn, /*indeterministicPoolSpace=*/true);
+    dev->healthTimer =
+        std::make_unique<boost::asio::steady_timer>(conn->get_io_context());
+
+    // Phase 1: bridge up, 3 downstream EIDs discovered
+    dev->markDiscoveredMctpEid(131);
+    dev->markDiscoveredMctpEid(145);
+    dev->markDiscoveredMctpEid(152);
+    ASSERT_EQ(dev->discoveredMctpEids.size(), 3U);
+
+    // Phase 1 health check: 1 main + 3 pool pings
+    EXPECT_NO_THROW(dev->performHealthCheck());
+    EXPECT_EQ(gPendingAsyncCalls.size(), 4U);
+    while (!gPendingAsyncCalls.empty())
+    {
+        driveAsyncCallSuccess();
+    }
+    gPendingAsyncCalls.clear();
+
+    // Phase 2: Vera bridge resets — endpointRemoved() fires
+    dev->endpointRemoved();
+    EXPECT_TRUE(dev->discoveredMctpEids.empty());
+    EXPECT_TRUE(dev->bridgePoolPingFailures.empty());
+
+    // Phase 3: bridge reconnects; mctpd discovers new (different) EID
+    // assignments
+    dev->markDiscoveredMctpEid(132);
+    dev->markDiscoveredMctpEid(147);
+    dev->markDiscoveredMctpEid(155);
+    ASSERT_EQ(dev->discoveredMctpEids.size(), 3U);
+
+    // Old EIDs (131, 145, 152) must not be present
+    EXPECT_FALSE(dev->discoveredMctpEids.contains(131));
+    EXPECT_FALSE(dev->discoveredMctpEids.contains(145));
+    EXPECT_FALSE(dev->discoveredMctpEids.contains(152));
+
+    // Phase 3 health check: only new EIDs are pinged
+    // Reinitialise healthTimer (cleared by endpointRemoved)
+    dev->healthTimer =
+        std::make_unique<boost::asio::steady_timer>(conn->get_io_context());
+    EXPECT_NO_THROW(dev->performHealthCheck());
+
+    // 1 main device ping + 3 new pool pings (NOT 6 stale+new)
+    EXPECT_EQ(gPendingAsyncCalls.size(), 4U);
+
+    while (!gPendingAsyncCalls.empty())
+    {
+        driveAsyncCallSuccess();
+    }
 }
