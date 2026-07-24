@@ -411,7 +411,7 @@ void USBGadgetMCTPDevice::setup(
 
     isSetup = true;
     info("USB gadget feature enabled successfully");
-    createMCTPLogEntry(connection, name, hmcBridgeError,
+    createMCTPLogEntry(connection, name, hmcBridgeInfo,
                        "USB gadget feature enabled successfully",
                        "If problem persists, contact next level support.");
 

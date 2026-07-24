@@ -11,6 +11,7 @@
 #include <vector>
 
 const std::string hmcBridgeError{"ResourceEvent.1.0.ResourceErrorsDetected"};
+const std::string hmcBridgeInfo{"ResourceEvent.1.1.ResourceStateChanged"};
 
 // MCTP Control Message Type
 enum
