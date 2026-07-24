@@ -1,0 +1,165 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "NvidiaGpuMemoryDevice.hpp"
+
+#include "NvidiaGpuMctpVdm.hpp"
+#include "NvidiaUtils.hpp"
+#include "OcpMctpVdm.hpp"
+
+#include <MctpRequester.hpp>
+#include <phosphor-logging/lg2.hpp>
+#include <sdbusplus/asio/connection.hpp>
+#include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/message/native_types.hpp>
+
+#include <cstdint>
+#include <format>
+#include <functional>
+#include <memory>
+#include <span>
+#include <string>
+#include <system_error>
+
+static constexpr const char* embeddedIfaceName =
+    "xyz.openbmc_project.Inventory.Connector.Embedded";
+
+NvidiaGpuMemoryDevice::NvidiaGpuMemoryDevice(
+    std::shared_ptr<sdbusplus::asio::connection>& conn,
+    mctp::MctpRequester& mctpRequester, const std::string& gpuName, uint8_t eid,
+    sdbusplus::asio::object_server& objectServer) :
+    eid(eid), gpuName(gpuName), conn(conn), mctpRequester(mctpRequester),
+    objectServer(objectServer)
+{
+    const int rc = gpu::encodeGetEccErrorCountsRequest(0, requestBuffer);
+    if (rc == 0)
+    {
+        requestEncoded = true;
+    }
+    else
+    {
+        lg2::error(
+            "Failed to encode ECC request for {NAME}, eid={EID}, rc={RC}",
+            "NAME", gpuName, "EID", eid, "RC", rc);
+    }
+
+    const sdbusplus::object_path inventoryPath = inventoryPrefix / gpuName;
+    const std::string dramName =
+        std::format("{}_{}", gpuName, dramInventorySuffix);
+    const sdbusplus::object_path dramPath = inventoryPrefix / dramName;
+
+    sramEccInterface = objectServer.add_interface(
+        inventoryPath, "xyz.openbmc_project.Memory.MemoryECC");
+
+    sramEccInterface->register_property("ceCount", int64_t{0});
+    sramEccInterface->register_property("ueCount", int64_t{0});
+
+    if (!sramEccInterface->initialize())
+    {
+        lg2::error(
+            "Error initializing SRAM ECC interface for {NAME}, eid={EID}",
+            "NAME", gpuName, "EID", eid);
+    }
+
+    lg2::info("Created SRAM ECC interface for {NAME} at {PATH}", "NAME",
+              gpuName, "PATH", inventoryPath);
+
+    dramEmbeddedInterface =
+        objectServer.add_interface(dramPath, embeddedIfaceName);
+
+    if (!dramEmbeddedInterface->initialize())
+    {
+        lg2::error(
+            "Error initializing Embedded interface for {NAME}, eid={EID}",
+            "NAME", dramName, "EID", eid);
+    }
+
+    dramEccInterface = objectServer.add_interface(
+        dramPath, "xyz.openbmc_project.Memory.MemoryECC");
+
+    dramEccInterface->register_property("ceCount", int64_t{0});
+    dramEccInterface->register_property("ueCount", int64_t{0});
+
+    if (!dramEccInterface->initialize())
+    {
+        lg2::error(
+            "Error initializing DRAM ECC interface for {NAME}, eid={EID}",
+            "NAME", dramName, "EID", eid);
+    }
+}
+
+NvidiaGpuMemoryDevice::~NvidiaGpuMemoryDevice()
+{
+    objectServer.remove_interface(sramEccInterface);
+    objectServer.remove_interface(dramEmbeddedInterface);
+    objectServer.remove_interface(dramEccInterface);
+}
+
+void NvidiaGpuMemoryDevice::update()
+{
+    if (!requestEncoded)
+    {
+        return;
+    }
+
+    mctpRequester.sendRecvMsg(
+        eid, requestBuffer,
+        [weak{weak_from_this()}](const std::error_code& ec,
+                                 std::span<const uint8_t> buffer) {
+            std::shared_ptr<NvidiaGpuMemoryDevice> self = weak.lock();
+            if (!self)
+            {
+                lg2::error("Invalid reference to NvidiaGpuMemoryDevice");
+                return;
+            }
+            self->processResponse(ec, buffer);
+        });
+}
+
+void NvidiaGpuMemoryDevice::processResponse(const std::error_code& ec,
+                                            std::span<const uint8_t> buffer)
+{
+    if (ec)
+    {
+        lg2::error("MCTP error for {NAME}: {EC}", "NAME", gpuName, "EC",
+                   ec.message());
+        return;
+    }
+
+    ocp::accelerator_management::CompletionCode cc{};
+    uint16_t reasonCode = 0;
+    uint16_t flags = 0;
+    uint32_t sramCorrected = 0;
+    uint32_t sramUncorrectedSecded = 0;
+    uint32_t sramUncorrectedParity = 0;
+    uint32_t dramCorrected = 0;
+    uint32_t dramUncorrected = 0;
+
+    auto rc = gpu::decodeGetEccErrorCountsResponse(
+        buffer, cc, reasonCode, flags, sramCorrected, sramUncorrectedSecded,
+        sramUncorrectedParity, dramCorrected, dramUncorrected);
+
+    if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
+    {
+        lg2::error(
+            "Error decoding ECC response for {NAME}: rc={RC}, cc={CC}, reason={REASON}",
+            "NAME", gpuName, "RC", rc, "CC", static_cast<int>(cc), "REASON",
+            reasonCode);
+        return;
+    }
+
+    int64_t sramCeCount = sramCorrected;
+    int64_t sramUeCount = static_cast<int64_t>(sramUncorrectedSecded) +
+                          static_cast<int64_t>(sramUncorrectedParity);
+
+    sramEccInterface->set_property("ceCount", sramCeCount);
+    sramEccInterface->set_property("ueCount", sramUeCount);
+
+    int64_t dramCeCount = dramCorrected;
+    int64_t dramUeCount = dramUncorrected;
+
+    dramEccInterface->set_property("ceCount", dramCeCount);
+    dramEccInterface->set_property("ueCount", dramUeCount);
+}

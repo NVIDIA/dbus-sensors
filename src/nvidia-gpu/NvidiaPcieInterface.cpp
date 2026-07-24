@@ -11,11 +11,12 @@
 
 #include <MctpRequester.hpp>
 #include <NvidiaGpuMctpVdm.hpp>
-#include <NvidiaPcieDevice.hpp>
+#include <NvidiaUtils.hpp>
 #include <OcpMctpVdm.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/message/native_types.hpp>
 
 #include <cmath>
 #include <cstddef>
@@ -23,6 +24,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <system_error>
@@ -37,24 +39,67 @@ NvidiaPcieInterface::NvidiaPcieInterface(
     mctp::MctpRequester& mctpRequester, const std::string& name,
     const std::string& path, uint8_t eid,
     sdbusplus::asio::object_server& objectServer,
-    gpu::DeviceIdentification deviceType) :
+    gpu::DeviceIdentification deviceType,
+    const std::optional<std::string>& networkAdapterName) :
     eid(eid), path(path), conn(conn), mctpRequester(mctpRequester),
     deviceType(deviceType)
 {
-    const std::string dbusPath = pcieDevicePathPrefix + escapeName(name);
+    int rc = 0;
+    switch (deviceType)
+    {
+        case gpu::DeviceIdentification::DEVICE_GPU:
+            request.resize(gpu::queryScalarGroupTelemetryV1RequestSize);
+            rc = gpu::encodeQueryScalarGroupTelemetryV1Request(
+                0, 0, gpu::PcieScalarGroupId::LinkSpeedWidth, request);
+            break;
+        case gpu::DeviceIdentification::DEVICE_PCIE:
+            request.resize(gpu::queryScalarGroupTelemetryV2RequestSize);
+            rc = gpu::encodeQueryScalarGroupTelemetryV2Request(
+                0, {}, 0, 0, gpu::PcieScalarGroupId::LinkSpeedWidth, request);
+            break;
+        default:
+            break;
+    }
+    if (rc != 0)
+    {
+        request.clear();
+        lg2::error(
+            "Failed to encode PCIe Interface request: rc={RC}, EID={EID}", "RC",
+            rc, "EID", eid);
+    }
+
+    const sdbusplus::object_path dbusPath = inventoryPrefix / escapeName(name);
 
     pcieDeviceInterface = objectServer.add_interface(
         dbusPath, "xyz.openbmc_project.Inventory.Item.PCIeDevice");
 
-    if (deviceType == gpu::DeviceIdentification::DEVICE_PCIE)
-    {
-        switchInterface = objectServer.add_interface(
-            dbusPath, "xyz.openbmc_project.Inventory.Item.PCIeSwitch");
-    }
-
     std::vector<Association> associations;
     associations.emplace_back("contained_by", "containing",
                               sdbusplus::object_path(path).parent_path());
+
+    switch (deviceType)
+    {
+        case gpu::DeviceIdentification::DEVICE_GPU:
+            pcieDeviceInterface->register_property(
+                "DeviceType",
+                std::string("xyz.openbmc_project.Inventory.Item.PCIeDevice."
+                            "DeviceTypes.SingleFunction"));
+            break;
+        case gpu::DeviceIdentification::DEVICE_PCIE:
+            switchInterface = objectServer.add_interface(
+                dbusPath, "xyz.openbmc_project.Inventory.Item.PCIeSwitch");
+            break;
+        default:
+            break;
+    }
+
+    if (networkAdapterName.has_value())
+    {
+        const sdbusplus::object_path networkAdapterPath =
+            inventoryPrefix / (*networkAdapterName + "_NIC");
+        associations.emplace_back("connected_to", "connecting",
+                                  networkAdapterPath);
+    }
 
     associationInterface =
         objectServer.add_interface(dbusPath, association::interface);
@@ -77,20 +122,20 @@ NvidiaPcieInterface::NvidiaPcieInterface(
 
     if (!pcieDeviceInterface->initialize())
     {
-        lg2::error("Error initializing PCIe Device Interface for EID={EID}",
-                   "EID", eid);
+        lg2::error("Error initializing PCIe Device interface, eid={EID}", "EID",
+                   eid);
     }
 
     if (switchInterface && !switchInterface->initialize())
     {
-        lg2::error("Error initializing Switch Interface for EID={EID}", "EID",
+        lg2::error("Error initializing Switch interface, eid={EID}", "EID",
                    eid);
     }
 
     if (associationInterface && !associationInterface->initialize())
     {
         lg2::error(
-            "Error initializing Association Interface for PCIeSwitch EID={EID}",
+            "Error initializing Association interface for PCIeSwitch, eid={EID}",
             "EID", eid);
     }
 }
@@ -190,42 +235,21 @@ void NvidiaPcieInterface::processResponse(const std::error_code& ec,
 
 void NvidiaPcieInterface::update()
 {
-    int rc = 0;
-    std::span<uint8_t> buf;
-
-    switch (deviceType)
+    if (request.empty())
     {
-        case gpu::DeviceIdentification::DEVICE_GPU:
-            rc = gpu::encodeQueryScalarGroupTelemetryV1Request(
-                0, 0, gpu::PcieScalarGroupId::LinkSpeedWidth, requestV1);
-            buf = requestV1;
-            break;
-        case gpu::DeviceIdentification::DEVICE_PCIE:
-            rc = gpu::encodeQueryScalarGroupTelemetryV2Request(
-                0, {}, 0, 0, gpu::PcieScalarGroupId::LinkSpeedWidth, requestV2);
-            buf = requestV2;
-            break;
-        default:
-            return;
-    }
-
-    if (rc != 0)
-    {
-        lg2::error("Error updating PCIe Interface: failed, rc={RC}, EID={EID}",
-                   "RC", rc, "EID", eid);
         return;
     }
 
     mctpRequester.sendRecvMsg(
-        eid, buf,
-        [weak{weak_from_this()}](const std::error_code& ec,
-                                 std::span<const uint8_t> buffer) {
+        eid, request,
+        [eid{this->eid}, weak{weak_from_this()}](
+            const std::error_code& ec, std::span<const uint8_t> buffer) {
             std::shared_ptr<NvidiaPcieInterface> self = weak.lock();
             if (!self)
             {
                 lg2::error(
                     "Invalid reference to NvidiaPcieInterface for EID {EID}",
-                    "EID", self->eid);
+                    "EID", eid);
                 return;
             }
             self->processResponse(ec, buffer);

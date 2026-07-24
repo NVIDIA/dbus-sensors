@@ -16,21 +16,30 @@
 #include <string>
 #include <unordered_map>
 
-constexpr const char* inventoryPrefix = "/xyz/openbmc_project/inventory/";
-
 class Inventory : public std::enable_shared_from_this<Inventory>
 {
   public:
-    Inventory(const std::shared_ptr<sdbusplus::asio::connection>& conn,
-              sdbusplus::asio::object_server& objectServer,
-              const std::string& inventoryName,
-              mctp::MctpRequester& mctpRequester,
-              gpu::DeviceIdentification deviceType, uint8_t eid,
-              boost::asio::io_context& io,
-              const std::shared_ptr<sdbusplus::asio::dbus_interface>&
-                  powerCapInterface);
+    Inventory(
+        const std::shared_ptr<sdbusplus::asio::connection>& conn,
+        sdbusplus::asio::object_server& objectServer,
+        const std::string& inventoryName, mctp::MctpRequester& mctpRequester,
+        gpu::DeviceIdentification deviceType, uint8_t eid,
+        boost::asio::io_context& io,
+        const std::shared_ptr<sdbusplus::asio::dbus_interface>&
+            powerCapInterface,
+        const std::shared_ptr<sdbusplus::asio::dbus_interface>& dramItemIface);
 
     void init();
+
+    std::optional<uint32_t> getMinPowerCap() const
+    {
+        return minPowerCapWatts;
+    }
+
+    std::optional<uint32_t> getMaxPowerCap() const
+    {
+        return maxPowerCapWatts;
+    }
 
   private:
     struct PropertyInfo
@@ -62,6 +71,8 @@ class Inventory : public std::enable_shared_from_this<Inventory>
     std::shared_ptr<sdbusplus::asio::dbus_interface> acceleratorInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> uuidInterface;
     std::shared_ptr<sdbusplus::asio::dbus_interface> revisionIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> dramItemInterface;
+    std::array<uint16_t, 2> allowedSpeedsMT{0, 0};
 
     std::string name;
     mctp::MctpRequester& mctpRequester;
@@ -69,8 +80,11 @@ class Inventory : public std::enable_shared_from_this<Inventory>
     uint8_t eid;
     boost::asio::steady_timer retryTimer;
     std::unordered_map<gpu::InventoryPropertyId, PropertyInfo> properties;
-    std::array<uint8_t, sizeof(gpu::GetInventoryInformationRequest)>
+    std::array<uint8_t, gpu::getInventoryInformationRequestSize>
         requestBuffer{};
+    std::optional<uint32_t> minPowerCapWatts;
+    std::optional<uint32_t> maxPowerCapWatts;
+
     static constexpr std::chrono::seconds retryDelay{5};
     static constexpr int maxRetryAttempts = 3;
 };

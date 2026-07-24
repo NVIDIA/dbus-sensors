@@ -6,7 +6,6 @@
 #include "VariantVisitors.hpp"
 
 #include <systemd/sd-bus-protocol.h>
-#include <systemd/sd-bus.h>
 
 #include <boost/asio/error.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -463,8 +462,8 @@ void MCTPDDevice::finaliseEndpoint(
                        const std::shared_ptr<MCTPEndpoint>& ep)>& added)
 {
     const auto matchSpec =
-        sdbusplus::bus::match::rules::interfacesRemovedAtPath(objpath);
-    removeMatch = std::make_unique<sdbusplus::bus::match_t>(
+        sdbusplus::match_rules::interfacesRemovedAtPath(objpath);
+    removeMatch = std::make_unique<sdbusplus::match>(
         *connection, matchSpec,
         std::bind_front(MCTPDDevice::onEndpointInterfacesRemoved,
                         weak_from_this(), objpath));
@@ -1136,9 +1135,8 @@ uint8_t MCTPDEndpoint::eid() const
 void MCTPDEndpoint::subscribe(Event&& degraded, Event&& available,
                               Event&& removed)
 {
-    const auto matchSpec =
-        sdbusplus::bus::match::rules::propertiesChangedNamespace(
-            objpath.str, mctpdEndpointControlInterface);
+    const auto matchSpec = sdbusplus::match_rules::propertiesChangedNamespace(
+        objpath.str, mctpdEndpointControlInterface);
 
     this->notifyDegraded = std::move(degraded);
     this->notifyAvailable = std::move(available);
@@ -1190,7 +1188,7 @@ void MCTPDEndpoint::subscribe(Event&& degraded, Event&& available,
             mctpdBusName, objpath.str, "org.freedesktop.DBus.Properties", "Get",
             mctpdEndpointControlInterface, "Connectivity");
     }
-    catch (const sdbusplus::exception::SdBusError& err)
+    catch (const sdbusplus::exception::internal_exception& err)
     {
         this->notifyDegraded = nullptr;
         this->notifyAvailable = nullptr;

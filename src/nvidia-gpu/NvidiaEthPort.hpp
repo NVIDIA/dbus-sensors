@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 struct NvidiaEthPortMetrics :
     public std::enable_shared_from_this<NvidiaEthPortMetrics>
@@ -25,7 +27,8 @@ struct NvidiaEthPortMetrics :
         std::shared_ptr<sdbusplus::asio::connection>& conn,
         mctp::MctpRequester& mctpRequester, const std::string& name,
         const std::string& deviceName, const std::string& path, uint8_t eid,
-        uint16_t portNumber, sdbusplus::asio::object_server& objectServer);
+        uint16_t portNumber, sdbusplus::asio::object_server& objectServer,
+        const std::vector<std::pair<uint8_t, uint64_t>>& addresses);
 
     void update();
 
@@ -47,12 +50,20 @@ struct NvidiaEthPortMetrics :
 
     mctp::MctpRequester& mctpRequester;
 
-    std::array<uint8_t, sizeof(gpu::GetEthernetPortTelemetryCountersRequest)>
+    std::array<uint8_t, gpu::getEthernetPortTelemetryCountersRequestSize>
         request{};
+
+    bool requestEncoded{false};
 
     std::shared_ptr<sdbusplus::asio::dbus_interface> portInterface;
 
     std::shared_ptr<sdbusplus::asio::dbus_interface> associationInterface;
+
+    std::shared_ptr<sdbusplus::asio::dbus_interface>
+        networkDeviceFunctionInterface;
+
+    std::shared_ptr<sdbusplus::asio::dbus_interface>
+        networkDeviceFunctionAssociationInterface;
 
     std::array<std::shared_ptr<sdbusplus::asio::dbus_interface>,
                maxTelemetryValues>

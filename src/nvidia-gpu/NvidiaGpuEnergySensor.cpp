@@ -52,6 +52,19 @@ NvidiaGpuEnergySensor::NvidiaGpuEnergySensor(
     eid(eid), sensorId{sensorId}, mctpRequester(mctpRequester),
     objectServer(objectServer)
 {
+    const int rc =
+        gpu::encodeGetCurrentEnergyCounterRequest(0, sensorId, request);
+    if (rc == 0)
+    {
+        requestEncoded = true;
+    }
+    else
+    {
+        lg2::error(
+            "Failed to encode Energy Sensor request for eid {EID} and sensor id {SID}, rc={RC}",
+            "EID", eid, "SID", sensorId, "RC", rc);
+    }
+
     std::string dbusPath = sensorPathPrefix + "energy/"s + escapeName(name);
 
     sensorInterface = objectServer.add_interface(
@@ -82,8 +95,10 @@ NvidiaGpuEnergySensor::NvidiaGpuEnergySensor(
         if (!commonPhysicalContextInterface->initialize())
         {
             lg2::error(
-                "Error initializing PhysicalContext Interface for Energy Sensor for eid {EID} and sensor id {SID}",
+                "Error initializing PhysicalContext interface for Energy Sensor, eid={EID}, sensorId={SID}",
                 "EID", eid, "SID", sensorId);
+            objectServer.remove_interface(commonPhysicalContextInterface);
+            commonPhysicalContextInterface = nullptr;
         }
     }
 }
@@ -141,13 +156,8 @@ void NvidiaGpuEnergySensor::processResponse(const std::error_code& ec,
 
 void NvidiaGpuEnergySensor::update()
 {
-    auto rc = gpu::encodeGetCurrentEnergyCounterRequest(0, sensorId, request);
-
-    if (rc != 0)
+    if (!requestEncoded)
     {
-        lg2::error(
-            "Error updating Energy Sensor for eid {EID} and sensor id {SID} : encode failed, rc={RC}",
-            "EID", eid, "SID", sensorId, "RC", rc);
         return;
     }
 

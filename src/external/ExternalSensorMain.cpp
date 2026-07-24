@@ -329,7 +329,8 @@ void createSensors(
                 }
             }
         });
-    constexpr std::array<std::string_view, 1> sensorTypes{{sensorType}};
+    static constexpr auto sensorTypes =
+        std::to_array<std::string_view>({sensorType});
     getter->getConfiguration(sensorTypes);
 }
 
@@ -385,8 +386,9 @@ int main()
                 });
         };
 
-    static constexpr std::array<std::string_view, 1> sensorTypes{{sensorType}};
-    std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
+    static constexpr auto sensorTypes =
+        std::to_array<std::string_view>({sensorType});
+    std::vector<std::unique_ptr<sdbusplus::match>> matches =
         setupPropertiesChangedMatches(*systemBus, sensorTypes, eventHandler);
 
     lg2::debug("ExternalSensor service entering main loop");

@@ -4,6 +4,7 @@
 #include "async_test_helpers.hpp"
 
 #include <sys/socket.h>
+#include <systemd/sd-bus-protocol.h>
 #include <systemd/sd-bus.h>
 #include <unistd.h>
 

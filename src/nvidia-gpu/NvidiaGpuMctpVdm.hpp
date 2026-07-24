@@ -7,7 +7,6 @@
 
 #include <OcpMctpVdm.hpp>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -21,16 +20,8 @@ namespace gpu
 
 using InventoryValue =
     std::variant<std::string, std::vector<uint8_t>, uint32_t>;
-constexpr size_t maxInventoryDataSize = 256;
 
 constexpr uint16_t nvidiaPciVendorId = 0x10de;
-
-constexpr size_t setEventSubscriptionRequestSize =
-    ocp::accelerator_management::commonRequestSize + 2;
-constexpr size_t setEventSourcesRequestSize =
-    ocp::accelerator_management::commonRequestSize + 9;
-
-constexpr size_t longRunningResponseEventSize = 4;
 
 enum class MessageType : uint8_t
 {
@@ -60,10 +51,20 @@ enum class PlatformEnvironmentalCommands : uint8_t
     GET_MAX_OBSERVED_POWER = 0x04,
     GET_CURRENT_ENERGY_COUNTER = 0x06,
     GET_POWER_LIMITS = 0x07,
+    SET_POWER_LIMITS = 0x08,
+    GET_CURRENT_CLOCK_FREQUENCY = 0x0B,
     GET_INVENTORY_INFORMATION = 0x0C,
     GET_DRIVER_INFORMATION = 0x0E,
     GET_VOLTAGE = 0x0F,
+    GET_CLOCK_LIMIT = 0x11,
+    GET_VIOLATION_DURATION = 0x45,
     GET_CURRENT_UTILIZATION = 0x47,
+    GET_ECC_ERROR_COUNTS = 0x7D,
+};
+
+enum class PlatformEnvironmentalEvent : uint8_t
+{
+    XID = 0x01,
 };
 
 enum class NetworkPortCommands : uint8_t
@@ -148,6 +149,18 @@ enum class PciePortType : uint8_t
     DOWNSTREAM = 1,
 };
 
+enum class SetPowerLimitsAction : uint8_t
+{
+    NEW_LIMIT = 0,
+    DEFAULT_LIMIT = 1,
+};
+
+enum class SetPowerLimitsPersistence : uint8_t
+{
+    ONE_SHOT = 0,
+    PERSISTENT = 1,
+};
+
 enum class DriverState : uint8_t
 {
     DRIVER_STATE_UNKNOWN = 0,
@@ -162,38 +175,45 @@ enum class NetworkPortLinkType : uint8_t
     UNKNOWN = 0xFF,
 };
 
-struct QueryDeviceIdentificationRequest
+enum class ClockType : uint8_t
 {
-    ocp::accelerator_management::CommonRequest hdr;
-} __attribute__((packed));
+    GRAPHICS_CLOCK = 0,
+    MEMORY_CLOCK = 1,
+};
 
-struct QueryDeviceIdentificationResponse
-{
-    ocp::accelerator_management::CommonResponse hdr;
-    uint8_t device_identification;
-    uint8_t instance_id;
-} __attribute__((packed));
+constexpr size_t maxInventoryDataSize = 256;
 
-struct GetNumericSensorReadingRequest
-{
-    ocp::accelerator_management::CommonRequest hdr;
-    uint8_t sensor_id;
-} __attribute__((packed));
+constexpr size_t queryDeviceIdentificationRequestSize =
+    ocp::accelerator_management::commonRequestSize;
 
-using GetTemperatureReadingRequest = GetNumericSensorReadingRequest;
+constexpr size_t getNumericSensorReadingRequestSize =
+    ocp::accelerator_management::commonRequestSize + 1;
 
-using ReadThermalParametersRequest = GetNumericSensorReadingRequest;
+constexpr size_t getTemperatureReadingRequestSize =
+    getNumericSensorReadingRequestSize;
 
-struct GetPowerDrawRequest
-{
-    ocp::accelerator_management::CommonRequest hdr;
-    uint8_t sensorId;
-    uint8_t averagingInterval;
-} __attribute__((packed));
+constexpr size_t readThermalParametersRequestSize =
+    getNumericSensorReadingRequestSize;
 
-using GetCurrentEnergyCounterRequest = GetNumericSensorReadingRequest;
+constexpr size_t getPowerDrawRequestSize =
+    ocp::accelerator_management::commonRequestSize + 2;
 
-using GetVoltageRequest = GetNumericSensorReadingRequest;
+constexpr size_t getPowerLimitsRequestSize =
+    ocp::accelerator_management::commonRequestSize + 4;
+
+constexpr size_t setPowerLimitsRequestSize =
+    ocp::accelerator_management::commonRequestSize + 10;
+
+constexpr size_t getCurrentEnergyCounterRequestSize =
+    getNumericSensorReadingRequestSize;
+
+constexpr size_t getVoltageRequestSize = getNumericSensorReadingRequestSize;
+
+constexpr size_t getCurrentUtilizationRequestSize =
+    ocp::accelerator_management::commonRequestSize;
+
+constexpr size_t getViolationDurationRequestSize =
+    ocp::accelerator_management::commonRequestSize;
 
 constexpr size_t queryScalarGroupTelemetryV1RequestSize =
     ocp::accelerator_management::commonRequestSize + 2;
@@ -201,84 +221,43 @@ constexpr size_t queryScalarGroupTelemetryV1RequestSize =
 constexpr size_t queryScalarGroupTelemetryV2RequestSize =
     ocp::accelerator_management::commonRequestSize + 3;
 
-struct GetPortNetworkAddressesRequest
-{
-    ocp::accelerator_management::CommonRequest hdr;
-    uint16_t portNumber;
-} __attribute__((packed));
+constexpr size_t getPortNetworkAddressesRequestSize =
+    ocp::accelerator_management::commonRequestSize + 2;
 
-struct GetEthernetPortTelemetryCountersRequest
-{
-    ocp::accelerator_management::CommonRequest hdr;
-    uint16_t portNumber;
-} __attribute__((packed));
+constexpr size_t getEthernetPortTelemetryCountersRequestSize =
+    ocp::accelerator_management::commonRequestSize + 2;
 
-struct GetTemperatureReadingResponse
-{
-    ocp::accelerator_management::CommonResponse hdr;
-    int32_t reading;
-} __attribute__((packed));
+constexpr size_t getInventoryInformationRequestSize =
+    ocp::accelerator_management::commonRequestSize + 1;
 
-struct ReadThermalParametersResponse
-{
-    ocp::accelerator_management::CommonResponse hdr;
-    int32_t threshold;
-} __attribute__((packed));
+constexpr size_t getDriverInformationResponseMinSize =
+    ocp::accelerator_management::commonResponseSize + 2;
 
-struct GetPowerDrawResponse
-{
-    ocp::accelerator_management::CommonResponse hdr;
-    uint32_t power;
-} __attribute__((packed));
+constexpr size_t getCurrentClockFrequencyRequestSize =
+    ocp::accelerator_management::commonRequestSize + sizeof(uint8_t);
 
-struct GetCurrentEnergyCounterResponse
-{
-    ocp::accelerator_management::CommonResponse hdr;
-    uint64_t energy;
-} __attribute__((packed));
+constexpr size_t getEccErrorCountsRequestSize =
+    ocp::accelerator_management::commonRequestSize;
 
-struct GetVoltageResponse
-{
-    ocp::accelerator_management::CommonResponse hdr;
-    uint32_t voltage;
-} __attribute__((packed));
+constexpr size_t setEventSubscriptionRequestSize =
+    ocp::accelerator_management::commonRequestSize + 2;
 
-constexpr size_t getPowerLimitsRequestSize =
-    ocp::accelerator_management::commonRequestSize + sizeof(uint32_t);
+constexpr size_t setEventSourcesRequestSize =
+    ocp::accelerator_management::commonRequestSize + 9;
 
-struct ListPCIePortsResponse
-{
-    ocp::accelerator_management::CommonResponse hdr;
-    uint16_t numUpstreamPorts;
-} __attribute__((packed));
+constexpr size_t longRunningResponseEventSize = 4;
 
-struct ListPCIePortsDownstreamPortsData
-{
-    uint8_t isInternal;
-    uint8_t count;
-} __attribute__((packed));
+constexpr size_t xidEventMinDataSize = 20;
 
-struct GetDriverInformationResponse
-{
-    ocp::accelerator_management::CommonResponse hdr;
-    DriverState driverState;
-    char driverVersion;
-} __attribute__((packed));
+constexpr size_t getClockLimitRequestSize =
+    ocp::accelerator_management::commonRequestSize + sizeof(uint8_t);
 
-struct GetInventoryInformationRequest
-{
-    ocp::accelerator_management::CommonRequest hdr;
-    uint8_t property_id;
-} __attribute__((packed));
+int encodeRequestCommonHeader(PackBuffer& buffer, gpu::MessageType msgType,
+                              uint8_t command, uint8_t instanceId);
 
-struct GetInventoryInformationResponse
-{
-    ocp::accelerator_management::CommonResponse hdr;
-    std::array<uint8_t, maxInventoryDataSize> data;
-} __attribute__((packed));
-
-int packHeader(const ocp::accelerator_management::BindingPciVidInfo& hdr,
-               ocp::accelerator_management::BindingPciVid& msg);
+int decodeResponseCommonHeader(
+    UnpackBuffer& buffer, gpu::MessageType msgType, uint8_t command,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode);
 
 int encodeQueryDeviceIdentificationRequest(uint8_t instanceId,
                                            std::span<uint8_t> buf);
@@ -296,6 +275,10 @@ int encodeSetEventSourcesRequest(uint64_t sources, uint8_t messageType,
 int decodeSetEventSourcesResponse(
     std::span<const uint8_t> buf,
     ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode);
+
+int decodeXidEvent(std::span<const uint8_t> buf, uint8_t& flags,
+                   uint32_t& eventMessageReason, uint32_t& sequenceNumber,
+                   uint64_t& timestamp, std::string_view& messageTextString);
 
 int decodeQueryDeviceIdentificationResponse(
     std::span<const uint8_t> buf,
@@ -358,6 +341,15 @@ int decodeGetPowerLimitsResponse(
     uint32_t& persistentPowerLimitRequested,
     uint32_t& oneshotPowerLimitRequested, uint32_t& powerLimitEnforced);
 
+int encodeSetPowerLimitsRequest(
+    uint8_t instanceId, uint32_t powerLimitId, SetPowerLimitsAction action,
+    SetPowerLimitsPersistence persistence, uint32_t powerLimitMilliwatts,
+    std::span<uint8_t> buf);
+
+int decodeSetPowerLimitsResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode);
+
 int encodeGetInventoryInformationRequest(uint8_t instanceId, uint8_t propertyId,
                                          std::span<uint8_t> buf);
 
@@ -366,9 +358,34 @@ int decodeGetInventoryInformationResponse(
     ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
     InventoryPropertyId propertyId, InventoryValue& value);
 
+int encodeGetClockLimitRequest(uint8_t instanceId, ClockType clockType,
+                               std::span<uint8_t> buf);
+
+int decodeGetClockLimitResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    uint32_t& requestedLimitMin, uint32_t& requestedLimitMax,
+    uint32_t& presentLimitMin, uint32_t& presentLimitMax);
+
 int encodeQueryScalarGroupTelemetryV1Request(
     uint8_t instanceId, uint8_t deviceIndex, PcieScalarGroupId groupId,
     std::span<uint8_t> buf);
+
+int encodeGetViolationDurationRequest(uint8_t instanceId,
+                                      std::span<uint8_t> buf);
+
+int decodeGetViolationDurationResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    uint64_t& hwViolationDuration, uint64_t& globalSwViolationDuration,
+    uint64_t& powerViolationDuration, uint64_t& thermalViolationDuration);
+
+// Overload for the long-running response event payload, which contains
+// only the four violation duration values (no OCP/common response header).
+int decodeGetViolationDurationResponse(
+    std::span<const uint8_t> buf, uint64_t& hwViolationDuration,
+    uint64_t& globalSwViolationDuration, uint64_t& powerViolationDuration,
+    uint64_t& thermalViolationDuration);
 
 int encodeGetCurrentUtilizationModeRequest(uint8_t instanceId,
                                            std::span<uint8_t> buf);
@@ -377,6 +394,12 @@ int decodeGetCurrentUtilizationModeResponse(
     std::span<const uint8_t> buf,
     ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
     uint32_t& gpuUtilization, uint32_t& memoryUtilization);
+
+// Overload for the long-running response event payload, which contains
+// only the two utilization values (no OCP/common response header).
+int decodeGetCurrentUtilizationModeResponse(std::span<const uint8_t> buf,
+                                            uint32_t& gpuUtilization,
+                                            uint32_t& memoryUtilization);
 
 int decodeLongRunningResponseEvent(
     std::span<const uint8_t> buf,
@@ -420,4 +443,22 @@ int decodeGetEthernetPortTelemetryCountersResponse(
     std::span<const uint8_t> buf,
     ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
     std::vector<std::pair<uint8_t, uint64_t>>& telemetryValues);
+
+int encodeGetCurrentClockFrequencyRequest(uint8_t instanceId, ClockType clockId,
+                                          std::span<uint8_t> buf);
+
+int decodeGetCurrentClockFrequencyResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    uint32_t& clockFreqMHz);
+
+int encodeGetEccErrorCountsRequest(uint8_t instanceId, std::span<uint8_t> buf);
+
+int decodeGetEccErrorCountsResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    uint16_t& flags, uint32_t& sramCorrected, uint32_t& sramUncorrectedSecded,
+    uint32_t& sramUncorrectedParity, uint32_t& dramCorrected,
+    uint32_t& dramUncorrected);
+
 } // namespace gpu

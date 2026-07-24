@@ -15,7 +15,7 @@ namespace entity_manager
 
 PHOSPHOR_LOG2_USING;
 
-namespace rules_intf = sdbusplus::bus::match::rules;
+namespace rules_intf = sdbusplus::match_rules;
 
 EntityManagerInterface::EntityManagerInterface(
     sdbusplus::async::context& ctx, const interface_list_t& interfaceNames,
@@ -44,10 +44,10 @@ auto EntityManagerInterface::handleInventoryGet() -> sdbusplus::async::task<>
                              .path(InventoryIntf::namespace_path)
                              .interface("org.freedesktop.DBus.ObjectManager");
 
-    auto managedObjects = co_await entityManager.call<ManagedObjectType>(
+    const auto objs = co_await entityManager.call<ManagedObjectType>(
         ctx, "GetManagedObjects");
 
-    for (const auto& [objectPath, detectorConfig] : managedObjects)
+    for (const auto& [objectPath, detectorConfig] : objs)
     {
         for (const auto& interfaceName : interfaceNames)
         {

@@ -11,8 +11,8 @@
 
 #include <MctpRequester.hpp>
 #include <NvidiaGpuMctpVdm.hpp>
-#include <NvidiaPcieDevice.hpp>
 #include <NvidiaPcieInterface.hpp>
+#include <NvidiaUtils.hpp>
 #include <OcpMctpVdm.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
@@ -44,8 +44,34 @@ NvidiaPciePortInfo::NvidiaPciePortInfo(
     portNumber(portNumber), path(path), conn(conn),
     mctpRequester(mctpRequester), deviceType(deviceType)
 {
+    int rc = 0;
+    switch (deviceType)
+    {
+        case gpu::DeviceIdentification::DEVICE_GPU:
+            request.resize(gpu::queryScalarGroupTelemetryV1RequestSize);
+            rc = gpu::encodeQueryScalarGroupTelemetryV1Request(
+                0, 0, gpu::PcieScalarGroupId::LinkSpeedWidth, request);
+            break;
+        case gpu::DeviceIdentification::DEVICE_PCIE:
+            request.resize(gpu::queryScalarGroupTelemetryV2RequestSize);
+            rc = gpu::encodeQueryScalarGroupTelemetryV2Request(
+                0, portType, this->upstreamPortNumber, portNumber,
+                gpu::PcieScalarGroupId::LinkSpeedWidth, request);
+            break;
+        default:
+            break;
+    }
+    if (rc != 0)
+    {
+        request.clear();
+        lg2::error(
+            "Failed to encode PCIe Port Info request: rc={RC}, EID={EID}, PortType={PT}, PortNumber={PN}",
+            "RC", rc, "EID", eid, "PT", static_cast<uint8_t>(portType), "PN",
+            portNumber);
+    }
+
     const sdbusplus::object_path dbusPath =
-        sdbusplus::object_path(pcieDevicePathPrefix) / pcieDeviceName / name;
+        inventoryPrefix / pcieDeviceName / name;
 
     pciePortInterface = objectServer.add_interface(
         dbusPath, "xyz.openbmc_project.Inventory.Connector.Port");
@@ -79,13 +105,13 @@ NvidiaPciePortInfo::NvidiaPciePortInfo(
     if (!pciePortInterface->initialize())
     {
         lg2::error(
-            "Error initializing PCIe Device Interface for EID={EID}, PortType={PT}, PortNumber={PN}",
+            "Error initializing PCIe Device interface, eid={EID}, portType={PT}, portNumber={PN}",
             "EID", eid, "PT", static_cast<uint8_t>(portType), "PN", portNumber);
     }
 
     std::vector<Association> associations;
     associations.emplace_back("connected_to", "connecting",
-                              pcieDevicePathPrefix + pcieDeviceName);
+                              inventoryPrefix / pcieDeviceName);
 
     associationInterface =
         objectServer.add_interface(dbusPath, association::interface);
@@ -94,14 +120,14 @@ NvidiaPciePortInfo::NvidiaPciePortInfo(
     if (!associationInterface->initialize())
     {
         lg2::error(
-            "Error initializing Association Interface for PCIe Port Info for EID={EID}, PortType={PT}, PortNumber={PN}",
+            "Error initializing Association interface for PCIe Port Info, eid={EID}, portType={PT}, portNumber={PN}",
             "EID", eid, "PT", static_cast<uint8_t>(portType), "PN", portNumber);
     }
 }
 
 uint64_t NvidiaPciePortInfo::mapPcieGenToLinkSpeedBitsPerSecond(uint32_t value)
 {
-    static constexpr int gbpsToBps = 1 << 30;
+    static constexpr uint64_t gbpsToBps = 1000000000;
 
     switch (value)
     {
@@ -129,9 +155,10 @@ void NvidiaPciePortInfo::processResponse(
     {
         lg2::error(
             "Error updating PCIe Port Info: sending message over MCTP failed, "
-            "rc={RC}, EID={EID}, PortType={PT}, PortNumber={PN}",
+            "rc={RC}, EID={EID}, PortType={PT}, UpstreamPortNumber={UP}, PortNumber={PN}",
             "RC", sendRecvMsgResult.message(), "EID", eid, "PT",
-            static_cast<uint8_t>(portType), "PN", portNumber);
+            static_cast<uint8_t>(portType), "UP", upstreamPortNumber, "PN",
+            portNumber);
         return;
     }
 
@@ -158,9 +185,10 @@ void NvidiaPciePortInfo::processResponse(
     {
         lg2::error(
             "Error updating PCIe Port Info: decode failed, "
-            "rc={RC}, cc={CC}, reasonCode={RESC}, EID={EID}, PortType={PT}, PortNumber={PN}",
+            "rc={RC}, cc={CC}, reasonCode={RESC}, EID={EID}, PortType={PT}, UpstreamPortNumber={UP}, PortNumber={PN}",
             "RC", rc, "CC", static_cast<uint8_t>(cc), "RESC", reasonCode, "EID",
-            eid, "PT", static_cast<uint8_t>(portType), "PN", portNumber);
+            eid, "PT", static_cast<uint8_t>(portType), "UP", upstreamPortNumber,
+            "PN", portNumber);
         return;
     }
 
@@ -168,9 +196,10 @@ void NvidiaPciePortInfo::processResponse(
     {
         lg2::error(
             "Error updating PCIe Port Info: insufficient telemetry values, "
-            "NumValues={NUM}, EID={EID}, PortType={PT}, PortNumber={PN}",
+            "NumValues={NUM}, EID={EID}, PortType={PT}, UpstreamPortNumber={UP}, PortNumber={PN}",
             "NUM", telemetryValues.size(), "EID", eid, "PT",
-            static_cast<uint8_t>(portType), "PN", portNumber);
+            static_cast<uint8_t>(portType), "UP", upstreamPortNumber, "PN",
+            portNumber);
         return;
     }
 
@@ -183,37 +212,13 @@ void NvidiaPciePortInfo::processResponse(
 
 void NvidiaPciePortInfo::update()
 {
-    int rc = 0;
-    std::span<uint8_t> buf;
-
-    switch (deviceType)
+    if (request.empty())
     {
-        case gpu::DeviceIdentification::DEVICE_GPU:
-            rc = gpu::encodeQueryScalarGroupTelemetryV1Request(
-                0, 0, gpu::PcieScalarGroupId::LinkSpeedWidth, requestV1);
-            buf = requestV1;
-            break;
-        case gpu::DeviceIdentification::DEVICE_PCIE:
-            rc = gpu::encodeQueryScalarGroupTelemetryV2Request(
-                0, portType, upstreamPortNumber, portNumber,
-                gpu::PcieScalarGroupId::LinkSpeedWidth, requestV2);
-            buf = requestV2;
-            break;
-        default:
-            return;
-    }
-
-    if (rc != 0)
-    {
-        lg2::error(
-            "Error updating PCIe Port Info: encode failed, rc={RC}, EID={EID}, PortType={PT}, PortNumber={PN}",
-            "RC", rc, "EID", eid, "PT", static_cast<uint8_t>(portType), "PN",
-            portNumber);
         return;
     }
 
     mctpRequester.sendRecvMsg(
-        eid, buf,
+        eid, request,
         [weak{weak_from_this()}](const std::error_code& ec,
                                  std::span<const uint8_t> buffer) {
             std::shared_ptr<NvidiaPciePortInfo> self = weak.lock();

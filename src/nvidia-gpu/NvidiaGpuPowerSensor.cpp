@@ -54,6 +54,20 @@ NvidiaGpuPowerSensor::NvidiaGpuPowerSensor(
     mctpRequester(mctpRequester), objectServer(objectServer)
 
 {
+    const int rc = gpu::encodeGetPowerDrawRequest(
+        gpu::PlatformEnvironmentalCommands::GET_CURRENT_POWER_DRAW, 0, sensorId,
+        averagingInterval, request);
+    if (rc == 0)
+    {
+        requestEncoded = true;
+    }
+    else
+    {
+        lg2::error(
+            "Failed to encode Power Sensor request for eid {EID} and sensor id {SID}, rc={RC}",
+            "EID", eid, "SID", sensorId, "RC", rc);
+    }
+
     std::string dbusPath = sensorPathPrefix + "power/"s + escapeName(name);
 
     sensorInterface = objectServer.add_interface(
@@ -84,7 +98,7 @@ NvidiaGpuPowerSensor::NvidiaGpuPowerSensor(
         if (!commonPhysicalContextInterface->initialize())
         {
             lg2::error(
-                "Error initializing PhysicalContext Interface for Power Sensor for eid {EID} and sensor id {SID}",
+                "Error initializing PhysicalContext interface for Power Sensor, eid={EID}, sensorId={SID}",
                 "EID", eid, "SID", sensorId);
         }
     }
@@ -143,15 +157,9 @@ void NvidiaGpuPowerSensor::processResponse(const std::error_code& ec,
 
 void NvidiaGpuPowerSensor::update()
 {
-    const int rc = gpu::encodeGetPowerDrawRequest(
-        gpu::PlatformEnvironmentalCommands::GET_CURRENT_POWER_DRAW, 0, sensorId,
-        averagingInterval, request);
-
-    if (rc != 0)
+    if (!requestEncoded)
     {
-        lg2::error(
-            "Error updating Temperature Sensor for eid {EID} and sensor id {SID} : encode failed, rc={RC}",
-            "EID", eid, "SID", sensorId, "RC", rc);
+        return;
     }
 
     mctpRequester.sendRecvMsg(

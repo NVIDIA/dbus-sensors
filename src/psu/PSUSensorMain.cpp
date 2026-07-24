@@ -86,6 +86,7 @@ static constexpr auto sensorTypes = std::to_array<
     {"cffps3", I2CDeviceType{"cffps", true}},
     {"CRPS185", I2CDeviceType{"crps185", true}},
     {"DPS800", I2CDeviceType{"dps800", true}},
+    {"E50SN12051", I2CDeviceType{"e50sn12051", true}},
     {"INA219", I2CDeviceType{"ina219", true}},
     {"INA226", I2CDeviceType{"ina226", true}},
     {"INA230", I2CDeviceType{"ina230", true}},
@@ -138,6 +139,8 @@ static constexpr auto sensorTypes = std::to_array<
     {"PLI1209BC", I2CDeviceType{"pli1209bc", true}},
     {"pmbus", I2CDeviceType{"pmbus", true}},
     {"PXE1610", I2CDeviceType{"pxe1610", true}},
+    {"Q54SN120A1", I2CDeviceType{"q54sn120a1", true}},
+    {"Q54SW120A7", I2CDeviceType{"q54sw120a7", true}},
     {"SQ52206", I2CDeviceType{"sq52206", true}},
     {"RAA228000", I2CDeviceType{"raa228000", true}},
     {"RAA228004", I2CDeviceType{"raa228004", true}},
@@ -198,7 +201,7 @@ static constexpr const std::array<SensorUnit, 6> sensorTable{{
     {"voltage", sensor_paths::unitVolts},
 }};
 
-static constexpr std::array<PSUProperty, 20> labelMatch{{
+constexpr static auto labelMatch = std::to_array<PSUProperty>({
     {"curr", "Output Current", 255, 0, 3, 0},
     {"fan", "Fan Speed ", 30000, 0, 0, 0},
     {"iin", "Input Current", 20, 0, 3, 0},
@@ -217,7 +220,7 @@ static constexpr std::array<PSUProperty, 20> labelMatch{{
     {"vmon", "Auxiliary Input Voltage", 255, 0, 3, 0},
     {"voltage", "Output Voltage", 255, 0, 3, 0},
     {"vout", "Output Voltage", 255, 0, 3, 0},
-}};
+});
 
 const static EventPathList eventMatch{{"PredictiveFailure", {"power1_alarm"}},
                                       {"Failure", {"in2_alarm"}},
@@ -836,8 +839,8 @@ static void createSensorsCallback(
             {
                 try
                 {
-                    sensorScaleFactor = std::visit(
-                        VariantToUnsignedIntVisitor(), findCustomScale->second);
+                    sensorScaleFactor = std::visit(VariantToDoubleVisitor(),
+                                                   findCustomScale->second);
                 }
                 catch (const std::invalid_argument&)
                 {
@@ -846,7 +849,8 @@ static void createSensorsCallback(
                 }
 
                 // Avoid later division by zero
-                if (sensorScaleFactor > 0)
+                if (sensorScaleFactor != 0.0 &&
+                    std::isfinite(sensorScaleFactor))
                 {
                     customizedScale = true;
                 }
@@ -968,7 +972,7 @@ static void createSensorsCallback(
             // Similarly, if sensor scaling factor is being customized,
             // then the below power-of-10 constraint becomes unnecessary,
             // as config should be able to specify an arbitrary divisor.
-            unsigned int factor = sensorScaleFactor;
+            double factor = sensorScaleFactor;
             if (!customizedScale)
             {
                 // Preserve existing usage of hardcoded labelMatch table below
@@ -985,8 +989,12 @@ static void createSensorsCallback(
                 auto findScaleFactor = baseConfig->find(strScaleFactor);
                 if (findScaleFactor != baseConfig->end())
                 {
-                    factor = std::visit(VariantToIntVisitor(),
-                                        findScaleFactor->second);
+                    double newFactor = std::visit(VariantToDoubleVisitor(),
+                                                  findScaleFactor->second);
+                    if (newFactor != 0.0 && std::isfinite(newFactor))
+                    {
+                        factor = newFactor;
+                    }
                 }
 
                 lg2::debug(
@@ -1348,10 +1356,10 @@ int main()
             });
         };
 
-    std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
+    std::vector<std::unique_ptr<sdbusplus::match>> matches =
         setupPropertiesChangedMatches(*systemBus, sensorTypes, eventHandler);
 
-    matches.emplace_back(std::make_unique<sdbusplus::bus::match_t>(
+    matches.emplace_back(std::make_unique<sdbusplus::match>(
         static_cast<sdbusplus::bus_t&>(*systemBus),
         "type='signal',member='PropertiesChanged',path_namespace='" +
             std::string(cpuInventoryPath) +

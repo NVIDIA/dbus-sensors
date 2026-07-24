@@ -273,7 +273,7 @@ class MCTPDEndpoint :
     MCTPEndpoint::Event notifyAvailable;
     MCTPEndpoint::Event notifyDegraded;
     MCTPEndpoint::Event notifyRemoved;
-    std::optional<sdbusplus::bus::match_t> connectivityMatch;
+    std::optional<sdbusplus::match> connectivityMatch;
 
     void onMctpEndpointChange(sdbusplus::message_t& msg);
     void updateEndpointConnectivity(const std::string& connectivity);
@@ -435,7 +435,7 @@ class MCTPDDevice :
     const std::optional<std::vector<uint8_t>> ignoreEids;
     const std::optional<std::vector<uint8_t>> ignoreMessageTypes;
     const std::optional<std::uint8_t> pollingInterval;
-    std::unique_ptr<sdbusplus::bus::match_t> removeMatch;
+    std::unique_ptr<sdbusplus::match> removeMatch;
     std::unique_ptr<sdbusplus::bus::match_t> discoveryNotifyMatch;
     bool discoveryNeeded = false;
     std::unique_ptr<boost::asio::steady_timer> discoveryCheckTimer;

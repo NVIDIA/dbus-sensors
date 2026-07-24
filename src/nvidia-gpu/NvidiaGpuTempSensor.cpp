@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "NvidiaGpuSensor.hpp"
+#include "NvidiaGpuTempSensor.hpp"
 
 #include "NvidiaSensorUtils.hpp"
 #include "SensorPaths.hpp"
@@ -50,6 +50,19 @@ NvidiaGpuTempSensor::NvidiaGpuTempSensor(
     eid(eid), sensorId{sensorId}, mctpRequester(mctpRequester),
     objectServer(objectServer)
 {
+    const int rc = gpu::encodeGetTemperatureReadingRequest(
+        0, sensorId, getTemperatureReadingRequest);
+    if (rc == 0)
+    {
+        requestEncoded = true;
+    }
+    else
+    {
+        lg2::error(
+            "Failed to encode Temperature Sensor request for eid {EID} and sensor id {SID}, rc={RC}",
+            "EID", eid, "SID", sensorId, "RC", rc);
+    }
+
     std::string dbusPath =
         sensorPathPrefix + "temperature/"s + escapeName(name);
 
@@ -82,7 +95,7 @@ NvidiaGpuTempSensor::NvidiaGpuTempSensor(
         if (!sensorTypeInterface->initialize())
         {
             lg2::error(
-                "Error initializing Type Interface for Temperature Sensor for eid {EID} and sensor id {SID}",
+                "Error initializing Type interface for Temperature Sensor, eid={EID}, sensorId={SID}",
                 "EID", eid, "SID", sensorId);
         }
     }
@@ -101,7 +114,7 @@ NvidiaGpuTempSensor::NvidiaGpuTempSensor(
         if (!commonPhysicalContextInterface->initialize())
         {
             lg2::error(
-                "Error initializing PhysicalContext Interface for Temperature Sensor for eid {EID} and sensor id {SID}",
+                "Error initializing PhysicalContext interface for Temperature Sensor, eid={EID}, sensorId={SID}",
                 "EID", eid, "SID", sensorId);
         }
     }
@@ -163,14 +176,9 @@ void NvidiaGpuTempSensor::processResponse(const std::error_code& ec,
 
 void NvidiaGpuTempSensor::update()
 {
-    auto rc = gpu::encodeGetTemperatureReadingRequest(
-        0, sensorId, getTemperatureReadingRequest);
-
-    if (rc != 0)
+    if (!requestEncoded)
     {
-        lg2::error(
-            "Error updating Temperature Sensor for eid {EID} and sensor id {SID} : encode failed, rc={RC}",
-            "EID", eid, "SID", sensorId, "RC", rc);
+        return;
     }
 
     mctpRequester.sendRecvMsg(

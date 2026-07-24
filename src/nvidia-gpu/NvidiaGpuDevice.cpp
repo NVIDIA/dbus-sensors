@@ -13,28 +13,39 @@
 #include <NvidiaDeviceDiscovery.hpp>
 #include <NvidiaDriverInformation.hpp>
 #include <NvidiaEventReporting.hpp>
-#include <NvidiaGpuControl.hpp>
-#include <NvidiaGpuCurrentUtilization.hpp>
+#include <NvidiaGpuClockFrequencyMetric.hpp>
+#include <NvidiaGpuClockSpeedControl.hpp>
 #include <NvidiaGpuEnergySensor.hpp>
 #include <NvidiaGpuMctpVdm.hpp>
+#include <NvidiaGpuMemoryClockFrequency.hpp>
+#include <NvidiaGpuMemoryDevice.hpp>
+#include <NvidiaGpuPowerControl.hpp>
 #include <NvidiaGpuPowerPeakReading.hpp>
 #include <NvidiaGpuPowerSensor.hpp>
-#include <NvidiaGpuSensor.hpp>
+#include <NvidiaGpuTempSensor.hpp>
+#include <NvidiaGpuUtilizationMetrics.hpp>
+#include <NvidiaGpuViolationDuration.hpp>
 #include <NvidiaGpuVoltageSensor.hpp>
+#include <NvidiaGpuXid.hpp>
 #include <NvidiaLongRunningHandler.hpp>
 #include <NvidiaPcieFunction.hpp>
 #include <NvidiaPcieInterface.hpp>
 #include <NvidiaPciePort.hpp>
 #include <NvidiaPciePortMetrics.hpp>
+#include <NvidiaUtils.hpp>
 #include <OcpMctpVdm.hpp>
+#include <SerialQueue.hpp>
 #include <boost/asio/io_context.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/message/native_types.hpp>
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <format>
 #include <functional>
 #include <initializer_list>
 #include <limits>
@@ -45,17 +56,28 @@
 #include <utility>
 #include <vector>
 
+// Each long-running command can take up to 2s on timeout; worst-case
+// capacity is ~15 commands/device.
+static constexpr auto longRunningSensorPollRate = std::chrono::seconds{30};
+
+static constexpr const char* controlClockSpeedIfaceName =
+    "xyz.openbmc_project.Control.OperatingClockSpeed";
+static constexpr const char* controlClockSpeedPrefix =
+    "/xyz/openbmc_project/control/operatingclockspeed/";
+static constexpr const char* controlPowerPrefix =
+    "/xyz/openbmc_project/control/power/";
+
 static constexpr uint8_t gpuTLimitCriticalThresholdId{1};
 static constexpr uint8_t gpuTLimitWarningThresholdId{2};
 static constexpr uint8_t gpuTLimitHardshutDownThresholdId{4};
 
 // nota bene: the order has to match the order in processTLimitThresholds
-static constexpr std::array<uint8_t, 3> thresholdIds{
-    gpuTLimitWarningThresholdId, gpuTLimitCriticalThresholdId,
-    gpuTLimitHardshutDownThresholdId};
+static constexpr auto thresholdIds = std::to_array<uint8_t>(
+    {gpuTLimitWarningThresholdId, gpuTLimitCriticalThresholdId,
+     gpuTLimitHardshutDownThresholdId});
 
-static constexpr const char* controlPowerPrefix =
-    "/xyz/openbmc_project/control/power/";
+static constexpr const char* dramIfaceName =
+    "xyz.openbmc_project.Inventory.Item.Dimm";
 
 GpuDevice::GpuDevice(const SensorConfigs& configs, const std::string& name,
                      const std::string& path,
@@ -65,6 +87,7 @@ GpuDevice::GpuDevice(const SensorConfigs& configs, const std::string& name,
                      sdbusplus::asio::object_server& objectServer) :
     eid(eid), sensorPollMs(std::chrono::milliseconds{configs.pollRate}),
     waitTimer(io, std::chrono::steady_clock::duration(0)),
+    waitTimerLongRunning(io, std::chrono::steady_clock::duration(0)),
     mctpRequester(mctpRequester), io(io), conn(conn),
     objectServer(objectServer), configs(configs), name(escapeName(name)),
     path(path)
@@ -74,29 +97,87 @@ GpuDevice::GpuDevice(const SensorConfigs& configs, const std::string& name,
     powerCapInterface = objectServer.add_interface(
         powerControlPath, "xyz.openbmc_project.Control.Power.Cap");
 
-    powerCapInterface->register_property("PowerCap",
-                                         std::numeric_limits<uint32_t>::max());
-    powerCapInterface->register_property("PowerCapEnable", false);
     powerCapInterface->register_property("MinPowerCapValue", uint32_t{0});
     powerCapInterface->register_property("MaxPowerCapValue",
                                          std::numeric_limits<uint32_t>::max());
-    powerCapInterface->register_property(
-        "DefaultPowerCap", std::numeric_limits<uint32_t>::max(),
-        sdbusplus::asio::PropertyPermission::readOnly);
+    powerCapInterface->register_property("DefaultPowerCap",
+                                         std::numeric_limits<uint32_t>::max());
 
-    powerCapInterface->initialize();
+    const sdbusplus::object_path gpuPath = inventoryPrefix / this->name;
+    const sdbusplus::object_path dramPath =
+        inventoryPrefix / std::format("{}_{}", this->name, dramInventorySuffix);
+
+    std::vector<Association> associations;
+    associations.emplace_back("contained_by", "containing", gpuPath);
+
+    dramAssociationInterface =
+        objectServer.add_interface(dramPath, association::interface);
+    dramAssociationInterface->register_property("Associations", associations);
+
+    if (!dramAssociationInterface->initialize())
+    {
+        lg2::error(
+            "Error initializing DRAM association interface for {NAME}, eid={EID}",
+            "NAME", this->name, "EID", eid);
+    }
+
+    dramItemInterface = objectServer.add_interface(dramPath, dramIfaceName);
+    dramItemInterface->register_property(
+        "MemoryType",
+        std::string("xyz.openbmc_project.Inventory.Item.Dimm.DeviceType.HBM"));
+    dramItemInterface->register_property(
+        "ECC", std::string(
+                   "xyz.openbmc_project.Inventory.Item.Dimm.Ecc.SingleBitECC"));
+    dramItemInterface->register_property("MemorySizeInKB", size_t{0});
+    dramItemInterface->register_property("MemoryConfiguredSpeedInMhz",
+                                         uint16_t{0});
+    dramItemInterface->register_property("AllowedSpeedsMT",
+                                         std::vector<uint16_t>(2, 0));
+
+    if (!dramItemInterface->initialize())
+    {
+        lg2::error(
+            "Error initializing DRAM Item.Dimm interface for {NAME}, eid={EID}",
+            "NAME", this->name, "EID", eid);
+    }
+
+    const std::string gpuClockSpeedControlPath =
+        controlClockSpeedPrefix + this->name;
+    controlClockSpeedInterface = objectServer.add_interface(
+        gpuClockSpeedControlPath, controlClockSpeedIfaceName);
+    controlClockSpeedInterface->register_property(
+        "PresentSpeedLimitMaxHz", std::numeric_limits<uint64_t>::max(),
+        sdbusplus::asio::PropertyPermission::readOnly);
+    controlClockSpeedInterface->register_property(
+        "PresentSpeedLimitMinHz", uint64_t{0},
+        sdbusplus::asio::PropertyPermission::readOnly);
+    controlClockSpeedInterface->register_property(
+        "RequestedSpeedLimitMaxHz", std::numeric_limits<uint64_t>::max());
+    controlClockSpeedInterface->register_property(
+        "RequestedSpeedLimitMinHz", std::numeric_limits<uint64_t>::max());
+
+    if (!controlClockSpeedInterface->initialize())
+    {
+        lg2::error(
+            "Error initializing OperatingClockSpeed interface for {NAME}, eid={EID}",
+            "NAME", this->name, "EID", eid);
+    }
 }
 
 GpuDevice::~GpuDevice()
 {
     objectServer.remove_interface(powerCapInterface);
+    objectServer.remove_interface(dramAssociationInterface);
+    objectServer.remove_interface(dramItemInterface);
+    objectServer.remove_interface(controlClockSpeedInterface);
 }
 
 void GpuDevice::init()
 {
     inventory = std::make_shared<Inventory>(
         conn, objectServer, name, mctpRequester,
-        gpu::DeviceIdentification::DEVICE_GPU, eid, io, powerCapInterface);
+        gpu::DeviceIdentification::DEVICE_GPU, eid, io, powerCapInterface,
+        dramItemInterface);
 
     inventory->init();
 
@@ -138,7 +219,11 @@ void GpuDevice::makeSensors()
         objectServer, std::vector<thresholds::Threshold>{},
         gpu::DeviceIdentification::DEVICE_GPU);
 
-    longRunningHandler = std::make_shared<NvidiaLongRunningResponseHandler>();
+    longRunningQueue = std::make_shared<SerialQueue>(io);
+
+    longRunningHandler = std::make_shared<NvidiaLongRunningResponseHandler>(io);
+
+    xidEventHandler = std::make_shared<NvidiaXidEventHandler>(name, conn);
 
     eventReporting = std::make_shared<NvidiaEventReportingConfig>(
         eid, mctpRequester,
@@ -147,17 +232,30 @@ void GpuDevice::makeSensors()
              static_cast<uint8_t>(
                  gpu::DeviceCapabilityDiscoveryEvents::LONG_RUNNING_RESPONSE),
              std::bind_front(&NvidiaLongRunningResponseHandler::handler,
-                             longRunningHandler)}});
+                             longRunningHandler)},
+            {gpu::MessageType::PLATFORM_ENVIRONMENTAL,
+             static_cast<uint8_t>(gpu::PlatformEnvironmentalEvent::XID),
+             std::bind_front(&NvidiaXidEventHandler::handleXidEvent,
+                             xidEventHandler)}});
 
-    currentUtilization = std::make_shared<NvidiaGpuCurrentUtilization>(
-        conn, mctpRequester, objectServer, name, eid, longRunningHandler);
+    utilizationMetrics = std::make_shared<NvidiaGpuUtilizationMetrics>(
+        mctpRequester, objectServer, name, eid, longRunningQueue,
+        longRunningHandler);
+
+    violationDuration = std::make_shared<NvidiaGpuViolationDuration>(
+        mctpRequester, objectServer, name, eid, longRunningQueue,
+        longRunningHandler);
 
     driverInfo = std::make_shared<NvidiaDriverInformation>(
-        conn, mctpRequester, name, path, eid, objectServer);
+        conn, mctpRequester, name, eid, objectServer,
+        sdbusplus::object_path(path).parent_path());
 
-    gpuControl = std::make_shared<NvidiaGpuControl>(
-        objectServer, name, inventoryPrefix + name, mctpRequester, eid,
-        powerCapInterface);
+    gpuPowerControl = std::make_shared<NvidiaGpuPowerControl>(
+        objectServer, name, mctpRequester, eid, io, powerCapInterface,
+        inventory);
+
+    gpuClockSpeedControl = std::make_shared<NvidiaGpuClockSpeedControl>(
+        objectServer, name, mctpRequester, eid, controlClockSpeedInterface);
 
     pcieInterface = std::make_shared<NvidiaPcieInterface>(
         conn, mctpRequester, name, path, eid, objectServer,
@@ -187,11 +285,21 @@ void GpuDevice::makeSensors()
         gpu::PciePortType::UPSTREAM, 0, 0, objectServer,
         gpu::DeviceIdentification::DEVICE_GPU));
 
+    memoryDevice = std::make_shared<NvidiaGpuMemoryDevice>(
+        conn, mctpRequester, name, eid, objectServer);
+
+    memoryClockFrequency = std::make_shared<NvidiaGpuMemoryClockFrequency>(
+        mctpRequester, name, eid, dramItemInterface);
+
+    clockFrequencyMetric = std::make_shared<NvidiaGpuClockFrequencyMetric>(
+        mctpRequester, name, eid, objectServer);
+
     getTLimitThresholds();
 
     lg2::info("Added GPU {NAME} Sensors with chassis path: {PATH}.", "NAME",
               name, "PATH", path);
     read();
+    readLongRunning();
 }
 
 void GpuDevice::getTLimitThresholds()
@@ -225,7 +333,8 @@ void GpuDevice::readThermalParameterCallback(const std::error_code& ec,
         lg2::error(
             "Error reading thermal parameter: decode failed, rc={RC}, cc={CC}, reasonCode={RESC}",
             "RC", rc, "CC", cc, "RESC", reasonCode);
-        processTLimitThresholds(ec);
+        processTLimitThresholds(
+            std::make_error_code(std::errc::protocol_error));
         return;
     }
 
@@ -306,8 +415,8 @@ void GpuDevice::read()
     energySensor->update();
     voltageSensor->update();
     driverInfo->update();
-    gpuControl->update();
-    currentUtilization->update();
+    gpuPowerControl->update();
+    gpuClockSpeedControl->update();
     pcieInterface->update();
     pciePort->update();
     pcieFunction->update();
@@ -315,6 +424,9 @@ void GpuDevice::read()
     {
         metrics->update();
     }
+    memoryDevice->update();
+    memoryClockFrequency->update();
+    clockFrequencyMetric->update();
 
     waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
     waitTimer.async_wait(
@@ -330,5 +442,27 @@ void GpuDevice::read()
                 return;
             }
             self->read();
+        });
+}
+
+void GpuDevice::readLongRunning()
+{
+    utilizationMetrics->update();
+    violationDuration->update();
+
+    waitTimerLongRunning.expires_after(longRunningSensorPollRate);
+    waitTimerLongRunning.async_wait(
+        [weak{weak_from_this()}](const boost::system::error_code& ec) {
+            std::shared_ptr<GpuDevice> self = weak.lock();
+            if (!self)
+            {
+                lg2::error("Invalid reference to GpuDevice");
+                return;
+            }
+            if (ec)
+            {
+                return;
+            }
+            self->readLongRunning();
         });
 }

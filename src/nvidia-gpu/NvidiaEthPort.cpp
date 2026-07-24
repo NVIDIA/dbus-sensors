@@ -12,7 +12,6 @@
 
 #include <MctpRequester.hpp>
 #include <NvidiaGpuMctpVdm.hpp>
-#include <NvidiaPcieDevice.hpp>
 #include <OcpMctpVdm.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
@@ -21,6 +20,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <format>
 #include <functional>
 #include <memory>
@@ -34,19 +34,34 @@ using std::string;
 
 using namespace std::literals;
 
+static constexpr uint8_t permanentMacAddressTag = 2;
+
 NvidiaEthPortMetrics::NvidiaEthPortMetrics(
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     mctp::MctpRequester& mctpRequester, const std::string& name,
     const std::string& deviceName, const std::string& path, uint8_t eid,
-    uint16_t portNumber, sdbusplus::asio::object_server& objectServer) :
+    uint16_t portNumber, sdbusplus::asio::object_server& objectServer,
+    const std::vector<std::pair<uint8_t, uint64_t>>& addresses) :
     eid(eid), portNumber(portNumber), path(path), conn(conn),
     mctpRequester(mctpRequester)
 {
-    const sdbusplus::object_path deviceDbusPath =
-        sdbusplus::object_path(nicPathPrefix) / deviceName;
+    const int rc = gpu::encodeGetEthernetPortTelemetryCountersRequest(
+        0, portNumber, request);
+    if (rc == 0)
+    {
+        requestEncoded = true;
+    }
+    else
+    {
+        lg2::error(
+            "Failed to encode Ethernet Port Metrics request for EID={EID}, PortNumber={PN}, rc={RC}",
+            "EID", eid, "PN", portNumber, "RC", rc);
+    }
+
+    const sdbusplus::object_path deviceDbusPath = inventoryPrefix / deviceName;
 
     const sdbusplus::object_path portDbusPath =
-        sdbusplus::object_path(nicPathPrefix) / deviceName / name;
+        inventoryPrefix / deviceName / name;
 
     const std::string metricsDbusPathPrefix =
         metricPath + std::format("port_{}_{}", deviceName, name);
@@ -62,8 +77,55 @@ NvidiaEthPortMetrics::NvidiaEthPortMetrics(
 
     associationInterface->register_property("Associations", associations);
 
-    constexpr std::array<std::pair<uint8_t, const char*>, 21> telemetryMetrics =
-        {{
+    portInterface->register_property(
+        "PortProtocol",
+        std::string("xyz.openbmc_project.Inventory.Connector.Port."
+                    "PortProtocol.Ethernet"));
+
+    for (const auto& [tag, value] : addresses)
+    {
+        if (tag != permanentMacAddressTag)
+        {
+            continue;
+        }
+
+        std::array<uint8_t, 6> mac{};
+        std::memcpy(mac.data(), &value, sizeof(mac));
+        const std::string macStr =
+            std::format("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}", mac[0],
+                        mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+        const sdbusplus::object_path ndfDbusPath =
+            inventoryPrefix / deviceName / "NetworkDeviceFunctions" / name;
+
+        networkDeviceFunctionInterface = objectServer.add_interface(
+            ndfDbusPath, "xyz.openbmc_project.Inventory.Item.NetworkInterface");
+        networkDeviceFunctionInterface->register_property("MACAddress", macStr);
+        if (!networkDeviceFunctionInterface->initialize())
+        {
+            lg2::error(
+                "Error initializing NetworkDeviceFunction interface, eid={EID}, portNumber={PN}",
+                "EID", eid, "PN", portNumber);
+        }
+
+        std::vector<Association> ndfAssociations;
+        ndfAssociations.emplace_back("exposed_by", "exposing", deviceDbusPath);
+        ndfAssociations.emplace_back("assigned_to", "assigning", portDbusPath);
+        networkDeviceFunctionAssociationInterface =
+            objectServer.add_interface(ndfDbusPath, association::interface);
+        networkDeviceFunctionAssociationInterface->register_property(
+            "Associations", ndfAssociations);
+        if (!networkDeviceFunctionAssociationInterface->initialize())
+        {
+            lg2::error(
+                "Error initializing NetworkDeviceFunction Association interface, eid={EID}, portNumber={PN}",
+                "EID", eid, "PN", portNumber);
+        }
+        break;
+    }
+
+    static constexpr auto telemetryMetrics =
+        std::to_array<std::pair<uint8_t, const char*>>({
             {0, "/nic/rx_bytes"},
             {1, "/nic/tx_bytes"},
             {2, "/nic/rx_unicast_frames"},
@@ -85,7 +147,7 @@ NvidiaEthPortMetrics::NvidiaEthPortMetrics(
             {18, "/nic/tx_multiple_collisions"},
             {19, "/nic/tx_late_collisions"},
             {20, "/nic/tx_excessive_collisions"},
-        }};
+        });
 
     for (const auto& [tag, metricName] : telemetryMetrics)
     {
@@ -107,14 +169,14 @@ NvidiaEthPortMetrics::NvidiaEthPortMetrics(
         if (!metricValueInterface[tag]->initialize())
         {
             lg2::error(
-                "Error initializing Ethernet Port Metric Interface for EID={EID}, PortNumber={PN}, Metric={MN}",
+                "Error initializing Ethernet Port Metric interface, eid={EID}, portNumber={PN}, metric={MN}",
                 "EID", eid, "PN", portNumber, "MN", metricName);
         }
 
         if (!metricAssociationInterfaces[tag]->initialize())
         {
             lg2::error(
-                "Error initializing Ethernet Port Metric Association Interface for EID={EID}, PortNumber={PN}, Metric={MN}",
+                "Error initializing Ethernet Port Metric Association interface, eid={EID}, portNumber={PN}, metric={MN}",
                 "EID", eid, "PN", portNumber, "MN", metricName);
         }
     }
@@ -122,14 +184,14 @@ NvidiaEthPortMetrics::NvidiaEthPortMetrics(
     if (!portInterface->initialize())
     {
         lg2::error(
-            "Error initializing Ethernet Port Interface for EID={EID}, PortNumber={PN}",
+            "Error initializing Ethernet Port interface, eid={EID}, portNumber={PN}",
             "EID", eid, "PN", portNumber);
     }
 
     if (!associationInterface->initialize())
     {
         lg2::error(
-            "Error initializing Association Interface for Ethernet Port for EID={EID}, PortNumber={PN}",
+            "Error initializing Association interface for Ethernet Port, eid={EID}, portNumber={PN}",
             "EID", eid, "PN", portNumber);
     }
 }
@@ -175,14 +237,8 @@ void NvidiaEthPortMetrics::processResponse(
 
 void NvidiaEthPortMetrics::update()
 {
-    const int rc = gpu::encodeGetEthernetPortTelemetryCountersRequest(
-        0, portNumber, request);
-
-    if (rc != 0)
+    if (!requestEncoded)
     {
-        lg2::error(
-            "Error updating Ethernet Port Metrics: encode failed, rc={RC}, EID={EID}, PortNumber={PN}",
-            "RC", rc, "EID", eid, "PN", portNumber);
         return;
     }
 

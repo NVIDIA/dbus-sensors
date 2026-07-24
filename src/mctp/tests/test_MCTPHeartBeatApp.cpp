@@ -459,6 +459,10 @@ TEST(HeartbeatMainPaths, addedSpiEndpointCallable)
     // it no longer rethrows, so a null bus must not be treated as throwing
     // here.
     EXPECT_NO_THROW(addedSPIEndpoint(conn, 8, io));
+    // Reset the global before io_context is destroyed: the MCTPHeartbeatService
+    // holds a timer that references io, so it must be released first to avoid
+    // ASAN heap-use-after-free during ~io_context().
+    gHeartbeatService = nullptr;
 }
 
 // NOTE: TestMockHeartbeatService and its tests (MockHeartbeatService.*,

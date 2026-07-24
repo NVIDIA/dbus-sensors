@@ -19,6 +19,7 @@
 #include "Utils.hpp"
 #include "async_test_helpers.hpp"
 
+#include <systemd/sd-bus-protocol.h>
 #include <systemd/sd-bus.h>
 #include <unistd.h>
 

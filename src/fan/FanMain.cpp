@@ -57,8 +57,8 @@
 #include <vector>
 
 // The following two structures need to be consistent
-static constexpr std::array<std::string_view, 4> sensorTypes{
-    {"AspeedFan", "I2CFan", "NuvotonFan", "HPEFan"}};
+static constexpr auto sensorTypes = std::to_array<std::string_view>(
+    {"AspeedFan", "I2CFan", "NuvotonFan", "HPEFan"});
 
 enum FanTypes
 {
@@ -721,7 +721,7 @@ int main()
             });
         };
 
-    std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
+    std::vector<std::unique_ptr<sdbusplus::match>> matches =
         setupPropertiesChangedMatches(*systemBus, sensorTypes, eventHandler);
 
     // redundancy sensor
@@ -729,7 +729,7 @@ int main()
         [&tachSensors, &systemBus, &objectServer](sdbusplus::message_t&) {
             createRedundancySensor(tachSensors, systemBus, objectServer);
         };
-    auto match = std::make_unique<sdbusplus::bus::match_t>(
+    auto match = std::make_unique<sdbusplus::match>(
         static_cast<sdbusplus::bus_t&>(*systemBus),
         "type='signal',member='PropertiesChanged',path_namespace='" +
             std::string(inventoryPath) + "',arg0namespace='" +

@@ -6,12 +6,14 @@
 #include "NvidiaPcieDevice.hpp"
 
 #include "NvidiaDeviceDiscovery.hpp"
+#include "NvidiaDriverInformation.hpp"
 #include "NvidiaEthPort.hpp"
 #include "NvidiaGpuMctpVdm.hpp"
 #include "NvidiaPcieFunction.hpp"
 #include "NvidiaPcieInterface.hpp"
 #include "NvidiaPciePort.hpp"
 #include "NvidiaPciePortMetrics.hpp"
+#include "NvidiaUtils.hpp"
 #include "Utils.hpp"
 
 #include <MctpRequester.hpp>
@@ -47,7 +49,7 @@ PcieDevice::PcieDevice(const SensorConfigs& configs, const std::string& name,
 void PcieDevice::init()
 {
     sdbusplus::object_path networkAdapterPath =
-        sdbusplus::object_path(nicPathPrefix) / (name + "_NIC");
+        inventoryPrefix / (name + "_NIC");
 
     networkAdapterInterface = objectServer.add_interface(
         networkAdapterPath,
@@ -62,19 +64,45 @@ void PcieDevice::init()
     networkAdapterAssociationInterface->register_property(
         "Associations", associations);
 
+    locationCodeInterface = objectServer.add_interface(
+        networkAdapterPath,
+        "xyz.openbmc_project.Inventory.Decorator.LocationCode");
+    locationCodeInterface->register_property("LocationCode", name);
+
+    embeddedConnectorInterface = objectServer.add_interface(
+        networkAdapterPath, "xyz.openbmc_project.Inventory.Connector.Embedded");
+
     if (!networkAdapterInterface->initialize())
     {
         lg2::error(
-            "Failed to initialize network adapter interface for for eid {EID}",
-            "EID", eid);
+            "Error initializing network adapter interface for {NAME}, eid={EID}",
+            "NAME", name, "EID", eid);
     }
 
     if (!networkAdapterAssociationInterface->initialize())
     {
         lg2::error(
-            "Error initializing Association Interface for Network Adapter for eid {EID}",
-            "EID", eid);
+            "Error initializing Association interface for Network Adapter for {NAME}, eid={EID}",
+            "NAME", name, "EID", eid);
     }
+
+    if (!locationCodeInterface->initialize())
+    {
+        lg2::error(
+            "Error initializing LocationCode interface for Network Adapter for {NAME}, eid={EID}",
+            "NAME", name, "EID", eid);
+    }
+
+    if (!embeddedConnectorInterface->initialize())
+    {
+        lg2::error(
+            "Error initializing Embedded Connector interface for Network Adapter for {NAME}, eid={EID}",
+            "NAME", name, "EID", eid);
+    }
+
+    driverInfo = std::make_shared<NvidiaDriverInformation>(
+        conn, mctpRequester, name + "_NIC", eid, objectServer,
+        networkAdapterPath, nvidiaManufacturer);
 
     getPciePortCounts();
 
@@ -158,13 +186,13 @@ void PcieDevice::getNetworkPortAddresses(const uint16_t portNumber)
 
     mctpRequester.sendRecvMsg(
         eid, getPortNetworkAddressesRequest,
-        [portNumber, weak{weak_from_this()}](const std::error_code& ec,
-                                             std::span<const uint8_t> buffer) {
+        [portNumber, eid{this->eid}, weak{weak_from_this()}](
+            const std::error_code& ec, std::span<const uint8_t> buffer) {
             std::shared_ptr<PcieDevice> self = weak.lock();
             if (!self)
             {
                 lg2::error("Invalid reference to PcieDevice, EID={EID}", "EID",
-                           self->eid);
+                           eid);
                 return;
             }
             self->processGetNetworkPortAddressesResponse(portNumber, ec,
@@ -213,7 +241,7 @@ void PcieDevice::processGetNetworkPortAddressesResponse(
 
         ethPortMetrics.emplace_back(std::make_shared<NvidiaEthPortMetrics>(
             conn, mctpRequester, portName, nicDeviceName, path, eid, portNumber,
-            objectServer));
+            objectServer, addresses));
     }
 }
 
@@ -223,7 +251,7 @@ void PcieDevice::makeSensors()
 
     pcieInterface = std::make_shared<NvidiaPcieInterface>(
         conn, mctpRequester, pcieDeviceName, path, eid, objectServer,
-        gpu::DeviceIdentification::DEVICE_PCIE);
+        gpu::DeviceIdentification::DEVICE_PCIE, name);
 
     pcieFunction = std::make_shared<NvidiaPcieFunction>(
         conn, mctpRequester, pcieDeviceName, path, eid, 0, objectServer,
@@ -237,22 +265,22 @@ void PcieDevice::makeSensors()
 
         pciePorts.emplace_back(std::make_shared<NvidiaPciePortInfo>(
             conn, mctpRequester, portName, pcieDeviceName, path, eid,
-            gpu::PciePortType::UPSTREAM, i, i, objectServer,
+            gpu::PciePortType::UPSTREAM, i, 0, objectServer,
             gpu::DeviceIdentification::DEVICE_PCIE));
 
         pciePortMetrics.emplace_back(makeNvidiaPciePortErrors(
             conn, mctpRequester, portName, pcieDeviceName, path, eid,
-            gpu::PciePortType::UPSTREAM, i, i, objectServer,
+            gpu::PciePortType::UPSTREAM, i, 0, objectServer,
             gpu::DeviceIdentification::DEVICE_PCIE));
 
         pciePortMetrics.emplace_back(makeNvidiaPciePortCounters(
             conn, mctpRequester, portName, pcieDeviceName, path, eid,
-            gpu::PciePortType::UPSTREAM, i, i, objectServer,
+            gpu::PciePortType::UPSTREAM, i, 0, objectServer,
             gpu::DeviceIdentification::DEVICE_PCIE));
 
         pciePortMetrics.emplace_back(makeNvidiaPciePortL0ToRecoveryCount(
             conn, mctpRequester, portName, pcieDeviceName, path, eid,
-            gpu::PciePortType::UPSTREAM, i, i, objectServer,
+            gpu::PciePortType::UPSTREAM, i, 0, objectServer,
             gpu::DeviceIdentification::DEVICE_PCIE));
 
         for (uint64_t j = 0; j < pcieDeviceInfo.numDownstreamPorts[i]; ++j)
@@ -295,6 +323,8 @@ void PcieDevice::read()
     pcieInterface->update();
     pcieFunction->update();
 
+    driverInfo->update();
+
     for (auto& port : pciePorts)
     {
         port->update();
@@ -311,11 +341,17 @@ void PcieDevice::read()
     }
 
     waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
-    waitTimer.async_wait([this](const boost::system::error_code& ec) {
-        if (ec)
-        {
-            return;
-        }
-        read();
-    });
+    waitTimer.async_wait(
+        [weak{weak_from_this()}](const boost::system::error_code& ec) {
+            if (ec)
+            {
+                return;
+            }
+            std::shared_ptr<PcieDevice> self = weak.lock();
+            if (!self)
+            {
+                return;
+            }
+            self->read();
+        });
 }

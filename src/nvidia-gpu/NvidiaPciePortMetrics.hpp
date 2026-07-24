@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -67,13 +68,9 @@ struct NvidiaPciePortMetrics :
 
     gpu::DeviceIdentification deviceType;
 
-    std::array<uint8_t, gpu::queryScalarGroupTelemetryV1RequestSize>
-        requestV1{};
+    std::vector<uint8_t> request;
 
-    std::array<uint8_t, gpu::queryScalarGroupTelemetryV2RequestSize>
-        requestV2{};
-
-    std::array<uint8_t, sizeof(ocp::accelerator_management::CommonResponse) +
+    std::array<uint8_t, ocp::accelerator_management::commonResponseSize +
                             sizeof(uint32_t) * maxTelemetryValues>
         response{};
 

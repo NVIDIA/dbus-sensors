@@ -22,7 +22,8 @@
 constexpr uint8_t gpuTempSensorId{0};
 constexpr uint8_t gpuTLimitSensorId{2};
 constexpr uint8_t gpuDramTempSensorId{1};
-constexpr uint8_t smaTempSensorId{5};
+// SMA Internal
+constexpr uint8_t smaTempSensorId{17};
 
 struct NvidiaGpuTempSensor :
     public Sensor,
@@ -57,8 +58,10 @@ struct NvidiaGpuTempSensor :
 
     sdbusplus::asio::object_server& objectServer;
 
-    std::array<uint8_t, sizeof(gpu::GetTemperatureReadingRequest)>
+    std::array<uint8_t, gpu::getTemperatureReadingRequestSize>
         getTemperatureReadingRequest{};
+
+    bool requestEncoded{false};
 
     std::shared_ptr<sdbusplus::asio::dbus_interface> sensorTypeInterface;
 

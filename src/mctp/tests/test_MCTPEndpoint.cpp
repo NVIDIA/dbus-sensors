@@ -3,6 +3,7 @@
 #include "async_test_helpers.hpp"
 
 #include <sys/stat.h>
+#include <systemd/sd-bus-protocol.h>
 #include <systemd/sd-bus.h>
 
 #include <boost/asio/io_context.hpp>

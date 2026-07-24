@@ -3,6 +3,7 @@
 #include "USBRecovery.hpp"
 #include "Utils.hpp"
 
+#include <systemd/sd-bus-protocol.h>
 #include <systemd/sd-bus.h>
 
 #include <boost/asio/io_context.hpp>

@@ -11,10 +11,11 @@
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -22,12 +23,13 @@ struct NvidiaPcieInterface :
     public std::enable_shared_from_this<NvidiaPcieInterface>
 {
   public:
-    NvidiaPcieInterface(std::shared_ptr<sdbusplus::asio::connection>& conn,
-                        mctp::MctpRequester& mctpRequester,
-                        const std::string& name, const std::string& path,
-                        uint8_t eid,
-                        sdbusplus::asio::object_server& objectServer,
-                        gpu::DeviceIdentification deviceType);
+    NvidiaPcieInterface(
+        std::shared_ptr<sdbusplus::asio::connection>& conn,
+        mctp::MctpRequester& mctpRequester, const std::string& name,
+        const std::string& path, uint8_t eid,
+        sdbusplus::asio::object_server& objectServer,
+        gpu::DeviceIdentification deviceType,
+        const std::optional<std::string>& networkAdapterName = std::nullopt);
 
     void update();
 
@@ -49,11 +51,7 @@ struct NvidiaPcieInterface :
 
     mctp::MctpRequester& mctpRequester;
 
-    std::array<uint8_t, gpu::queryScalarGroupTelemetryV1RequestSize>
-        requestV1{};
-
-    std::array<uint8_t, gpu::queryScalarGroupTelemetryV2RequestSize>
-        requestV2{};
+    std::vector<uint8_t> request;
 
     gpu::DeviceIdentification deviceType;
 

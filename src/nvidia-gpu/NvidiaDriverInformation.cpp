@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <system_error>
@@ -27,10 +28,23 @@ const std::string softwareInventoryPath = "/xyz/openbmc_project/software/";
 NvidiaDriverInformation::NvidiaDriverInformation(
     std::shared_ptr<sdbusplus::asio::connection>& conn,
     mctp::MctpRequester& mctpRequester, const std::string& name,
-    const sdbusplus::object_path& path, const uint8_t eid,
-    sdbusplus::asio::object_server& objectServer) :
+    const uint8_t eid, sdbusplus::asio::object_server& objectServer,
+    const sdbusplus::object_path& associationEndpoint,
+    const std::optional<std::string>& manufacturer) :
     eid(eid), conn(conn), mctpRequester(mctpRequester)
 {
+    const int rc = gpu::encodeGetDriverInformationRequest(0, request);
+    if (rc == 0)
+    {
+        requestEncoded = true;
+    }
+    else
+    {
+        lg2::error(
+            "Failed to encode Driver Information request for eid {EID}, rc={RC}",
+            "EID", eid, "RC", rc);
+    }
+
     const std::string dbusPath = softwareInventoryPath + escapeName(name);
 
     versionInterface = objectServer.add_interface(
@@ -44,12 +58,12 @@ NvidiaDriverInformation::NvidiaDriverInformation(
     if (!versionInterface->initialize())
     {
         lg2::error(
-            "Failed to initialize Version interface for Driver Information for eid {EID}",
+            "Error initializing Version interface for Driver Information, eid={EID}",
             "EID", eid);
     }
 
     std::vector<Association> associations;
-    associations.emplace_back("running", "ran_on", path.parent_path());
+    associations.emplace_back("running", "ran_on", associationEndpoint);
 
     associationInterface =
         objectServer.add_interface(dbusPath, association::interface);
@@ -59,8 +73,23 @@ NvidiaDriverInformation::NvidiaDriverInformation(
     if (!associationInterface->initialize())
     {
         lg2::error(
-            "Failed to initialize Association interface for Driver Information for eid {EID}",
+            "Error initializing Association interface for Driver Information, eid={EID}",
             "EID", eid);
+    }
+
+    if (manufacturer)
+    {
+        assetInterface = objectServer.add_interface(
+            dbusPath, "xyz.openbmc_project.Inventory.Decorator.Asset");
+
+        assetInterface->register_property("Manufacturer", *manufacturer);
+
+        if (!assetInterface->initialize())
+        {
+            lg2::error(
+                "Error initializing Asset interface for Driver Information, eid={EID}",
+                "EID", eid);
+        }
     }
 }
 
@@ -97,13 +126,8 @@ void NvidiaDriverInformation::processResponse(const std::error_code& ec,
 
 void NvidiaDriverInformation::update()
 {
-    const int rc = gpu::encodeGetDriverInformationRequest(0, request);
-
-    if (rc != 0)
+    if (!requestEncoded)
     {
-        lg2::error(
-            "Error updating Driver Information for eid {EID} : encode failed, rc={RC}",
-            "EID", eid, "RC", rc);
         return;
     }
 

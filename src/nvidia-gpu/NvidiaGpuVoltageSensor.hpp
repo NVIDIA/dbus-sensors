@@ -56,7 +56,9 @@ struct NvidiaGpuVoltageSensor :
 
     sdbusplus::asio::object_server& objectServer;
 
-    std::array<uint8_t, sizeof(gpu::GetVoltageRequest)> request{};
+    std::array<uint8_t, gpu::getVoltageRequestSize> request{};
+
+    bool requestEncoded{false};
 
     std::shared_ptr<sdbusplus::asio::dbus_interface>
         commonPhysicalContextInterface;

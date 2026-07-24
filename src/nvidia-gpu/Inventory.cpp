@@ -1,5 +1,6 @@
 #include "Inventory.hpp"
 
+#include "NvidiaUtils.hpp"
 #include "Utils.hpp"
 
 #include <MctpRequester.hpp>
@@ -11,8 +12,10 @@
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/message/native_types.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -20,6 +23,7 @@
 #include <span>
 #include <string>
 #include <system_error>
+#include <tuple>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -34,17 +38,20 @@ static constexpr const char* uuidIfaceName = "xyz.openbmc_project.Common.UUID";
 static constexpr const char* revisionIfaceName =
     "xyz.openbmc_project.Inventory.Decorator.Revision";
 
+static constexpr uint64_t mhzToHzFactor = 1'000'000;
+
 Inventory::Inventory(
     const std::shared_ptr<sdbusplus::asio::connection>& /*conn*/,
     sdbusplus::asio::object_server& objectServer,
     const std::string& inventoryName, mctp::MctpRequester& mctpRequester,
     const gpu::DeviceIdentification deviceTypeIn, const uint8_t eid,
     boost::asio::io_context& io,
-    const std::shared_ptr<sdbusplus::asio::dbus_interface>& powerCapInterface) :
+    const std::shared_ptr<sdbusplus::asio::dbus_interface>& powerCapInterface,
+    const std::shared_ptr<sdbusplus::asio::dbus_interface>& dramItemIface) :
     name(escapeName(inventoryName)), mctpRequester(mctpRequester),
     deviceType(deviceTypeIn), eid(eid), retryTimer(io)
 {
-    std::string path = inventoryPrefix + name;
+    sdbusplus::object_path path = inventoryPrefix / name;
 
     assetIface = objectServer.add_interface(path, assetIfaceName);
     assetIface->register_property("Manufacturer", std::string("NVIDIA"));
@@ -55,17 +62,30 @@ Inventory::Inventory(
                      "PartNumber");
     registerProperty(gpu::InventoryPropertyId::MARKETING_NAME, assetIface,
                      "Model");
-    assetIface->initialize();
+    if (!assetIface->initialize())
+    {
+        lg2::error("Error initializing Asset interface for {NAME}, eid={EID}",
+                   "NAME", name, "EID", eid);
+    }
 
     uuidInterface = objectServer.add_interface(path, uuidIfaceName);
     registerProperty(gpu::InventoryPropertyId::DEVICE_GUID, uuidInterface,
                      "UUID");
-    uuidInterface->initialize();
+    if (!uuidInterface->initialize())
+    {
+        lg2::error("Error initializing UUID interface for {NAME}, eid={EID}",
+                   "NAME", name, "EID", eid);
+    }
 
     revisionIface = objectServer.add_interface(path, revisionIfaceName);
     registerProperty(gpu::InventoryPropertyId::DEVICE_PART_NUMBER,
                      revisionIface, "Version");
-    revisionIface->initialize();
+    if (!revisionIface->initialize())
+    {
+        lg2::error(
+            "Error initializing Revision interface for {NAME}, eid={EID}",
+            "NAME", name, "EID", eid);
+    }
 
     // Static properties
     if (deviceType == gpu::DeviceIdentification::DEVICE_GPU)
@@ -75,17 +95,38 @@ Inventory::Inventory(
         acceleratorInterface =
             objectServer.add_interface(path, acceleratorIfaceName);
         acceleratorInterface->register_property("Type", acceleratorTypeGpu);
+    }
 
-        // Register BoostClockFrequency property
+    // Accelerator properties queried from device via MCTP VDM
+    if (acceleratorInterface)
+    {
         acceleratorInterface->register_property(
             "BoostClockFrequency", std::numeric_limits<uint64_t>::max());
+        acceleratorInterface->register_property(
+            "BaseSpeedInHz", std::numeric_limits<uint64_t>::max(),
+            sdbusplus::asio::PropertyPermission::readOnly);
+        acceleratorInterface->register_property(
+            "MaxSpeedInHz", std::numeric_limits<uint64_t>::max(),
+            sdbusplus::asio::PropertyPermission::readOnly);
+        acceleratorInterface->register_property(
+            "MinSpeedInHz", std::numeric_limits<uint64_t>::max(),
+            sdbusplus::asio::PropertyPermission::readOnly);
 
-        acceleratorInterface->initialize();
+        if (!acceleratorInterface->initialize())
+        {
+            lg2::error(
+                "Error initializing Accelerator interface for {NAME}, eid={EID}",
+                "NAME", name, "EID", eid);
+        }
 
-        // Add to query queue (manually since registerProperty is for strings
-        // only)
         properties[gpu::InventoryPropertyId::DEFAULT_BOOST_CLOCKS] = {
             acceleratorInterface, "BoostClockFrequency", 0, true};
+        properties[gpu::InventoryPropertyId::DEFAULT_BASE_CLOCKS] = {
+            acceleratorInterface, "BaseSpeedInHz", 0, true};
+        properties[gpu::InventoryPropertyId::MAX_GRAPHICS_CLOCK] = {
+            acceleratorInterface, "MaxSpeedInHz", 0, true};
+        properties[gpu::InventoryPropertyId::MIN_GRAPHICS_CLOCK] = {
+            acceleratorInterface, "MinSpeedInHz", 0, true};
     }
 
     if (powerCapInterface)
@@ -96,6 +137,17 @@ Inventory::Inventory(
             powerCapInterface, "MaxPowerCapValue", 0, true};
         properties[gpu::InventoryPropertyId::RATED_DEVICE_POWER_LIMIT] = {
             powerCapInterface, "DefaultPowerCap", 0, true};
+    }
+
+    if (dramItemIface)
+    {
+        dramItemInterface = dramItemIface;
+        properties[gpu::InventoryPropertyId::MAX_MEMORY_CAPACITY] = {
+            dramItemIface, "MemorySizeInKB", 0, true};
+        properties[gpu::InventoryPropertyId::MIN_MEMORY_CLOCK] = {
+            dramItemIface, "AllowedSpeedsMT", 0, true};
+        properties[gpu::InventoryPropertyId::MAX_MEMORY_CLOCK] = {
+            dramItemIface, "AllowedSpeedsMT", 0, true};
     }
 }
 
@@ -275,14 +327,21 @@ void Inventory::handleInventoryPropertyResponse(
                     break;
 
                 case gpu::InventoryPropertyId::DEFAULT_BOOST_CLOCKS:
+                case gpu::InventoryPropertyId::DEFAULT_BASE_CLOCKS:
+                case gpu::InventoryPropertyId::MIN_GRAPHICS_CLOCK:
+                case gpu::InventoryPropertyId::MAX_GRAPHICS_CLOCK:
                     if (std::holds_alternative<uint32_t>(info))
                     {
-                        const uint32_t clockSpeed = std::get<uint32_t>(info);
-                        // Convert to uint64_t for D-Bus interface requirement
-                        const uint64_t clockSpeed64 =
-                            static_cast<uint64_t>(clockSpeed);
+                        // NSM returns MHz; PDI expects Hz (uint64)
+                        const uint32_t mhz = std::get<uint32_t>(info);
+                        const uint64_t hz =
+                            static_cast<uint64_t>(mhz) * mhzToHzFactor;
                         it->second.interface->set_property(
-                            it->second.propertyName, clockSpeed64);
+                            it->second.propertyName, hz);
+                        lg2::info(
+                            "Successfully received property ID {PROP_ID} for {NAME} with value: {VALUE}",
+                            "PROP_ID", static_cast<uint8_t>(propertyId), "NAME",
+                            name, "VALUE", hz);
                         success = true;
                     }
                     else
@@ -302,12 +361,71 @@ void Inventory::handleInventoryPropertyResponse(
                         // Device reports milliwatts; expose watts on D-Bus
                         uint32_t powerLimit =
                             std::get<uint32_t>(info) / milliwattsPerWatt;
+                        if (propertyId ==
+                            gpu::InventoryPropertyId::MIN_DEVICE_POWER_LIMIT)
+                        {
+                            minPowerCapWatts = powerLimit;
+                        }
+                        else if (propertyId == gpu::InventoryPropertyId::
+                                                   MAX_DEVICE_POWER_LIMIT)
+                        {
+                            maxPowerCapWatts = powerLimit;
+                        }
                         it->second.interface->set_property(
                             it->second.propertyName, powerLimit);
                         lg2::info(
                             "Successfully received property ID {PROP_ID} for {NAME} with value: {VALUE}",
                             "PROP_ID", static_cast<uint8_t>(propertyId), "NAME",
                             name, "VALUE", powerLimit);
+                        success = true;
+                    }
+                    else
+                    {
+                        lg2::error(
+                            "Property ID {PROP_ID} for {NAME} expected uint32_t but got different type",
+                            "PROP_ID", static_cast<uint8_t>(propertyId), "NAME",
+                            name);
+                    }
+                    break;
+
+                case gpu::InventoryPropertyId::MAX_MEMORY_CAPACITY:
+                    if (std::holds_alternative<uint32_t>(info))
+                    {
+                        const size_t memorySizeInKB =
+                            static_cast<size_t>(std::get<uint32_t>(info)) *
+                            1024;
+                        it->second.interface->set_property(
+                            it->second.propertyName, memorySizeInKB);
+                        success = true;
+                    }
+                    else
+                    {
+                        lg2::error(
+                            "Property ID {PROP_ID} for {NAME} expected uint32_t but got different type",
+                            "PROP_ID", static_cast<uint8_t>(propertyId), "NAME",
+                            name);
+                    }
+                    break;
+
+                case gpu::InventoryPropertyId::MIN_MEMORY_CLOCK:
+                case gpu::InventoryPropertyId::MAX_MEMORY_CLOCK:
+                    if (std::holds_alternative<uint32_t>(info) &&
+                        dramItemInterface)
+                    {
+                        const size_t idx =
+                            (propertyId ==
+                             gpu::InventoryPropertyId::MIN_MEMORY_CLOCK)
+                                ? 0
+                                : 1;
+                        // NSM Type 3 property IDs 28/29 report the memory
+                        // clock in MHz; PDI AllowedSpeedsMT expects MT/s.
+                        // HBM uses DDR signaling, so MT/s = MHz * 2.
+                        allowedSpeedsMT[idx] =
+                            static_cast<uint16_t>(std::get<uint32_t>(info) * 2);
+                        dramItemInterface->set_property(
+                            "AllowedSpeedsMT",
+                            std::vector<uint16_t>(allowedSpeedsMT.begin(),
+                                                  allowedSpeedsMT.end()));
                         success = true;
                     }
                     else
@@ -365,7 +483,6 @@ void Inventory::handleInventoryPropertyResponse(
                     {
                         lg2::error("Retry timer error for {NAME}: {ERROR}",
                                    "NAME", self->name, "ERROR", ec.message());
-                        return;
                     }
                     self->processNextProperty();
                 });

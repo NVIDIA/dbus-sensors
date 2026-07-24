@@ -9,7 +9,7 @@
 
 #include <MctpRequester.hpp>
 #include <NvidiaGpuMctpVdm.hpp>
-#include <NvidiaPcieDevice.hpp>
+#include <NvidiaUtils.hpp>
 #include <OcpMctpVdm.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
@@ -37,8 +37,31 @@ NvidiaPcieFunction::NvidiaPcieFunction(
     eid(eid), path(path), conn(conn), mctpRequester(mctpRequester),
     deviceType(deviceType)
 {
+    int rc = 0;
+    switch (deviceType)
+    {
+        case gpu::DeviceIdentification::DEVICE_GPU:
+            request.resize(gpu::queryScalarGroupTelemetryV1RequestSize);
+            rc = gpu::encodeQueryScalarGroupTelemetryV1Request(
+                0, 0, gpu::PcieScalarGroupId::PciIdentity, request);
+            break;
+        case gpu::DeviceIdentification::DEVICE_PCIE:
+            request.resize(gpu::queryScalarGroupTelemetryV2RequestSize);
+            rc = gpu::encodeQueryScalarGroupTelemetryV2Request(
+                0, {}, 0, 0, gpu::PcieScalarGroupId::PciIdentity, request);
+            break;
+        default:
+            break;
+    }
+    if (rc != 0)
+    {
+        request.clear();
+        lg2::error("Failed to encode PCIe Function request: rc={RC}, EID={EID}",
+                   "RC", rc, "EID", eid);
+    }
+
     const sdbusplus::object_path dbusPath =
-        sdbusplus::object_path(pcieDevicePathPrefix) / pcieDeviceName /
+        inventoryPrefix / pcieDeviceName /
         std::format("Function{}", functionNumber);
 
     pcieFunctionInterface = objectServer.add_interface(
@@ -67,11 +90,12 @@ NvidiaPcieFunction::NvidiaPcieFunction(
 
     if (!pcieFunctionInterface->initialize())
     {
-        lg2::error("Error initializing PCIe Function Interface for EID={EID}",
+        lg2::error("Error initializing PCIe Function interface, eid={EID}",
                    "EID", eid);
     }
 
-    const std::string pcieDevicePath = pcieDevicePathPrefix + pcieDeviceName;
+    const sdbusplus::object_path pcieDevicePath =
+        inventoryPrefix / pcieDeviceName;
 
     std::vector<Association> associations;
     associations.emplace_back("exposed_by", "exposing", pcieDevicePath);
@@ -83,7 +107,7 @@ NvidiaPcieFunction::NvidiaPcieFunction(
     if (!associationInterface->initialize())
     {
         lg2::error(
-            "Error initializing Association Interface for PCIe Function for EID={EID}",
+            "Error initializing Association interface for PCIe Function, eid={EID}",
             "EID", eid);
     }
 }
@@ -149,35 +173,13 @@ void NvidiaPcieFunction::processResponse(const std::error_code& ec,
 
 void NvidiaPcieFunction::update()
 {
-    int rc = 0;
-    std::span<uint8_t> buf;
-
-    switch (deviceType)
+    if (request.empty())
     {
-        case gpu::DeviceIdentification::DEVICE_GPU:
-            rc = gpu::encodeQueryScalarGroupTelemetryV1Request(
-                0, 0, gpu::PcieScalarGroupId::PciIdentity, requestV1);
-            buf = requestV1;
-            break;
-        case gpu::DeviceIdentification::DEVICE_PCIE:
-            rc = gpu::encodeQueryScalarGroupTelemetryV2Request(
-                0, {}, 0, 0, gpu::PcieScalarGroupId::PciIdentity, requestV2);
-            buf = requestV2;
-            break;
-        default:
-            return;
-    }
-
-    if (rc != 0)
-    {
-        lg2::error(
-            "Error updating PCIe Function: encode failed, rc={RC}, EID={EID}",
-            "RC", rc, "EID", eid);
         return;
     }
 
     mctpRequester.sendRecvMsg(
-        eid, buf,
+        eid, request,
         [weak{weak_from_this()}](const std::error_code& ec,
                                  std::span<const uint8_t> buffer) {
             std::shared_ptr<NvidiaPcieFunction> self = weak.lock();

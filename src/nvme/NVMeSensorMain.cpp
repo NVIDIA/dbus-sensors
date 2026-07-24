@@ -252,8 +252,8 @@ void createSensors(boost::asio::io_context& io,
             handleSensorConfigurations(io, objectServer, dbusConnection,
                                        sensorConfigurations);
         });
-    static constexpr std::array<std::string_view, 1> sensorTypes{
-        {NVMeSensor::sensorType}};
+    static constexpr auto sensorTypes =
+        std::to_array<std::string_view>({NVMeSensor::sensorType});
     getter->getConfiguration(sensorTypes);
 }
 
@@ -318,15 +318,15 @@ int main()
             });
         };
 
-    static constexpr std::array<std::string_view, 1> sensorTypes{
-        {NVMeSensor::sensorType}};
+    static constexpr auto sensorTypes =
+        std::to_array<std::string_view>({NVMeSensor::sensorType});
 
-    std::vector<std::unique_ptr<sdbusplus::bus::match_t>> matches =
+    std::vector<std::unique_ptr<sdbusplus::match>> matches =
         setupPropertiesChangedMatches(*systemBus, sensorTypes, eventHandler);
 
     // Watch for entity-manager to remove configuration interfaces
     // so the corresponding sensors can be removed.
-    auto ifaceRemovedMatch = std::make_unique<sdbusplus::bus::match_t>(
+    auto ifaceRemovedMatch = std::make_unique<sdbusplus::match>(
         static_cast<sdbusplus::bus_t&>(*systemBus),
         "type='signal',member='InterfacesRemoved',arg0path='" +
             std::string(inventoryPath) + "/'",

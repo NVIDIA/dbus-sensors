@@ -34,6 +34,20 @@ NvidiaGpuPowerPeakReading::NvidiaGpuPowerPeakReading(
     eid(eid), sensorId{sensorId}, mctpRequester(mctpRequester),
     objectServer(objectServer)
 {
+    const int rc = gpu::encodeGetPowerDrawRequest(
+        gpu::PlatformEnvironmentalCommands::GET_MAX_OBSERVED_POWER, 0, sensorId,
+        averagingInterval, request);
+    if (rc == 0)
+    {
+        requestEncoded = true;
+    }
+    else
+    {
+        lg2::error(
+            "Failed to encode Peak Power Sensor request for eid {EID} and sensor id {SID}, rc={RC}",
+            "EID", eid, "SID", sensorId, "RC", rc);
+    }
+
     std::string dbusPath = sensorPathPrefix + "power/"s + escapeName(name);
 
     telemetryReportInterface = objectServer.add_interface(
@@ -57,7 +71,12 @@ NvidiaGpuPowerPeakReading::NvidiaGpuPowerPeakReading(
     telemetryReportInterface->register_property("Readings", readings);
     telemetryReportInterface->register_property("Enabled", true);
 
-    telemetryReportInterface->initialize();
+    if (!telemetryReportInterface->initialize())
+    {
+        lg2::error(
+            "Error initializing Telemetry Report interface for Peak Power, eid={EID}, sensorId={SID}",
+            "EID", eid, "SID", sensorId);
+    }
 }
 
 NvidiaGpuPowerPeakReading::~NvidiaGpuPowerPeakReading()
@@ -101,20 +120,23 @@ void NvidiaGpuPowerPeakReading::processResponse(const std::error_code& ec,
 
 void NvidiaGpuPowerPeakReading::update()
 {
-    const int rc = gpu::encodeGetPowerDrawRequest(
-        gpu::PlatformEnvironmentalCommands::GET_MAX_OBSERVED_POWER, 0, sensorId,
-        averagingInterval, request);
-
-    if (rc != 0)
+    if (!requestEncoded)
     {
-        lg2::error(
-            "Error updating Peak Power Sensor for eid {EID} and sensor id {SID} : encode failed, rc={RC}",
-            "EID", eid, "SID", sensorId, "RC", rc);
+        return;
     }
 
     mctpRequester.sendRecvMsg(
         eid, request,
-        [this](const std::error_code& ec, std::span<const uint8_t> buffer) {
-            processResponse(ec, buffer);
+        [eid{this->eid}, sensorId{this->sensorId}, weak{weak_from_this()}](
+            const std::error_code& ec, std::span<const uint8_t> buffer) {
+            std::shared_ptr<NvidiaGpuPowerPeakReading> self = weak.lock();
+            if (!self)
+            {
+                lg2::error(
+                    "Invalid reference to NvidiaGpuPowerPeakReading for eid {EID} and sensor id {SID}",
+                    "EID", eid, "SID", sensorId);
+                return;
+            }
+            self->processResponse(ec, buffer);
         });
 }
