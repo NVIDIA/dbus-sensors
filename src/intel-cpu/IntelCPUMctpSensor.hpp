@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "IntelCPUMctpPowerSensor.hpp"
 #include "IntelCPUMctpTempSensor.hpp"
 #include "MctpRequester.hpp"
 #include "PeciMctp.hpp"
@@ -16,6 +17,7 @@
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -68,6 +70,17 @@ class IntelCPUMctpSensor :
 
     static constexpr uint8_t mbxIndexTempTarget = 16;
     static constexpr uint8_t mbxIndexDimmTemp = 14;
+    static constexpr uint8_t mbxIndexRaplUnits = 30;
+    static constexpr uint8_t mbxIndexPkgEnergy = 3;
+    static constexpr uint16_t paramPkgEnergy = 0x00FF;
+    static constexpr uint8_t mbxIndexDramEnergy = 4;
+    static constexpr uint16_t paramDramEnergy = 0x00FF;
+    // Extended-energy hardware timestamp ticks per second (10 ns/tick).
+    static constexpr double extEnergyTicksPerSec = 1e8;
+    static constexpr uint8_t mbxIndexPkgPowerSku = 28;
+    static constexpr uint16_t paramPkgPowerSku = 0x00FF;
+    // TDP register field is 15-bit, scaled by 2^powerUnit.
+    static constexpr uint16_t powerFieldMask = 0x7FFF;
     static constexpr uint8_t tempTargetRefreshInterval = 8;
     static constexpr uint8_t maxChanRanks = 12;
     static constexpr uint8_t maxDimmIdx = 2;
@@ -83,10 +96,30 @@ class IntelCPUMctpSensor :
 
     // Published sensors.
     std::shared_ptr<IntelCPUMctpTempSensor> cpuTempSensor;
+    std::shared_ptr<IntelCPUMctpPowerSensor> pkgPowerSensor;
+    std::shared_ptr<IntelCPUMctpPowerSensor> dramPowerSensor;
 
     double tjmax{0};
     bool tempTargetsValid{false};
     uint8_t pollCycleCount{0};
+
+    // RAPL scaling units (from the units register, index 30). Cached once.
+    bool raplUnitsValid{false};
+    uint8_t powerUnit{0};
+    uint8_t energyUnit{0};
+    uint8_t timeUnit{0};
+
+    bool pkgEnergyValid{false};
+    uint32_t prevPkgEnergyRaw{0};
+    uint32_t prevPkgTimestamp{0};
+
+    bool dramEnergyValid{false};
+    uint32_t prevDramEnergyRaw{0};
+    std::chrono::steady_clock::time_point prevDramEnergyTime;
+
+    // Package power SKU (TDP), read once; published as a plain read-only value.
+    bool powerLimitsRead{false};
+    std::shared_ptr<sdbusplus::asio::dbus_interface> tdpIface;
 
     // Base poll interval; configurable via the constructor (CLI stress test).
     size_t basePollMs{sensorPollMs};
@@ -113,6 +146,22 @@ class IntelCPUMctpSensor :
     void handleGetTempResponse(const std::error_code& ec,
                                std::span<const uint8_t> buffer);
 
+    void pollRaplUnits();
+    void handleRaplUnitsResponse(const std::error_code& ec,
+                                 std::span<const uint8_t> buffer);
+
+    void pollPackageEnergy();
+    void handlePackageEnergyResponse(const std::error_code& ec,
+                                     std::span<const uint8_t> buffer);
+
+    void pollDramEnergy();
+    void handleDramEnergyResponse(const std::error_code& ec,
+                                  std::span<const uint8_t> buffer);
+
+    void pollPkgPowerSku();
+    void handlePkgPowerSkuResponse(const std::error_code& ec,
+                                   std::span<const uint8_t> buffer);
+
     void pollDimmPhase();
     void discoverDimms(uint8_t domainId, uint8_t chanRank);
     void handleDiscoverResponse(uint8_t domainId, uint8_t chanRank,
@@ -128,4 +177,10 @@ class IntelCPUMctpSensor :
         tempTargetsTxBuf{};
     std::array<uint8_t, sizeof(peci_mctp::GetTempRequest)> getTempTxBuf{};
     std::array<uint8_t, sizeof(peci_mctp::RdPkgConfigRequest)> dimmTempTxBuf{};
+    std::array<uint8_t, sizeof(peci_mctp::RdPkgConfigRequest)> raplUnitsTxBuf{};
+    std::array<uint8_t, sizeof(peci_mctp::RdPkgConfigRequest)> pkgEnergyTxBuf{};
+    std::array<uint8_t, sizeof(peci_mctp::RdPkgConfigRequest)>
+        dramEnergyTxBuf{};
+    std::array<uint8_t, sizeof(peci_mctp::RdPkgConfigRequest)>
+        pkgPowerSkuTxBuf{};
 };

@@ -5,9 +5,11 @@
 
 #include "IntelCPUMctpSensor.hpp"
 
+#include "IntelCPUMctpPowerSensor.hpp"
 #include "IntelCPUMctpTempSensor.hpp"
 #include "MctpRequester.hpp"
 #include "PeciMctp.hpp"
+#include "SensorPaths.hpp"
 #include "Thresholds.hpp"
 #include "Utils.hpp"
 
@@ -50,10 +52,17 @@ IntelCPUMctpSensor::IntelCPUMctpSensor(
         baseName.resize(baseName.size() - 5);
     }
 
-    // The CPU package temperature carries the configured thresholds.
+    // The CPU package temperature carries the configured thresholds; the power
+    // sensors currently take none (config carries none yet).
     cpuTempSensor = std::make_shared<IntelCPUMctpTempSensor>(
         objServer, conn, baseName + "_Temp_0", sensorConfiguration,
         std::move(thresholdsIn));
+    pkgPowerSensor = std::make_shared<IntelCPUMctpPowerSensor>(
+        objServer, conn, baseName + "_Power", sensorConfiguration,
+        std::vector<thresholds::Threshold>{});
+    dramPowerSensor = std::make_shared<IntelCPUMctpPowerSensor>(
+        objServer, conn, baseName + "_DRAM_Power", sensorConfiguration,
+        std::vector<thresholds::Threshold>{});
 
     setupPowerMatch(conn);
 }
@@ -61,13 +70,19 @@ IntelCPUMctpSensor::IntelCPUMctpSensor(
 IntelCPUMctpSensor::~IntelCPUMctpSensor()
 {
     waitTimer.cancel();
-    // cpuTempSensor and the per-DIMM sensors remove their own D-Bus interfaces
-    // on destruction.
+    if (tdpIface)
+    {
+        objServer.remove_interface(tdpIface);
+    }
+    // cpuTempSensor, pkgPowerSensor, dramPowerSensor and the per-DIMM sensors
+    // remove their own D-Bus interfaces on destruction.
 }
 
 void IntelCPUMctpSensor::markAllUnavailable()
 {
     cpuTempSensor->updateReading(std::numeric_limits<double>::quiet_NaN());
+    pkgPowerSensor->updateReading(std::numeric_limits<double>::quiet_NaN());
+    dramPowerSensor->updateReading(std::numeric_limits<double>::quiet_NaN());
     for (auto& dimm : dimms)
     {
         if (dimm.sensor)
@@ -261,8 +276,302 @@ void IntelCPUMctpSensor::handleGetTempResponse(const std::error_code& ec,
     double tempC = tjmax + (static_cast<double>(tempRaw) / 64.0);
     cpuTempSensor->updateReading(tempC);
 
-    // CPU temperature is in hand; sweep the DIMMs and schedule the next poll
-    // cycle.
+    // CPU temperature is in hand; sample the RAPL power sensors next. The
+    // scaling units register is read once and cached. The chain ends by
+    // sweeping the DIMMs and scheduling the next poll cycle.
+    if (!raplUnitsValid)
+    {
+        pollRaplUnits();
+    }
+    else
+    {
+        pollPackageEnergy();
+    }
+}
+
+void IntelCPUMctpSensor::pollRaplUnits()
+{
+    auto rc = peci_mctp::serializeRdPkgConfig(raplUnitsTxBuf, 0,
+                                              mbxIndexRaplUnits, 0, 4);
+    if (!rc)
+    {
+        pollDimmPhase();
+        return;
+    }
+
+    auto req = requester.lock();
+    if (!req)
+    {
+        restartRead();
+        return;
+    }
+    std::weak_ptr<IntelCPUMctpSensor> weakRef = weak_from_this();
+    req->sendRecvMsg(
+        eid,
+        std::span<const uint8_t>(raplUnitsTxBuf.data(),
+                                 sizeof(peci_mctp::RdPkgConfigRequest)),
+        [weakRef](const std::error_code& ec, std::span<const uint8_t> buffer) {
+            if (auto self = weakRef.lock())
+            {
+                self->handleRaplUnitsResponse(ec, buffer);
+            }
+        });
+}
+
+void IntelCPUMctpSensor::handleRaplUnitsResponse(
+    const std::error_code& ec, std::span<const uint8_t> buffer)
+{
+    uint8_t cc = 0;
+    std::array<uint8_t, 4> data{};
+    if (ec || !peci_mctp::deserializeRdPkgConfig(buffer, cc, data) ||
+        !peci_mctp::ccHasValidData(cc))
+    {
+        lg2::error("'{NAME}' RAPL units read failed", "NAME", baseName);
+        pollDimmPhase(); // retry units next cycle
+        return;
+    }
+
+    // Units register (little-endian 32-bit): pwr[3:0], eng[12:8], tim[19:16].
+    uint32_t reg = static_cast<uint32_t>(data[0]) |
+                   (static_cast<uint32_t>(data[1]) << 8) |
+                   (static_cast<uint32_t>(data[2]) << 16) |
+                   (static_cast<uint32_t>(data[3]) << 24);
+    powerUnit = static_cast<uint8_t>(reg & 0xF);
+    energyUnit = static_cast<uint8_t>((reg >> 8) & 0x1F);
+    timeUnit = static_cast<uint8_t>((reg >> 16) & 0xF);
+    raplUnitsValid = true;
+
+    pollPackageEnergy();
+}
+
+void IntelCPUMctpSensor::pollPackageEnergy()
+{
+    // readLen 8: 4 bytes energy counter + 4 bytes hardware timestamp (GNR).
+    auto rc = peci_mctp::serializeRdPkgConfig(
+        pkgEnergyTxBuf, 0, mbxIndexPkgEnergy, paramPkgEnergy, 8);
+    if (!rc)
+    {
+        pollDimmPhase();
+        return;
+    }
+
+    auto req = requester.lock();
+    if (!req)
+    {
+        restartRead();
+        return;
+    }
+    std::weak_ptr<IntelCPUMctpSensor> weakRef = weak_from_this();
+    req->sendRecvMsg(
+        eid,
+        std::span<const uint8_t>(pkgEnergyTxBuf.data(),
+                                 sizeof(peci_mctp::RdPkgConfigRequest)),
+        [weakRef](const std::error_code& ec, std::span<const uint8_t> buffer) {
+            if (auto self = weakRef.lock())
+            {
+                self->handlePackageEnergyResponse(ec, buffer);
+            }
+        });
+}
+
+void IntelCPUMctpSensor::handlePackageEnergyResponse(
+    const std::error_code& ec, std::span<const uint8_t> buffer)
+{
+    uint8_t cc = 0;
+    std::array<uint8_t, 8> data{};
+    if (ec || !peci_mctp::deserializeRdPkgConfig(buffer, cc, data) ||
+        !peci_mctp::ccHasValidData(cc))
+    {
+        lg2::error("'{NAME}' package energy read failed", "NAME", baseName);
+        pollDimmPhase();
+        return;
+    }
+
+    uint32_t raw = static_cast<uint32_t>(data[0]) |
+                   (static_cast<uint32_t>(data[1]) << 8) |
+                   (static_cast<uint32_t>(data[2]) << 16) |
+                   (static_cast<uint32_t>(data[3]) << 24);
+    // Bytes [4..7] are the CPU hardware timestamp (10 ns ticks).
+    uint32_t timestamp =
+        static_cast<uint32_t>(data[4]) | (static_cast<uint32_t>(data[5]) << 8) |
+        (static_cast<uint32_t>(data[6]) << 16) |
+        (static_cast<uint32_t>(data[7]) << 24);
+
+    if (pkgEnergyValid)
+    {
+        uint32_t deltaRaw = raw - prevPkgEnergyRaw;
+        uint32_t deltaTicks = timestamp - prevPkgTimestamp;
+        double dt = static_cast<double>(deltaTicks) / extEnergyTicksPerSec;
+        if (dt > 0.0)
+        {
+            double powerWatts =
+                (static_cast<double>(deltaRaw) /
+                 static_cast<double>(uint64_t{1} << energyUnit)) /
+                dt;
+            pkgPowerSensor->updateReading(powerWatts);
+        }
+    }
+    prevPkgEnergyRaw = raw;
+    prevPkgTimestamp = timestamp;
+    pkgEnergyValid = true;
+
+    pollDramEnergy();
+}
+
+void IntelCPUMctpSensor::pollDramEnergy()
+{
+    // DDR energy is a plain 4-byte counter (no hardware timestamp).
+    auto rc = peci_mctp::serializeRdPkgConfig(
+        dramEnergyTxBuf, 0, mbxIndexDramEnergy, paramDramEnergy, 4);
+    if (!rc)
+    {
+        pollDimmPhase();
+        return;
+    }
+
+    auto req = requester.lock();
+    if (!req)
+    {
+        restartRead();
+        return;
+    }
+    std::weak_ptr<IntelCPUMctpSensor> weakRef = weak_from_this();
+    req->sendRecvMsg(
+        eid,
+        std::span<const uint8_t>(dramEnergyTxBuf.data(),
+                                 sizeof(peci_mctp::RdPkgConfigRequest)),
+        [weakRef](const std::error_code& ec, std::span<const uint8_t> buffer) {
+            if (auto self = weakRef.lock())
+            {
+                self->handleDramEnergyResponse(ec, buffer);
+            }
+        });
+}
+
+void IntelCPUMctpSensor::handleDramEnergyResponse(
+    const std::error_code& ec, std::span<const uint8_t> buffer)
+{
+    uint8_t cc = 0;
+    std::array<uint8_t, 4> data{};
+    if (ec || !peci_mctp::deserializeRdPkgConfig(buffer, cc, data) ||
+        !peci_mctp::ccHasValidData(cc))
+    {
+        // Not all CPUs expose DDR RAPL; treat as absent this cycle.
+        if (!powerLimitsRead)
+        {
+            pollPkgPowerSku();
+        }
+        else
+        {
+            pollDimmPhase();
+        }
+        return;
+    }
+
+    uint32_t raw = static_cast<uint32_t>(data[0]) |
+                   (static_cast<uint32_t>(data[1]) << 8) |
+                   (static_cast<uint32_t>(data[2]) << 16) |
+                   (static_cast<uint32_t>(data[3]) << 24);
+
+    auto now = std::chrono::steady_clock::now();
+    if (dramEnergyValid)
+    {
+        double dt =
+            std::chrono::duration<double>(now - prevDramEnergyTime).count();
+        uint32_t deltaRaw = raw - prevDramEnergyRaw;
+        if (dt > 0.0)
+        {
+            double powerWatts =
+                (static_cast<double>(deltaRaw) /
+                 static_cast<double>(uint64_t{1} << energyUnit)) /
+                dt;
+            dramPowerSensor->updateReading(powerWatts);
+        }
+    }
+    prevDramEnergyRaw = raw;
+    prevDramEnergyTime = now;
+    dramEnergyValid = true;
+
+    // TDP is quasi-static: read it once, then move on.
+    if (!powerLimitsRead)
+    {
+        pollPkgPowerSku();
+    }
+    else
+    {
+        pollDimmPhase();
+    }
+}
+
+void IntelCPUMctpSensor::pollPkgPowerSku()
+{
+    auto rc = peci_mctp::serializeRdPkgConfig(
+        pkgPowerSkuTxBuf, 0, mbxIndexPkgPowerSku, paramPkgPowerSku, 4);
+    if (!rc)
+    {
+        pollDimmPhase();
+        return;
+    }
+
+    auto req = requester.lock();
+    if (!req)
+    {
+        restartRead();
+        return;
+    }
+    std::weak_ptr<IntelCPUMctpSensor> weakRef = weak_from_this();
+    req->sendRecvMsg(
+        eid,
+        std::span<const uint8_t>(pkgPowerSkuTxBuf.data(),
+                                 sizeof(peci_mctp::RdPkgConfigRequest)),
+        [weakRef](const std::error_code& ec, std::span<const uint8_t> buffer) {
+            if (auto self = weakRef.lock())
+            {
+                self->handlePkgPowerSkuResponse(ec, buffer);
+            }
+        });
+}
+
+void IntelCPUMctpSensor::handlePkgPowerSkuResponse(
+    const std::error_code& ec, std::span<const uint8_t> buffer)
+{
+    uint8_t cc = 0;
+    std::array<uint8_t, 4> data{};
+    if (ec || !peci_mctp::deserializeRdPkgConfig(buffer, cc, data) ||
+        !peci_mctp::ccHasValidData(cc))
+    {
+        lg2::error("'{NAME}' power SKU read failed", "NAME", baseName);
+        pollDimmPhase();
+        return;
+    }
+
+    // TDP (pkg power SKU) is in bits[14:0], scaled by 2^powerUnit.
+    uint32_t reg = static_cast<uint32_t>(data[0]) |
+                   (static_cast<uint32_t>(data[1]) << 8) |
+                   (static_cast<uint32_t>(data[2]) << 16) |
+                   (static_cast<uint32_t>(data[3]) << 24);
+    double tdp = static_cast<double>(reg & powerFieldMask) /
+                 static_cast<double>(uint64_t{1} << powerUnit);
+
+    if (tdpIface == nullptr)
+    {
+        std::string path =
+            "/xyz/openbmc_project/sensors/power/" + baseName + "_TDP";
+        tdpIface =
+            objServer.add_interface(path, "xyz.openbmc_project.Sensor.Value");
+        tdpIface->register_property("Value", tdp);
+        tdpIface->register_property("MaxValue", 1000.0);
+        tdpIface->register_property("MinValue", 0.0);
+        tdpIface->register_property("Unit",
+                                    std::string(sensor_paths::unitWatts));
+        tdpIface->initialize();
+    }
+    else
+    {
+        tdpIface->set_property("Value", tdp);
+    }
+
+    powerLimitsRead = true;
     pollDimmPhase();
 }
 

@@ -21,6 +21,7 @@ if get_option('intel-cpu').allowed()
         'IntelCPUSensor.cpp',
         'IntelCPUMctpSensor.cpp',
         'IntelCPUMctpTempSensor.cpp',
+        'IntelCPUMctpPowerSensor.cpp',
         mctp_peci_sources,
         dependencies: [
             default_deps,
@@ -47,6 +48,7 @@ if get_option('intel-cpu-mctp').allowed()
         'IntelCPUMctpSensorMain.cpp',
         'IntelCPUMctpSensor.cpp',
         'IntelCPUMctpTempSensor.cpp',
+        'IntelCPUMctpPowerSensor.cpp',
         mctp_peci_sources,
         dependencies: [
             default_deps,
