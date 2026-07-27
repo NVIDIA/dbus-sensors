@@ -1,6 +1,6 @@
 // NOLINTBEGIN
 #define main disabled_main_reactor
-#include "../MCTPReactorMain.cpp" // NOLINT(bugprone-suspicious-include)
+#include "../mctp/MCTPReactorMain.cpp" // NOLINT(bugprone-suspicious-include)
 #undef main
 
 #include <systemd/sd-bus.h>

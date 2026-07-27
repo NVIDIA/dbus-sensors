@@ -2,7 +2,7 @@
 // namespace, so the implementation is included directly (same pattern as
 // test_MCTPHeartBeatApp.cpp) to exercise them and the LibusbUSBRecovery
 // early-return paths without requiring a real USB device.
-#include "../LibusbSystem.hpp"
+#include "../mctp/LibusbSystem.hpp"
 #include "USBRecovery.hpp"
 
 #include <fcntl.h>
@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-#include "../USBRecovery.cpp" // NOLINT(bugprone-suspicious-include)
+#include "../mctp/USBRecovery.cpp" // NOLINT(bugprone-suspicious-include)
 
 #include <gtest/gtest.h>
 

@@ -40,7 +40,3 @@ if get_option('mctpheartbeat').enabled()
         install_mode: 'rwxr-xr-x',
     )
 endif
-
-if get_option('tests').allowed()
-    subdir('tests')
-endif

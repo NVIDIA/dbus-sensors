@@ -1,6 +1,6 @@
 // NOLINTBEGIN
 #define main disabled_main_heartbeat
-#include "../MCTPHeartBeatApp.cpp" // NOLINT(bugprone-suspicious-include)
+#include "../mctp/MCTPHeartBeatApp.cpp" // NOLINT(bugprone-suspicious-include)
 #undef main
 
 #include <endian.h>
