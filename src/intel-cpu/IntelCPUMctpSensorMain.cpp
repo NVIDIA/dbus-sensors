@@ -63,6 +63,10 @@ struct CpuConfig
     std::string name;
     std::string path;
     int cpuId{0};
+    // Temperature thresholds parsed from the XeonCPU config by "Label": the
+    // package temperature uses "CPU", every DIMM shares the "DIMM" set.
+    std::vector<thresholds::Threshold> cpuThresholds;
+    std::vector<thresholds::Threshold> dimmThresholds;
 };
 
 // One sensor per CPU, keyed by the entity-manager config path.
@@ -149,8 +153,9 @@ void handlePingResponse(DiscoveryContext ctx, const CpuConfig& config,
 
     auto sensor = std::make_shared<IntelCPUMctpSensor>(
         std::string(sensorType), ctx.objectServer, ctx.conn, ctx.io,
-        config.name, std::vector<thresholds::Threshold>{}, config.path,
-        config.cpuId, true, 0.0, ctx.requester, eid);
+        config.name, std::vector<thresholds::Threshold>(config.cpuThresholds),
+        config.dimmThresholds, config.path, config.cpuId, true, 0.0,
+        ctx.requester, eid);
     ctx.sensors[key] = sensor;
     sensor->setupRead();
 }
@@ -294,6 +299,7 @@ void discoverEndpoints(const DiscoveryContext& ctx, const CpuConfig& config)
 }
 
 std::optional<CpuConfig> parseCpuConfig(const std::string& path,
+                                        const SensorData& interfaces,
                                         const SensorBaseConfigMap& cfg)
 {
     CpuConfig config;
@@ -323,6 +329,14 @@ std::optional<CpuConfig> parseCpuConfig(const std::string& path,
         }
     }
 
+    // Thresholds are optional and matched by "Label": "CPU" limits apply to the
+    // package temperature, "DIMM" limits are shared across every discovered
+    // DIMM.
+    const std::string cpuLabel = "CPU";
+    const std::string dimmLabel = "DIMM";
+    parseThresholdsFromConfig(interfaces, config.cpuThresholds, &cpuLabel);
+    parseThresholdsFromConfig(interfaces, config.dimmThresholds, &dimmLabel);
+
     return config;
 }
 
@@ -347,7 +361,7 @@ void handleManagedObjects(const DiscoveryContext& ctx,
             continue;
         }
 
-        auto config = parseCpuConfig(path.str, it->second);
+        auto config = parseCpuConfig(path.str, interfaces, it->second);
         if (!config)
         {
             continue;

@@ -37,6 +37,7 @@ class IntelCPUMctpSensor :
         std::shared_ptr<sdbusplus::asio::connection>& conn,
         boost::asio::io_context& io, const std::string& sensorName,
         std::vector<thresholds::Threshold>&& thresholds,
+        std::vector<thresholds::Threshold> dimmThresholds,
         const std::string& sensorConfigurationIn, int cpuId, bool show,
         double dtsOffset, std::weak_ptr<mctp::MctpRequester> requester,
         uint8_t eid, unsigned int pollMs = sensorPollMs);
@@ -93,6 +94,11 @@ class IntelCPUMctpSensor :
     int cpuId;
     std::string sensorConfiguration;
     std::string baseName;
+
+    // Shared DIMM temperature thresholds (config "Label": "DIMM"), applied as a
+    // copy to every discovered DIMM. The package temperature carries its own
+    // ("Label": "CPU") set, moved into cpuTempSensor at construction.
+    std::vector<thresholds::Threshold> dimmThresholds;
 
     // Published sensors.
     std::shared_ptr<IntelCPUMctpTempSensor> cpuTempSensor;

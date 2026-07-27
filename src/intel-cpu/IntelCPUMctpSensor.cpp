@@ -38,12 +38,14 @@ IntelCPUMctpSensor::IntelCPUMctpSensor(
     std::shared_ptr<sdbusplus::asio::connection>& connIn,
     boost::asio::io_context& io, const std::string& sensorName,
     std::vector<thresholds::Threshold>&& thresholdsIn,
+    std::vector<thresholds::Threshold> dimmThresholdsIn,
     const std::string& sensorConfigurationIn, int cpuId, bool /*show*/,
     double /*dtsOffset*/, std::weak_ptr<mctp::MctpRequester> requesterIn,
     uint8_t eid, unsigned int pollMs) :
     objServer(objectServer), conn(connIn), waitTimer(io),
     requester(std::move(requesterIn)), eid(eid), cpuId(cpuId),
-    sensorConfiguration(sensorConfigurationIn), basePollMs(pollMs),
+    sensorConfiguration(sensorConfigurationIn),
+    dimmThresholds(std::move(dimmThresholdsIn)), basePollMs(pollMs),
     pollTime(pollMs)
 {
     baseName = escapeName(sensorName);
@@ -52,8 +54,9 @@ IntelCPUMctpSensor::IntelCPUMctpSensor(
         baseName.resize(baseName.size() - 5);
     }
 
-    // The CPU package temperature carries the configured thresholds; the power
-    // sensors currently take none (config carries none yet).
+    // The CPU package temperature carries its own ("Label": "CPU") thresholds;
+    // DIMMs share the "DIMM"-labelled set. The power sensors currently take
+    // none.
     cpuTempSensor = std::make_shared<IntelCPUMctpTempSensor>(
         objServer, conn, baseName + "_Temp_0", sensorConfiguration,
         std::move(thresholdsIn));
@@ -694,7 +697,7 @@ void IntelCPUMctpSensor::createDimmSensors()
                                std::to_string(dimm.dimmOrder) + "_Temp";
         dimm.sensor = std::make_shared<IntelCPUMctpTempSensor>(
             objServer, conn, dimmName, sensorConfiguration,
-            std::vector<thresholds::Threshold>{});
+            std::vector<thresholds::Threshold>(dimmThresholds));
         lg2::info("Discovered DIMM sensor '{NAME}'", "NAME", dimmName);
     }
 
