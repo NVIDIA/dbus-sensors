@@ -16,6 +16,7 @@ unit_files = [
     ['plx-temp', 'xyz.openbmc_project.plxtempsensor.service'],
     ['mctpheartbeat', 'xyz.openbmc_project.mctpheartbeatapp.service'],
     ['intel-cpu', 'xyz.openbmc_project.intelcpusensor.service'],
+    ['intel-cpu-mctp', 'xyz.openbmc_project.intelcpumctpsensor.service'],
     ['intrusion', 'xyz.openbmc_project.intrusionsensor.service'],
     ['ipmb', 'xyz.openbmc_project.ipmbsensor.service'],
     ['leakdetector', 'xyz.openbmc_project.leakdetector.service'],

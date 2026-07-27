@@ -11,6 +11,12 @@ option(
     description: 'Enable CPU sensor.',
 )
 option(
+    'intel-cpu-mctp',
+    type: 'feature',
+    value: 'enabled',
+    description: 'Enable the PECI-over-MCTP CPU sensor daemon.',
+)
+option(
     'exit-air',
     type: 'feature',
     value: 'enabled',

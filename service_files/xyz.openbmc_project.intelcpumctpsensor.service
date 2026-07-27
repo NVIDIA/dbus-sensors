@@ -1,0 +1,16 @@
+[Unit]
+Description=Intel CPU PECI-over-MCTP Sensor
+StopWhenUnneeded=false
+Requires=xyz.openbmc_project.EntityManager.service
+After=xyz.openbmc_project.EntityManager.service
+
+[Service]
+Type=dbus
+BusName=xyz.openbmc_project.IntelCpuMctpSensor
+Restart=always
+RestartSec=5
+StartLimitBurst=10
+ExecStart=/usr/libexec/dbus-sensors/intelcpumctpsensor
+
+[Install]
+WantedBy=multi-user.target

@@ -104,8 +104,7 @@ if not meson.get_compiler('cpp').has_header('linux/peci-ioctl.h')
     peci_incdirs = ['../include']
 endif
 
-if get_option('intel-cpu').allowed()
-    peci_dep = dependency('libpeci', required: true)
+if get_option('intel-cpu').allowed() or get_option('intel-cpu-mctp').allowed()
     subdir('intel-cpu')
 endif
 
