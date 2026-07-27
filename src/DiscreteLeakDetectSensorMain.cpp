@@ -164,7 +164,8 @@ void createSensors(
                             // Kick off discovery and the poll loop only after a
                             // shared_ptr owns the sensor. The captured
                             // shared_ptr keeps it alive until this runs, and
-                            // monitor() reschedules itself via weak_from_this().
+                            // monitor() reschedules itself via
+                            // weak_from_this().
                             boost::asio::post(io, [newSensor]() {
                                 newSensor->startLeakPolicyDiscovery();
                                 newSensor->monitor();

@@ -202,7 +202,6 @@ class MCTPDevice
     {
         return std::nullopt;
     }
-
 };
 
 class MCTPDDevice;

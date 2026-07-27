@@ -151,8 +151,8 @@ void MCTPReactor::trackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep)
                  "MCTP_ENDPOINT", ep->describe());
             if (auto self = weak.lock())
             {
-                auto current = self->trackedEndpointGenerations.find(
-                    endpointPath);
+                auto current =
+                    self->trackedEndpointGenerations.find(endpointPath);
                 if (current == self->trackedEndpointGenerations.end() ||
                     current->second != generation)
                 {
@@ -353,16 +353,16 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
             "INVENTORY_PATH", path, "MCTP_DEVICE", current->describe());
 
         auto removed = std::make_shared<bool>(false);
-        unmanageMCTPDevice(
-            path, [weak{weak_from_this()}, path, device, removed]() {
-                *removed = true;
-                auto self = weak.lock();
-                if (!self || self->devices.deviceFor(path) != device)
-                {
-                    return;
-                }
-                self->deferSetup(device);
-            });
+        unmanageMCTPDevice(path, [weak{weak_from_this()}, path, device,
+                                  removed]() {
+            *removed = true;
+            auto self = weak.lock();
+            if (!self || self->devices.deviceFor(path) != device)
+            {
+                return;
+            }
+            self->deferSetup(device);
+        });
 
         devices.add(path, device);
         if (*removed && devices.deviceFor(path) == device)

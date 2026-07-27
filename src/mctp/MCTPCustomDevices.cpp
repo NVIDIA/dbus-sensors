@@ -761,8 +761,8 @@ void USBGadgetMCTPDevice::onEndpointRemoved(sdbusplus::message_t& msg)
     std::set<std::string> interfaces;
     try
     {
-        std::tie(path, interfaces) = msg.unpack<
-            sdbusplus::message::object_path, std::set<std::string>>();
+        std::tie(path, interfaces) = msg.unpack<sdbusplus::message::object_path,
+                                                std::set<std::string>>();
     }
     catch (const sdbusplus::exception_t& e)
     {

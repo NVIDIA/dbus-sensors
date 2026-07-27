@@ -72,9 +72,9 @@ std::string describeLeakShutdownAction(const std::string& criticalType,
         return std::string("no_chassis_shutdown(delay_s=") +
                std::to_string(static_cast<int>(reactionDelaySeconds)) + ")";
     }
-    const char* transition =
-        (criticalType == "GracefulShutdown") ? "graceful_shutdown"
-                                             : "force_off";
+    const char* transition = (criticalType == "GracefulShutdown")
+                                 ? "graceful_shutdown"
+                                 : "force_off";
     return std::string(transition) + "(delay_s=" +
            std::to_string(static_cast<int>(reactionDelaySeconds)) + ")";
 }
@@ -343,39 +343,39 @@ void DiscreteLeakDetectSensor::monitor()
 {
     waitTimer.expires_after(std::chrono::milliseconds(sensorPollMs));
     std::weak_ptr<DiscreteLeakDetectSensor> weak = weak_from_this();
-    waitTimer.async_wait([weak, sensorName = name](
-                             const boost::system::error_code& ec) {
-        // Bail out if the sensor was destroyed while this expired timer
-        // handler was already queued: cancel() cannot un-queue it (UAF).
-        auto self = weak.lock();
-        if (!self)
-        {
-            return; // sensor already destroyed
-        }
-        if (ec == boost::asio::error::operation_aborted)
-        {
-            std::cerr << "DiscreteLeakDetectSensor " << sensorName
-                      << ": Read operation aborted\n";
-            return; // we're being cancelled
-        }
-        // read timer error
-        if (ec)
-        {
-            std::cerr << "DiscreteLeakDetectSensor " << sensorName
-                      << ": timer error\n";
-            return;
-        }
+    waitTimer.async_wait(
+        [weak, sensorName = name](const boost::system::error_code& ec) {
+            // Bail out if the sensor was destroyed while this expired timer
+            // handler was already queued: cancel() cannot un-queue it (UAF).
+            auto self = weak.lock();
+            if (!self)
+            {
+                return; // sensor already destroyed
+            }
+            if (ec == boost::asio::error::operation_aborted)
+            {
+                std::cerr << "DiscreteLeakDetectSensor " << sensorName
+                          << ": Read operation aborted\n";
+                return; // we're being cancelled
+            }
+            // read timer error
+            if (ec)
+            {
+                std::cerr << "DiscreteLeakDetectSensor " << sensorName
+                          << ": timer error\n";
+                return;
+            }
 
-        int ret = self->getLeakInfo();
-        if (ret < 0)
-        {
-            std::cerr << "DiscreteLeakDetectSensor " << sensorName
-                      << ": getLeakInfo error\n";
-        }
+            int ret = self->getLeakInfo();
+            if (ret < 0)
+            {
+                std::cerr << "DiscreteLeakDetectSensor " << sensorName
+                          << ": getLeakInfo error\n";
+            }
 
-        // Start read for next leakage status
-        self->monitor();
-    });
+            // Start read for next leakage status
+            self->monitor();
+        });
 }
 
 inline void DiscreteLeakDetectSensor::createLeakageLogEntry()
@@ -451,8 +451,8 @@ void DiscreteLeakDetectSensor::startShutdown()
             if (ec)
             {
                 std::cerr << "DiscreteLeakDetectSensor " << sensorName
-                          << ": Shutdown Timer callback error: "
-                          << ec.message() << "\n";
+                          << ": Shutdown Timer callback error: " << ec.message()
+                          << "\n";
                 return;
             }
 
@@ -480,7 +480,8 @@ void DiscreteLeakDetectSensor::executeShutdown()
 
     std::cout << "Executing shutdown requested by " << name << ".\n";
 
-    // Same as bmcweb systems.hpp GracefulShutdown: host RequestedHostTransition Off.
+    // Same as bmcweb systems.hpp GracefulShutdown: host RequestedHostTransition
+    // Off.
     if (leakPolicyPropsLoaded_ && criticalReactionType_ == "GracefulShutdown")
     {
         std::variant<std::string> transitionHost(
@@ -519,8 +520,8 @@ void DiscreteLeakDetectSensor::executeShutdown()
             "org.freedesktop.DBus.Properties", "Set", state::Chassis::interface,
             "RequestedPowerTransition", transitionChassis);
     }
-    std::cout << "Issued async D-Bus request for shutdown transition ("
-               << name << ").\n";
+    std::cout << "Issued async D-Bus request for shutdown transition (" << name
+              << ").\n";
 }
 
 void DiscreteLeakDetectSensor::startLeakPolicyDiscovery()
@@ -536,9 +537,10 @@ void DiscreteLeakDetectSensor::startLeakPolicyDiscovery()
             }
             if (ec)
             {
-                std::cerr << "DiscreteLeakDetectSensor " << self->name
-                          << ": mapper GetSubTree failed for LeakDetectionPolicy ("
-                          << ec.message() << ")\n";
+                std::cerr
+                    << "DiscreteLeakDetectSensor " << self->name
+                    << ": mapper GetSubTree failed for LeakDetectionPolicy ("
+                    << ec.message() << ")\n";
                 return;
             }
             auto st = std::make_shared<GetSubTreeType>(subtree);
@@ -559,8 +561,9 @@ void DiscreteLeakDetectSensor::leakPolicyScanIndex(
     }
     if (i >= subtree->size())
     {
-        std::cout << "DiscreteLeakDetectSensor " << name
-                  << ": no LeakDetectionPolicy row with LeakDetectorName match\n";
+        std::cout
+            << "DiscreteLeakDetectSensor " << name
+            << ": no LeakDetectionPolicy row with LeakDetectorName match\n";
         return;
     }
 
@@ -569,9 +572,9 @@ void DiscreteLeakDetectSensor::leakPolicyScanIndex(
 
     std::weak_ptr<DiscreteLeakDetectSensor> weak = weak_from_this();
     dbusConnection->async_method_call(
-        [weak, i, subtree, path, service](
-            const boost::system::error_code& ec,
-            const BasicVariantType& leakDetectorName) {
+        [weak, i, subtree, path,
+         service](const boost::system::error_code& ec,
+                  const BasicVariantType& leakDetectorName) {
             auto self = weak.lock();
             if (!self)
             {
@@ -649,8 +652,7 @@ void DiscreteLeakDetectSensor::applyPolicyConfigMap(
             out = std::visit(VariantToStringVisitor(), it->second);
         }
         catch (const std::invalid_argument&)
-        {
-        }
+        {}
     };
 
     applyString("CriticalReactionType", criticalReactionType_);
@@ -684,7 +686,7 @@ void DiscreteLeakDetectSensor::applyPolicyConfigMap(
               << describeLeakShutdownAction(prevCritical, prevDelay)
               << "\" -> \""
               << describeLeakShutdownAction(criticalReactionType_,
-                                          policyReactionDelaySeconds_)
+                                            policyReactionDelaySeconds_)
               << "\" (CriticalReactionType / ReactionDelaySeconds)\n";
 
     leakPolicyPropsLoaded_ = true;
