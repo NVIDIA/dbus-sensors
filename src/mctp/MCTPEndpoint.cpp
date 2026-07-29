@@ -32,6 +32,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <random>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -764,8 +765,16 @@ void MCTPDDevice::performHealthCheck()
         }
     }
 
-    // Reschedule next health check (after initiating all pings)
-    healthTimer->expires_after(std::chrono::seconds{*pollingInterval});
+    // Randomize each period so health checks cannot remain phase-aligned with
+    // other fixed-rate users of the shared MCTP link.
+    static std::random_device generator;
+    std::uniform_int_distribution<int> jitterMs{-500, 500};
+    const int jitter = *pollingInterval == 0 ? 0 : jitterMs(generator);
+    const auto delay =
+        std::chrono::milliseconds{*pollingInterval * 1000 + jitter};
+    debug("Scheduling next MCTP health check in {DELAY_MS} ms", "DELAY_MS",
+          delay.count());
+    healthTimer->expires_after(delay);
     healthTimer->async_wait(
         [weak = weak_from_this()](const boost::system::error_code& ec) {
             if (!ec)
