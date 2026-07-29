@@ -2687,6 +2687,45 @@ TEST_F(FakeConnFixture, performHealthCheckCoversAllLambdas)
     {}
 }
 
+TEST_F(FakeConnFixture, performHealthCheckRandomizesRecurringDelay)
+{
+    using namespace std::chrono_literals;
+
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-hc-jitter", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::optional<uint8_t>(5));
+    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+    dev->inHealthRecoveryMode = true;
+
+    auto shortest = std::chrono::steady_clock::duration::max();
+    auto longest = std::chrono::steady_clock::duration::zero();
+    for (int sample = 0; sample < 32; ++sample)
+    {
+        const auto before = std::chrono::steady_clock::now();
+        EXPECT_NO_THROW(dev->performHealthCheck());
+        const auto after = std::chrono::steady_clock::now();
+        const auto expiry = dev->healthTimer->expiry();
+
+        EXPECT_GE(expiry, before + 4500ms);
+        EXPECT_LE(expiry, after + 5500ms);
+
+        const auto remaining = expiry - after;
+        if (remaining < shortest)
+        {
+            shortest = remaining;
+        }
+        if (remaining > longest)
+        {
+            longest = remaining;
+        }
+    }
+
+    EXPECT_GT(longest - shortest, 100ms);
+    dev->healthTimer->cancel();
+    io.poll();
+}
+
 // 6. performHealthCheck() with bridge pool — covers the bridge-pool ping lambda
 TEST_F(FakeConnFixture, performHealthCheckBridgePoolCoversLambda)
 {
