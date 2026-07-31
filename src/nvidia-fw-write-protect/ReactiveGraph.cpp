@@ -39,6 +39,12 @@ void Graph::connect(NodeId from, NodeId to)
     nodes[from.id].outgoing.push_back(to.id);
     nodes[to.id].incoming.push_back(from.id);
     touch(to.id);
+    // The new edge can change the target's value immediately (e.g. when
+    // linking to an already-true source).  propagate() evaluates only the
+    // children of dirty nodes, never the dirty nodes themselves, so
+    // evaluate the target here; the dirty mark set above makes the next
+    // propagate() notify its observers and descendants.
+    nodes[to.id].output = evaluate(nodes[to.id]);
 }
 
 void Graph::set(SourceNodeId id, bool value)

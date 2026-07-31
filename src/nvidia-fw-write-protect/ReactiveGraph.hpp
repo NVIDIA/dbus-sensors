@@ -129,7 +129,10 @@ class Graph
     struct Node
     {
         NodeType type;
-        bool output = type == NodeType::And;
+        // False also for And nodes: evaluate() derives results solely from
+        // incoming edges, and downstream reads of a no-input node must match
+        // output()'s false masking.
+        bool output = false;
         bool dirty = false;
         bool snapshot = output;
         std::vector<std::size_t> incoming = {};

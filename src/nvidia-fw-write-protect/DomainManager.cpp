@@ -347,6 +347,9 @@ auto DomainManager::addGroup(sdbusplus::object_path objectPath,
     auto groupName = config->name;
     groups.emplace(groupName, group);
     resolveGroupLinks(*group, groupName);
+    // Flush the dirty mark left by graph.connect() when a source was
+    // already true at link time, so the facade observers see it.
+    graph.propagate();
     info("Successfully added group {NAME}", "NAME", groupName);
 }
 
