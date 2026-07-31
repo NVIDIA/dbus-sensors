@@ -63,3 +63,14 @@ test(
     ),
 )
 
+test(
+    'test_write_protect_reactive_graph',
+    executable(
+        'test_write_protect_reactive_graph',
+        '../nvidia-fw-write-protect/ReactiveGraph.cpp',
+        'test_WriteProtectReactiveGraph.cpp',
+        dependencies: [gtest_dep],
+        implicit_include_directories: false,
+        include_directories: '../nvidia-fw-write-protect',
+    ),
+)

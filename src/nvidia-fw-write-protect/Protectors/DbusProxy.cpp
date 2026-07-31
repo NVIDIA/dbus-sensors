@@ -12,11 +12,19 @@
 #include <xyz/openbmc_project/Software/Settings/client.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <exception>
 #include <expected>
 #include <format>
+#include <map>
+#include <memory>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
 #include <variant>
+#include <vector>
 
 PHOSPHOR_LOG2_USING;
 
@@ -67,21 +75,26 @@ auto DbusProxy::init() -> sdbusplus::async::task<>
     co_return;
 }
 
+/// Poll cadence while waiting for the underlying D-Bus object to appear.
+static constexpr auto detectPollInterval = std::chrono::seconds(5);
+/// After this long the wait is logged as an error instead of a warning.
+static constexpr auto detectEscalationDelay = std::chrono::minutes(1);
+/// Cadence of repeated error logs once escalated.
+static constexpr auto detectErrorLogInterval = std::chrono::minutes(5);
+
 auto DbusProxy::create(sdbusplus::async::context& ctx,
                        const sdbusplus::message::object_path& path)
     -> sdbusplus::async::task<std::optional<DbusProxy>>
 {
-    namespace rules = sdbusplus::bus::match::rules;
-
-    // Create the match first so that we don't miss the signal if it's sent
-    // slightly after we query the object mapper.
-    sdbusplus::async::match protectorMatch(
-        ctx, rules::interfacesAddedAtPath(path.str));
-
+    // Poll the mapper rather than waiting on an InterfacesAdded match:
+    // match completions ignore stop requests, so a cancelled wait would
+    // otherwise park until the next signal, which may never arrive.
     auto detected = co_await detect(ctx, path);
     if (!detected)
     {
         auto token = co_await stdexec::get_stop_token();
+        std::chrono::milliseconds waited{0};
+        std::chrono::milliseconds nextLogAt{0};
         while (!detected)
         {
             if (token.stop_requested())
@@ -89,11 +102,29 @@ auto DbusProxy::create(sdbusplus::async::context& ctx,
                 co_return {};
             }
 
-            warning(
-                "Underlying DBus object is not available yet - waiting for {PATH}",
-                "PATH", path.str);
+            if (waited >= nextLogAt)
+            {
+                if (waited < detectEscalationDelay)
+                {
+                    warning(
+                        "Underlying DBus object is not available yet - waiting for {PATH}",
+                        "PATH", path.str);
+                    nextLogAt = detectEscalationDelay;
+                }
+                else
+                {
+                    error(
+                        "Underlying DBus object still unavailable after {SECONDS}s - source at {PATH} reports no write-protect state",
+                        "SECONDS",
+                        std::chrono::duration_cast<std::chrono::seconds>(waited)
+                            .count(),
+                        "PATH", path.str);
+                    nextLogAt = waited + detectErrorLogInterval;
+                }
+            }
 
-            co_await protectorMatch.next();
+            co_await sdbusplus::async::sleep_for(ctx, detectPollInterval);
+            waited += detectPollInterval;
             detected = co_await detect(ctx, path);
         }
     }

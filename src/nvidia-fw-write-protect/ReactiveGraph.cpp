@@ -1,10 +1,13 @@
 #include "ReactiveGraph.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <format>
 #include <queue>
 #include <ranges>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace nvidia::write_protect
 {
@@ -39,6 +42,12 @@ void Graph::connect(NodeId from, NodeId to)
     nodes[from.id].outgoing.push_back(to.id);
     nodes[to.id].incoming.push_back(from.id);
     touch(to.id);
+    // The new edge can change the target's value immediately (e.g. when
+    // linking to an already-true source).  propagate() evaluates only the
+    // children of dirty nodes, never the dirty nodes themselves, so
+    // evaluate the target here; the dirty mark set above makes the next
+    // propagate() notify its observers and descendants.
+    nodes[to.id].output = evaluate(nodes[to.id]);
 }
 
 void Graph::set(SourceNodeId id, bool value)
@@ -127,7 +136,7 @@ void Graph::propagate()
 bool Graph::output(NodeId id) const
 {
     const auto& node = nodes[id.id];
-    if (node.type != NodeType::Source && node.incoming.size() == 0)
+    if (node.type != NodeType::Source && node.incoming.empty())
     {
         return false;
     }
@@ -178,7 +187,7 @@ bool Graph::evaluate(const Node& node) const
     auto val = [&](std::size_t id) { return nodes[id].output; };
     if (node.type == NodeType::And)
     {
-        return node.incoming.size() > 0 &&
+        return !node.incoming.empty() &&
                std::ranges::all_of(node.incoming, val);
     }
     return std::ranges::any_of(node.incoming, val);
