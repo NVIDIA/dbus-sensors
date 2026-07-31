@@ -135,9 +135,9 @@ class Graph
         bool output = false;
         bool dirty = false;
         bool snapshot = output;
-        std::vector<std::size_t> incoming = {};
-        std::vector<std::size_t> outgoing = {};
-        std::vector<Callback> observers = {};
+        std::vector<std::size_t> incoming;
+        std::vector<std::size_t> outgoing;
+        std::vector<Callback> observers;
     };
 
     bool evaluate(const Node& node) const;

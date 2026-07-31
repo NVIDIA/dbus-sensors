@@ -1,10 +1,13 @@
 #include "ReactiveGraph.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <format>
 #include <queue>
 #include <ranges>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace nvidia::write_protect
 {
@@ -133,7 +136,7 @@ void Graph::propagate()
 bool Graph::output(NodeId id) const
 {
     const auto& node = nodes[id.id];
-    if (node.type != NodeType::Source && node.incoming.size() == 0)
+    if (node.type != NodeType::Source && node.incoming.empty())
     {
         return false;
     }
@@ -184,7 +187,7 @@ bool Graph::evaluate(const Node& node) const
     auto val = [&](std::size_t id) { return nodes[id].output; };
     if (node.type == NodeType::And)
     {
-        return node.incoming.size() > 0 &&
+        return !node.incoming.empty() &&
                std::ranges::all_of(node.incoming, val);
     }
     return std::ranges::any_of(node.incoming, val);
