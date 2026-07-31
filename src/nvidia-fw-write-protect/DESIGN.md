@@ -386,11 +386,22 @@ No domain D-Bus objects are created.  The GPIO input drives both the chassis
 ### 4.2.1 addGpioGroup
 
 1. Read config properties from Entity Manager (`GpioInputConfig::tryFrom`).
-2. Create a graph source node and spawn GPIO protector initialization.
+2. Create a graph source node — or, if a group processed earlier already
+   reserved a placeholder node under this name while resolving its
+   `Sources` list, adopt that node (it is what every referencing group is
+   wired to).  Group and input configs are therefore correct in either
+   dispatch order.  If a D-Bus proxy protector already claimed the
+   adopted source, an error is logged: the proxy cannot be safely
+   replaced while its monitor coroutine may be suspended inside it, so
+   the GPIO line will not be opened.
 3. Register the source as a group (using the source node directly as the
    output node) so other groups can reference it by name.
 4. Create `SoftwareComponent` objects for any `FlashProtectedComponents`.
-5. Resolve pending entity links.
+5. Resolve pending entity links, cancelling any in-flight D-Bus proxy
+   initialization for this name.  Adopted placeholder links are kept
+   live rather than rewired.
+6. Spawn GPIO protector initialization.  Initialization is skipped with
+   a warning if the source already has a protector.
 
 ### 4.3 Source Initialization (Background)
 
@@ -602,7 +613,9 @@ journalctl -u com.nvidia.fwwriteprotect -p info
 
 ---
 
-*Document version: 5.0 — WriteProtectInput replaces inline source specifiers;
+*Document version: 5.1 — WriteProtectInput replaces inline source specifiers;
 WriteProtectGroup no longer creates a Domain facade; Domain objects live at
 `/xyz/openbmc_project/state/<Name>`; SourceMode support (OR/AND); cancellable
-entity source initialization.*
+entity source initialization; order-independent input/group config
+processing (a WriteProtectInput adopts a placeholder source node reserved
+by an earlier-dispatched referencing group).*
