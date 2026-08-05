@@ -3018,7 +3018,9 @@ TEST(MCTPReactorSecurity,
     ASSERT_TRUE(static_cast<bool>(removeHandler));
 
     reactor->states[dev->id()] = MCTPDeviceState::Quarantine;
-    reactor->devices.devices.clear();
+    // Simulate inventory removal through the repository API so its forward
+    // and reverse indexes remain consistent.
+    reactor->devices.remove(dev);
     EXPECT_FALSE(reactor->devices.contains(dev));
 
     EXPECT_NO_THROW(removeHandler(ep));
