@@ -740,7 +740,22 @@ TEST(PCIeMCTPDDevice, fromValidMinimalConfigWithDomainBdf)
     EXPECT_EQ(device->getInterface(), "mctp-pcie0");
     EXPECT_FALSE(device->getEid().has_value());
     EXPECT_EQ(device->describe(),
-              "interface: mctp-pcie0, address: 0x [ 01 00 ]");
+              "interface: mctp-pcie0, address: 0x [ 02 01 00 ]");
+}
+
+TEST(PCIeMCTPDDevice, fromZeroBdfUsesRouteToRootComplex)
+{
+    SensorBaseConfigMap iface{
+        {"Type", "MCTPPCIeTarget"},
+        {"Name", "pcie-root-complex"},
+        {"Interface", "mctp-pcie0"},
+        {"Address", "0000:00:00.0"},
+    };
+
+    auto device = PCIeMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->describe(),
+              "interface: mctp-pcie0, address: 0x [ 00 00 00 ]");
 }
 
 TEST(PCIeMCTPDDevice, fromValidMinimalConfigWithoutDomainBdf)
@@ -757,7 +772,7 @@ TEST(PCIeMCTPDDevice, fromValidMinimalConfigWithoutDomainBdf)
     EXPECT_EQ(device->getName(), "pcie-test-device");
     EXPECT_EQ(device->getInterface(), "mctp-pcie1");
     EXPECT_EQ(device->describe(),
-              "interface: mctp-pcie1, address: 0x [ 02 ff ]");
+              "interface: mctp-pcie1, address: 0x [ 02 02 ff ]");
 }
 
 TEST(PCIeMCTPDDevice, fromValidWithStaticEid)
@@ -775,7 +790,7 @@ TEST(PCIeMCTPDDevice, fromValidWithStaticEid)
     EXPECT_TRUE(device->managesEid(44));
     EXPECT_FALSE(device->managesEid(45));
     EXPECT_EQ(device->describe(),
-              "interface: mctp-pcie2, address: 0x [ 03 25 ]");
+              "interface: mctp-pcie2, address: 0x [ 02 03 25 ]");
 }
 
 TEST(PCIeMCTPDDevice, fromValidWithStaticEidBridgePoolAndPolling)
@@ -800,7 +815,7 @@ TEST(PCIeMCTPDDevice, fromValidWithStaticEidBridgePoolAndPolling)
     EXPECT_EQ(device->getNameForEid(10).value_or(""), "bridge-a");
     EXPECT_EQ(device->getNameForEid(11).value_or(""), "bridge-b");
     EXPECT_EQ(device->describe(),
-              "interface: mctp-pcie3, address: 0x [ 04 2e ]");
+              "interface: mctp-pcie3, address: 0x [ 02 04 2e ]");
 }
 
 TEST(PCIeMCTPDDevice, fromIgnoreEidsValidMultipleValues)
@@ -899,7 +914,7 @@ TEST(PCIeMCTPDDevice, fromValidWithoutStaticButWithBridgeEnd)
     EXPECT_FALSE(device->getEid().has_value());
     EXPECT_FALSE(device->managesEid(11));
     EXPECT_EQ(device->describe(),
-              "interface: mctp-pcie4, address: 0x [ 05 37 ]");
+              "interface: mctp-pcie4, address: 0x [ 02 05 37 ]");
 }
 
 TEST(PCIeMCTPDDevice, fromBadStaticEndpointIdThrows)

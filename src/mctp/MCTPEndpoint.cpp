@@ -2326,12 +2326,14 @@ bool PCIeMCTPDDevice::match(const std::set<std::string>& interfaces)
 
 /*
  * Parse a PCIe BDF string of the form "[domain:]bus:device.function"
- * (e.g. "0000:01:00.0" or "01:00.0") into the 2-byte physical address
- * { bus, devfn } that the kernel mctp-pcie binding uses for routing
- * (matches the "address bb:df" column in `mctp link show`).
+ * (e.g. "0000:01:00.0" or "01:00.0") into the 3-byte physical address
+ * { routing type, bus, devfn } used by the generic kernel mctp-pcie-vdm
+ * driver with the ASPEED backend. Preserve the legacy Ampere driver
+ * convention where a zero BDF selects Route-to-RC; all other BDFs use
+ * Route-by-ID.
  *
- * The PCIe domain is parsed but ignored: the link layer address is only
- * the requester ID (bus:devfn).
+ * The PCIe domain is parsed but ignored: the link-layer address contains
+ * only the routing type and requester ID (bus:devfn).
  */
 static unsigned int parsePcieBdfHexField(std::string_view field,
                                          const std::string& bdf)
@@ -2353,6 +2355,9 @@ static unsigned int parsePcieBdfHexField(std::string_view field,
 
 static std::vector<uint8_t> parsePcieBdf(const std::string& bdf)
 {
+    constexpr uint8_t routeToRootComplex = 0;
+    constexpr uint8_t routeById = 2;
+
     unsigned int bus = 0;
     unsigned int device = 0;
     unsigned int function = 0;
@@ -2406,8 +2411,11 @@ static std::vector<uint8_t> parsePcieBdf(const std::string& bdf)
         throw std::invalid_argument("BDF out of range: " + bdf);
     }
 
+    auto busNumber = static_cast<uint8_t>(bus);
     auto devfn = static_cast<uint8_t>((device << 3) | function);
-    return {static_cast<uint8_t>(bus), devfn};
+    auto routingType =
+        (busNumber == 0 && devfn == 0) ? routeToRootComplex : routeById;
+    return {routingType, busNumber, devfn};
 }
 
 std::shared_ptr<PCIeMCTPDDevice> PCIeMCTPDDevice::from(
