@@ -13,7 +13,7 @@ option(
 option(
     'intel-cpu-mctp',
     type: 'feature',
-    value: 'enabled',
+    value: 'disabled',
     description: 'Enable the PECI-over-MCTP CPU sensor daemon.',
 )
 option(
