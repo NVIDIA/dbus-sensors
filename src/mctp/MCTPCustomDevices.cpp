@@ -15,10 +15,13 @@
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus.hpp>
 #include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/exception.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <charconv>
 #include <cstdint>
@@ -35,11 +38,26 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
 
 PHOSPHOR_LOG2_USING;
+
+namespace
+{
+bool isSafeGadgetName(const std::string& name)
+{
+    return !name.empty() && name.size() < IFNAMSIZ &&
+           std::ranges::all_of(
+               name,
+               [](const unsigned char ch) {
+                   return std::isalnum(ch) || ch == '_' || ch == '-' ||
+                          ch == '.';
+               });
+}
+} // namespace
 
 /* MCTP USBGadget */
 
@@ -49,6 +67,11 @@ USBGadgetMCTPDevice::USBGadgetMCTPDevice(
     connection(connection), gadgetName(gadgetName), localEID(localEID),
     name(name)
 {
+    if (!isSafeGadgetName(gadgetName))
+    {
+        throw std::invalid_argument("Bad USB gadget interface name");
+    }
+
     info("Creating USB Gadget MCTP Device: {GADGET_NAME}, EID: {EID}",
          "GADGET_NAME", gadgetName, "EID", static_cast<int>(localEID));
 }
@@ -349,18 +372,71 @@ void USBGadgetMCTPDevice::setup(
     info("netfilter delete table result for {GADGET_NAME}: {RESULT}",
          "GADGET_NAME", gadgetName, "RESULT", deleteTableResult);
 
-    const std::array<std::string, 5> nftCommands = {
+    // MCTP control (type 0) state-mutating ("set") command codes per DSP0236
+    // 1.3.3. These commands change endpoint/bridge state, so a request carrying
+    // one is only honored when it targets our local EID; the same request aimed
+    // at any other EID is dropped at ingress.
+    struct CtrlSetCommand
+    {
+        uint8_t code;
+        const char* name;
+        // Set Endpoint ID legitimately targets the MCTP null EID (0): that is
+        // how a bus owner assigns an EID to a not-yet-enumerated endpoint. Only
+        // that command exempts dest EID 0 from the drop; the others never
+        // legitimately target the null EID, so they stay strict.
+        bool allowNullEid;
+    };
+    // Routing Information Update (0x09) is intentionally NOT filtered here: it
+    // is handled at the mctpd layer, which ignores an update whose advertised
+    // EID is already a known peer, so dropping it at ingress is redundant and
+    // would block legitimate updates.
+    static constexpr std::array<CtrlSetCommand, 5> ctrlSetCommands = {{
+        {0x01, "Set Endpoint ID", true},
+        {0x08, "Allocate Endpoint IDs", false},
+        {0x0D, "Discovery Notify", false},
+        {0x12, "Request TX rate limit", false},
+        {0x13, "Update rate limit", false},
+    }};
+
+    std::vector<std::string> nftCommands = {
         nftBinary + " add table netdev " + nftTableName,
         std::format(
             "{} 'add chain netdev {} {} {{ type filter hook ingress device "
             "\"{}\" priority 0; }}'",
             nftBinary, nftTableName, nftChainName, gadgetName),
-        nftBinary + " add rule netdev " + nftTableName + " " + nftChainName +
-            " @nh,32,8 0x0 accept",
-        nftBinary + " add rule netdev " + nftTableName + " " + nftChainName +
-            " @nh,32,8 0x5 accept",
-        nftBinary + " add rule netdev " + nftTableName + " " + nftChainName +
-            " drop"};
+    };
+
+    // Drop type-0 control "set" requests addressed to any EID other than ours.
+    // Header bit offsets into the MCTP packet (@nh = start of MCTP header):
+    //   @nh,32,8  IC|MsgType byte -> 0x0 means MCTP control with IC=0
+    //   @nh,24,1  start-of-message bit -> 1 (command code is in first packet)
+    //   @nh,40,1  Rq bit -> 1 (request, so responses are never matched)
+    //   @nh,48,8  command code
+    //   @nh,8,8   destination EID -> must differ from our local EID (and, for
+    //             Set Endpoint ID, also from the null EID 0, which is the valid
+    //             assignment target for a not-yet-enumerated endpoint)
+    for (const auto& cmd : ctrlSetCommands)
+    {
+        std::string destGuard =
+            std::format("@nh,8,8 != {}", static_cast<int>(localEID));
+        if (cmd.allowNullEid)
+        {
+            destGuard += " @nh,8,8 != 0x00";
+        }
+        nftCommands.push_back(std::format(
+            "{} add rule netdev {} {} @nh,32,8 0x0 @nh,24,1 1 @nh,40,1 1 "
+            "@nh,48,8 {:#04x} {} drop",
+            nftBinary, nftTableName, nftChainName, static_cast<int>(cmd.code),
+            destGuard));
+    }
+
+    // Allow remaining MCTP control (type 0) and type 5 traffic; drop the rest.
+    nftCommands.push_back(nftBinary + " add rule netdev " + nftTableName + " " +
+                          nftChainName + " @nh,32,8 0x0 accept");
+    nftCommands.push_back(nftBinary + " add rule netdev " + nftTableName + " " +
+                          nftChainName + " @nh,32,8 0x5 accept");
+    nftCommands.push_back(nftBinary + " add rule netdev " + nftTableName + " " +
+                          nftChainName + " drop");
 
     for (const auto& command : nftCommands)
     {
@@ -411,7 +487,7 @@ void USBGadgetMCTPDevice::setup(
 
     isSetup = true;
     info("USB gadget feature enabled successfully");
-    createMCTPLogEntry(connection, name, hmcBridgeError,
+    createMCTPLogEntry(connection, name, hmcBridgeInfo,
                        "USB gadget feature enabled successfully",
                        "If problem persists, contact next level support.");
 
@@ -638,7 +714,26 @@ void USBGadgetMCTPDevice::sendDiscoveryNotify()
 
 void USBGadgetMCTPDevice::onEndpointAdded(sdbusplus::message_t& msg)
 {
-    auto [path, interfaces] = msg.unpack<sdbusplus::object_path, SensorData>();
+    sdbusplus::object_path path;
+    SensorData interfaces;
+    try
+    {
+        std::tie(path, interfaces) =
+            msg.unpack<sdbusplus::object_path, SensorData>();
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Malformed endpoint-added signal for {GADGET_NAME}: {ERROR}",
+              "GADGET_NAME", gadgetName, "ERROR", e.what());
+        return;
+    }
+    catch (const std::exception& e)
+    {
+        error(
+            "Failed to process endpoint-added signal for {GADGET_NAME}: {ERROR}",
+            "GADGET_NAME", gadgetName, "ERROR", e.what());
+        return;
+    }
 
     if (interfaces.find(mctpdEndpointControlInterface) == interfaces.end())
     {
@@ -655,8 +750,26 @@ void USBGadgetMCTPDevice::onEndpointAdded(sdbusplus::message_t& msg)
 
 void USBGadgetMCTPDevice::onEndpointRemoved(sdbusplus::message_t& msg)
 {
-    auto [path, interfaces] =
-        msg.unpack<sdbusplus::object_path, std::set<std::string>>();
+    sdbusplus::object_path path;
+    std::set<std::string> interfaces;
+    try
+    {
+        std::tie(path, interfaces) =
+            msg.unpack<sdbusplus::object_path, std::set<std::string>>();
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Malformed endpoint-removed signal for {GADGET_NAME}: {ERROR}",
+              "GADGET_NAME", gadgetName, "ERROR", e.what());
+        return;
+    }
+    catch (const std::exception& e)
+    {
+        error(
+            "Failed to process endpoint-removed signal for {GADGET_NAME}: {ERROR}",
+            "GADGET_NAME", gadgetName, "ERROR", e.what());
+        return;
+    }
 
     if (!interfaces.contains(mctpdEndpointControlInterface))
     {

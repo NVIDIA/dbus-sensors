@@ -31,12 +31,14 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <random>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -355,8 +357,29 @@ void MCTPDDevice::performDiscovery()
 
                 if (dbusMethod == "LearnEndpoint")
                 {
-                    auto [eid, network, objpath, allocated] =
-                        msg.unpack<uint8_t, int32_t, std::string, bool>();
+                    uint8_t eid = 0;
+                    int32_t network = 0;
+                    std::string objpath;
+                    bool allocated = false;
+                    try
+                    {
+                        std::tie(eid, network, objpath, allocated) =
+                            msg.unpack<uint8_t, int32_t, std::string, bool>();
+                    }
+                    catch (const sdbusplus::exception_t& e)
+                    {
+                        error(
+                            "Malformed LearnEndpoint reply for {INTERFACE}: {ERROR}",
+                            "INTERFACE", self->interface, "ERROR", e.what());
+                        return;
+                    }
+                    catch (const std::exception& e)
+                    {
+                        error(
+                            "Failed to process LearnEndpoint reply for {INTERFACE}: {ERROR}",
+                            "INTERFACE", self->interface, "ERROR", e.what());
+                        return;
+                    }
                     info(
                         "LearnEndpoint returned eid: {EID}, network: {NETWORK}, objpath: {OBJPATH}, allocated: {ALLOCATED}",
                         "EID", eid, "NETWORK", network, "OBJPATH", objpath,
@@ -435,10 +458,28 @@ void MCTPDDevice::onEndpointInterfacesRemoved(
     const std::weak_ptr<MCTPDDevice>& weak, const std::string& objpath,
     sdbusplus::message_t& msg)
 {
-    auto path = msg.unpack<sdbusplus::object_path>();
+    sdbusplus::object_path path;
+    std::set<std::string> removedIfaces;
+    try
+    {
+        path = msg.unpack<sdbusplus::object_path>();
+        removedIfaces = msg.unpack<std::set<std::string>>();
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Malformed endpoint InterfacesRemoved signal for {PATH}: {ERROR}",
+              "PATH", objpath, "ERROR", e.what());
+        return;
+    }
+    catch (const std::exception& e)
+    {
+        error(
+            "Failed to process endpoint InterfacesRemoved signal for {PATH}: {ERROR}",
+            "PATH", objpath, "ERROR", e.what());
+        return;
+    }
     assert(path.str == objpath);
 
-    auto removedIfaces = msg.unpack<std::set<std::string>>();
     if (!removedIfaces.contains(mctpdEndpointControlInterface))
     {
         return;
@@ -655,8 +696,8 @@ void MCTPDDevice::performHealthCheck()
             suppressedHealthCheckEids.erase(eid);
 
             // Suppress errors before and after the threshold attempt. The
-            // threshold ping is left unsuppressed so injected TransportErrors
-            // produce one RF log.
+            // threshold ping is left unsuppressed so injected
+            // TransportErrors produce one RF log.
             if (bridgePoolPingFailures[eid] < pingFailureThreshold - 1 ||
                 bridgePoolPingFailures[eid] >= pingFailureThreshold)
             {
@@ -754,8 +795,16 @@ void MCTPDDevice::performHealthCheck()
         }
     }
 
-    // Reschedule next health check (after initiating all pings)
-    healthTimer->expires_after(std::chrono::seconds{*pollingInterval});
+    // Randomize each period so health checks cannot remain phase-aligned with
+    // other fixed-rate users of the shared MCTP link.
+    static std::random_device generator;
+    std::uniform_int_distribution<int> jitterMs{-500, 500};
+    const int jitter = *pollingInterval == 0 ? 0 : jitterMs(generator);
+    const auto delay =
+        std::chrono::milliseconds{*pollingInterval * 1000 + jitter};
+    debug("Scheduling next MCTP health check in {DELAY_MS} ms", "DELAY_MS",
+          delay.count());
+    healthTimer->expires_after(delay);
     healthTimer->async_wait(
         [weak = weak_from_this()](const boost::system::error_code& ec) {
             if (!ec)
@@ -1069,9 +1118,29 @@ std::string MCTPDEndpoint::path(const std::shared_ptr<MCTPEndpoint>& ep)
 
 void MCTPDEndpoint::onMctpEndpointChange(sdbusplus::message_t& msg)
 {
-    auto [iface, changed, _] =
-        msg.unpack<std::string, std::map<std::string, BasicVariantType>,
-                   std::vector<std::string>>();
+    std::string iface;
+    std::map<std::string, BasicVariantType> changed;
+    std::vector<std::string> invalidated;
+    try
+    {
+        std::tie(iface, changed, invalidated) =
+            msg.unpack<std::string, std::map<std::string, BasicVariantType>,
+                       std::vector<std::string>>();
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        error("Malformed endpoint PropertiesChanged signal for {PATH}: {ERROR}",
+              "PATH", objpath.str, "ERROR", e.what());
+        return;
+    }
+    catch (const std::exception& e)
+    {
+        error(
+            "Failed to process endpoint PropertiesChanged signal for {PATH}: {ERROR}",
+            "PATH", objpath.str, "ERROR", e.what());
+        return;
+    }
+
     if (iface != mctpdEndpointControlInterface)
     {
         return;
@@ -1083,7 +1152,15 @@ void MCTPDEndpoint::onMctpEndpointChange(sdbusplus::message_t& msg)
         return;
     }
 
-    updateEndpointConnectivity(std::get<std::string>(it->second));
+    const auto* connectivity = std::get_if<std::string>(&it->second);
+    if (connectivity == nullptr)
+    {
+        warning("Ignoring non-string Connectivity update for {PATH}", "PATH",
+                objpath.str);
+        return;
+    }
+
+    updateEndpointConnectivity(*connectivity);
 }
 
 void MCTPDEndpoint::updateEndpointConnectivity(const std::string& connectivity)

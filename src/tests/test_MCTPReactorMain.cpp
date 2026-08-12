@@ -6,6 +6,7 @@
 #include <systemd/sd-bus.h>
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -26,6 +27,36 @@ class MockAssocServer : public AssociationServer
                  const std::vector<Association>& associations),
                 (override));
     MOCK_METHOD(void, disassociate, (const std::string& path), (override));
+};
+
+class SecurityMockMCTPDevice : public MCTPDevice
+{
+  public:
+    ~SecurityMockMCTPDevice() override = default;
+
+    MOCK_METHOD(void, setup,
+                (std::function<void(const std::error_code& ec,
+                                    const std::shared_ptr<MCTPEndpoint>& ep)> &&
+                 added),
+                (override));
+    MOCK_METHOD(void, remove, (), (override));
+    MOCK_METHOD(std::string, describe, (), (const, override));
+    MOCK_METHOD(std::size_t, id, (), (const, override));
+};
+
+class SecurityMockMCTPEndpoint : public MCTPEndpoint
+{
+  public:
+    ~SecurityMockMCTPEndpoint() override = default;
+
+    MOCK_METHOD(int, network, (), (const, override));
+    MOCK_METHOD(uint8_t, eid, (), (const, override));
+    MOCK_METHOD(void, subscribe,
+                (Event && degraded, Event&& available, Event&& removed),
+                (override));
+    MOCK_METHOD(void, remove, (), (override));
+    MOCK_METHOD(std::string, describe, (), (const, override));
+    MOCK_METHOD(std::shared_ptr<MCTPDevice>, device, (), (const, override));
 };
 
 TEST(DeviceFromConfig, emptyConfigReturnsNull)
@@ -264,32 +295,37 @@ TEST(ReactorMainHandlers, exitReactorMalformedMessageThrows)
     EXPECT_THROW(static_cast<void>(exitReactor(&io, msg)), std::exception);
 }
 
-TEST(ReactorMainHandlers, handleTransportErrorSignalMalformedMessageThrows)
+TEST(ReactorMainHandlers, handleTransportErrorSignalMalformedMessageIsIgnored)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(static_cast<void>(handleTransportErrorSignal(reactor, msg)),
-                 std::exception);
+    EXPECT_NO_THROW(handleTransportErrorSignal(reactor, msg));
 }
 
-TEST(ReactorMainHandlers, addInventoryMalformedMessageThrows)
+TEST(ReactorMainHandlers, generalErrorMatchSpecPinsMctpdSender)
+{
+    const std::string matchSpec = buildGeneralErrorMatchSpec();
+    EXPECT_NE(matchSpec.find("sender='au.com.codeconstruct.MCTP1'"),
+              std::string::npos);
+    EXPECT_NE(matchSpec.find("member='GeneralError'"), std::string::npos);
+}
+
+TEST(ReactorMainHandlers, addInventoryMalformedMessageIsIgnored)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(static_cast<void>(addInventory(conn, reactor, msg)),
-                 std::exception);
+    EXPECT_NO_THROW(addInventory(conn, reactor, msg));
 }
 
-TEST(ReactorMainHandlers, removeInventoryMalformedMessageThrows)
+TEST(ReactorMainHandlers, removeInventoryMalformedMessageIsIgnored)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(static_cast<void>(removeInventory(reactor, msg)),
-                 std::exception);
+    EXPECT_NO_THROW(removeInventory(reactor, msg));
 }
 
 // NOTE: NoOpLogGuard/CaptureLogGuard/CaptureEventGuard originally used
@@ -2924,6 +2960,72 @@ TEST(MCTPDeviceRepository, removeKnownDeviceSucceeds)
     EXPECT_FALSE(reactor->devices.contains(device));
 }
 
+TEST(MCTPDeviceRepository, removeUnknownDeviceThrowsNoSuchDevice)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto device = std::make_shared<MCTPDDevice>(
+        nullptr, "AbsentDevice", "mctpabsentremove", std::vector<uint8_t>{0x31},
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
+
+    EXPECT_FALSE(reactor->devices.contains(device));
+    try
+    {
+        reactor->devices.remove(device);
+        FAIL() << "Removing an unknown device did not throw";
+    }
+    catch (const std::system_error& error)
+    {
+        EXPECT_EQ(error.code(),
+                  std::make_error_code(std::errc::no_such_device));
+    }
+}
+
+TEST(MCTPReactorSecurity,
+     currentQuarantineRemovalForUntrackedDeviceCleansAssociation)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> removeHandler;
+
+    std::vector<Association> requiredAssociation{
+        {"configured_by", "configures", "/test/security-quarantine"}};
+    EXPECT_CALL(server,
+                associate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9",
+                          requiredAssociation))
+        .Times(1);
+    EXPECT_CALL(
+        server,
+        disassociate("/au/com/codeconstruct/mctp1/networks/1/endpoints/9"))
+        .Times(1);
+
+    auto ep = std::make_shared<SecurityMockMCTPEndpoint>();
+    auto dev = std::make_shared<SecurityMockMCTPDevice>();
+    EXPECT_CALL(*dev, id()).WillRepeatedly(testing::Return(77U));
+    EXPECT_CALL(*dev, describe())
+        .WillRepeatedly(testing::Return("security-quarantine-device"));
+    EXPECT_CALL(*ep, device()).WillRepeatedly(testing::Return(dev));
+    EXPECT_CALL(*ep, describe()).WillRepeatedly(testing::Return("security-ep"));
+    EXPECT_CALL(*ep, eid()).WillRepeatedly(testing::Return(9));
+    EXPECT_CALL(*ep, network()).WillRepeatedly(testing::Return(1));
+    EXPECT_CALL(*ep, subscribe(testing::_, testing::_, testing::_))
+        .WillOnce(testing::SaveArg<2>(&removeHandler));
+    EXPECT_CALL(*dev, setup(testing::_))
+        .WillOnce(testing::InvokeArgument<0>(std::error_code(), ep));
+
+    reactor->manageMCTPDevice("/test/security-quarantine", dev);
+    ASSERT_TRUE(static_cast<bool>(removeHandler));
+
+    reactor->states[dev->id()] = MCTPDeviceState::Quarantine;
+    reactor->devices.devices.clear();
+    EXPECT_FALSE(reactor->devices.contains(dev));
+
+    EXPECT_NO_THROW(removeHandler(ep));
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(dev.get()));
+    EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(ep.get()));
+}
+
 // ---------------------------------------------------------------------------
 // MCTPReactor::tick — with deferred devices
 //
@@ -3806,17 +3908,14 @@ TEST_F(FakeConnReactorWithTestSdBusFixture,
 // suite.
 // ===========================================================================
 
-// Malformed message (nullptr) → msg.read throws → function body entered →
-// handleGeneralErrorSignal counted as covered by gcovr.
-TEST(ReactorMainHandlers, handleGeneralErrorSignalNullMsgThrows)
+// Malformed message (nullptr) is ignored after the guarded read.
+TEST(ReactorMainHandlers, handleGeneralErrorSignalNullMsgIsIgnored)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(
-        static_cast<void>(handleGeneralErrorSignal(conn, reactor, msg)),
-        std::exception);
+    EXPECT_NO_THROW(handleGeneralErrorSignal(conn, reactor, msg));
 }
 
 // Proper "yss" message + non-null FakeConnReactorFixture connection.
