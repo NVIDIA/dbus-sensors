@@ -30,6 +30,20 @@ namespace
 {
 constexpr uint8_t mctpInterfaceClass = 0x14;
 
+// USB descriptors that uniquely identify an NVIDIA APX device that has dropped
+// into RCM (recovery) mode. In this state the device re-enumerates with the APX
+// vendor/product ID and exposes a dedicated recovery interface plus bulk OUT
+// endpoint. Issuing a clear-halt while a recovery is in progress could disrupt
+// it, so we detect this signature and skip the clear-halt. Based on
+// nvidia-code-mgmt's usb_device_manager (VID:PID 0x0955:0x7410,
+// INTERFACE_RECOVERY / ENDPOINT_RECOVERY); we additionally require the endpoint
+// to be bulk OUT so an unrelated IN or non-bulk endpoint 8 cannot false-match.
+constexpr uint16_t apxVendorId = 0x0955;
+constexpr uint16_t apxProductId = 0x7410;
+constexpr uint8_t recoveryInterfaceNumber = 3;
+// bEndpointAddress 0x08 is bulk OUT (direction bit clear), endpoint number 8.
+constexpr uint8_t recoveryEndpointAddress = 0x08;
+
 struct USBDeviceLocation
 {
     uint8_t bus = 0;
@@ -299,6 +313,72 @@ std::optional<BulkOutEndpoint> findBulkOutEndpoint(libusb_device* device)
     return endpoint;
 }
 
+// Matches the NVIDIA APX device by its RCM-mode vendor/product ID. Mirrors
+// hasCorrectVidPid() in nvidia-code-mgmt's usb_device_manager.
+bool isNvidiaApxDevice(libusb_device* device)
+{
+    libusb_device_descriptor desc{};
+    if (libusb_get_device_descriptor(device, &desc) != LIBUSB_SUCCESS)
+    {
+        return false;
+    }
+    return desc.idVendor == apxVendorId && desc.idProduct == apxProductId;
+}
+
+// Returns true if the device exposes the RCM recovery interface with its bulk
+// recovery endpoint. Mirrors hasRecoveryEndpoints() in nvidia-code-mgmt's
+// usb_device_manager.
+bool hasRecoveryInterface(libusb_device* device)
+{
+    libusb_config_descriptor* config = nullptr;
+    int rc = libusb_get_active_config_descriptor(device, &config);
+    if (rc != LIBUSB_SUCCESS)
+    {
+        rc = libusb_get_config_descriptor(device, 0, &config);
+        if (rc != LIBUSB_SUCCESS)
+        {
+            return false;
+        }
+    }
+
+    bool recoveryMode = false;
+    for (uint8_t i = 0; i < config->bNumInterfaces && !recoveryMode; ++i)
+    {
+        const auto& iface = config->interface[i];
+        for (int alt = 0; alt < iface.num_altsetting && !recoveryMode; ++alt)
+        {
+            const auto& altsetting = iface.altsetting[alt];
+            if (altsetting.bInterfaceNumber != recoveryInterfaceNumber)
+            {
+                continue;
+            }
+            for (uint8_t e = 0; e < altsetting.bNumEndpoints; ++e)
+            {
+                const auto& ep = altsetting.endpoint[e];
+                const uint8_t transferType =
+                    ep.bmAttributes & LIBUSB_TRANSFER_TYPE_MASK;
+                if (transferType == LIBUSB_TRANSFER_TYPE_BULK &&
+                    ep.bEndpointAddress == recoveryEndpointAddress)
+                {
+                    recoveryMode = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    libusb_free_config_descriptor(config);
+    return recoveryMode;
+}
+
+// A device is in recovery only when it is the NVIDIA APX device AND exposes the
+// recovery interface/endpoint. The recovery interface is checked only for the
+// APX device, exactly like isDeviceInRcmMode() in nvidia-code-mgmt.
+bool isDeviceInRecoveryMode(libusb_device* device)
+{
+    return isNvidiaApxDevice(device) && hasRecoveryInterface(device);
+}
+
 std::string buildLocationString(const USBDeviceLocation& location)
 {
     std::ostringstream out;
@@ -388,6 +468,16 @@ bool clearHaltOnHandle(libusb_device_handle* handle,
     {
         status = "libusb_get_device returned null";
         return false;
+    }
+
+    if (isDeviceInRecoveryMode(device))
+    {
+        status = "Skipping clear-halt: device is in RCM recovery mode on " +
+                 buildLocationString(location);
+        info(
+            "Device on {USB_LOCATION} is in RCM recovery mode; skipping clear-halt",
+            "USB_LOCATION", buildLocationString(location));
+        return true;
     }
 
     auto endpoint = findBulkOutEndpoint(device);

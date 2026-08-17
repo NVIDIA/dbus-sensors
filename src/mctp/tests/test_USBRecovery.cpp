@@ -378,6 +378,12 @@ int gActiveConfigRc = LIBUSB_SUCCESS;
 int gFallbackConfigRc = LIBUSB_SUCCESS;
 int gFreeConfigCount = 0;
 
+// Device-descriptor mock state for the RCM recovery-mode check. Defaults to a
+// non-recovery VID:PID so existing clearHaltOnHandle tests are unaffected.
+int gGetDeviceDescriptorRc = LIBUSB_SUCCESS;
+uint16_t gDeviceVendorId = 0x0000;
+uint16_t gDeviceProductId = 0x0000;
+
 // Handle-operation mock state for clearHaltOnHandle.
 int gWrapSysDeviceRc = LIBUSB_SUCCESS;
 bool gGetDeviceReturnsNull = false;
@@ -403,6 +409,9 @@ void resetFakeConfigState()
 
 void resetFakeHandleState()
 {
+    gGetDeviceDescriptorRc = LIBUSB_SUCCESS;
+    gDeviceVendorId = 0x0000;
+    gDeviceProductId = 0x0000;
     gWrapSysDeviceRc = LIBUSB_SUCCESS;
     gGetDeviceReturnsNull = false;
     gKernelDriverActiveRc = 0;
@@ -598,6 +607,67 @@ TEST_F(ClearHaltOnHandleTest, NoBulkOutEndpointFails)
               std::string::npos);
 }
 
+TEST_F(ClearHaltOnHandleTest, RecoveryModeDeviceSkipsClearHalt)
+{
+    // NVIDIA RCM recovery signature: recovery VID:PID plus interface 3 with the
+    // recovery bulk endpoint 0x08.
+    gDeviceVendorId = 0x0955;
+    gDeviceProductId = 0x7410;
+    bulkOut.bEndpointAddress = 0x08;
+    altsetting.bInterfaceNumber = 3;
+
+    USBDeviceLocation location{1, std::vector<uint8_t>{1}, uint8_t{13}};
+    std::string status;
+    EXPECT_TRUE(clearHaltOnHandle(handle, location, status));
+    EXPECT_NE(status.find("RCM recovery mode"), std::string::npos);
+    // The clear-halt and the claim/detach that precede it must be skipped.
+    EXPECT_EQ(gClearHaltCount, 0);
+    EXPECT_EQ(gClaimCount, 0);
+    EXPECT_EQ(gDetachCount, 0);
+}
+
+TEST_F(ClearHaltOnHandleTest, RecoveryVidPidWithoutRecoveryEndpointStillClears)
+{
+    // Recovery VID:PID but the MCTP interface/endpoint layout (not the recovery
+    // interface 3 / endpoint 0x08): this is not recovery mode, so clear-halt
+    // proceeds normally.
+    gDeviceVendorId = 0x0955;
+    gDeviceProductId = 0x7410;
+
+    USBDeviceLocation location{1, std::vector<uint8_t>{1}, uint8_t{13}};
+    std::string status;
+    EXPECT_TRUE(clearHaltOnHandle(handle, location, status));
+    EXPECT_NE(status.find("Cleared halt on endpoint"), std::string::npos);
+    EXPECT_EQ(gClearHaltCount, 1);
+}
+
+TEST_F(ClearHaltOnHandleTest, RecoveryVidPidInterface3InEndpoint8StillClears)
+{
+    // APX VID:PID with recovery interface 3, but the endpoint numbered 8 is IN
+    // (0x88), not the bulk OUT recovery endpoint. A mask-only match would treat
+    // 0x88 as the recovery endpoint (0x88 & 0x7F == 0x08); ensure we no longer
+    // over-match on direction and the normal clear-halt still runs against the
+    // real bulk OUT endpoint.
+    gDeviceVendorId = 0x0955;
+    gDeviceProductId = 0x7410;
+
+    std::array<libusb_endpoint_descriptor, 2> endpoints{};
+    endpoints[0].bEndpointAddress = 0x88; // IN endpoint 8 (would false-match)
+    endpoints[0].bmAttributes = LIBUSB_TRANSFER_TYPE_BULK;
+    endpoints[1].bEndpointAddress = 0x04; // real bulk OUT
+    endpoints[1].bmAttributes = LIBUSB_TRANSFER_TYPE_BULK;
+
+    altsetting.bInterfaceNumber = 3;
+    altsetting.bNumEndpoints = 2;
+    altsetting.endpoint = endpoints.data();
+
+    USBDeviceLocation location{1, std::vector<uint8_t>{1}, uint8_t{13}};
+    std::string status;
+    EXPECT_TRUE(clearHaltOnHandle(handle, location, status));
+    EXPECT_NE(status.find("Cleared halt on endpoint"), std::string::npos);
+    EXPECT_EQ(gClearHaltCount, 1);
+}
+
 TEST_F(ClearHaltOnHandleTest, SuccessWithKernelDriverDetachAndReattach)
 {
     gKernelDriverActiveRc = 1; // active -> detach then re-attach
@@ -753,6 +823,18 @@ extern "C" int __wrap_libusb_get_active_config_descriptor(
         *config = gFakeConfig;
     }
     return gActiveConfigRc;
+}
+
+extern "C" int __wrap_libusb_get_device_descriptor(
+    libusb_device* /*dev*/, libusb_device_descriptor* desc)
+{
+    if (gGetDeviceDescriptorRc == LIBUSB_SUCCESS && desc != nullptr)
+    {
+        *desc = {};
+        desc->idVendor = gDeviceVendorId;
+        desc->idProduct = gDeviceProductId;
+    }
+    return gGetDeviceDescriptorRc;
 }
 
 extern "C" libusb_device* __wrap_libusb_get_device(

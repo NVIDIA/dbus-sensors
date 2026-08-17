@@ -90,6 +90,7 @@ test(
 # Intercept libusb descriptor fetches so findBulkOutEndpoint can be driven
 # through all branches with crafted descriptors (no real USB device needed).
 usb_recovery_wrap_link_args = [
+    '-Wl,--wrap,libusb_get_device_descriptor',
     '-Wl,--wrap,libusb_get_active_config_descriptor',
     '-Wl,--wrap,libusb_get_config_descriptor',
     '-Wl,--wrap,libusb_free_config_descriptor',
