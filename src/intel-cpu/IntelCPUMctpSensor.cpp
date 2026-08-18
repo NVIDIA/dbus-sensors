@@ -101,6 +101,30 @@ void IntelCPUMctpSensor::restart()
     // Cancelling aborts any pending wait (its handler early-returns on
     // operation_aborted), so we don't end up with two concurrent poll chains.
     waitTimer.cancel();
+
+    // Requester was recreated across a host power cycle; drop per-boot caches
+    // so the first samples are not computed against pre-reboot counters.
+    tempTargetsValid = false;
+    tjmax = 0;
+    pollCycleCount = 0;
+
+    raplUnitsValid = false;
+    powerUnit = 0;
+    energyUnit = 0;
+    timeUnit = 0;
+
+    pkgEnergyValid = false;
+    prevPkgEnergyRaw = 0;
+    prevPkgTimestamp = 0;
+
+    dramEnergyValid = false;
+    prevDramEnergyRaw = 0;
+    prevDramEnergyTime = {};
+
+    powerLimitsRead = false;
+    loggedInterfaceDown = false;
+    pollTime = basePollMs;
+
     setupRead();
 }
 
