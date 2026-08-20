@@ -20,6 +20,7 @@
 #include "Thresholds.hpp"
 #include "Utils.hpp"
 #include "sensor.hpp"
+#include "vHMCShmReader.hpp"
 
 #include <fcntl.h>
 #include <linux/i2c.h>
@@ -65,6 +66,64 @@ constexpr const char* objectType = "Satellite";
 
 boost::container::flat_map<std::string, std::unique_ptr<SatelliteSensor>>
     sensors;
+
+namespace
+{
+
+vhmc_shm::vHMCShmReader& vhmcShmReader()
+{
+    static vhmc_shm::vHMCShmReader reader;
+    return reader;
+}
+
+bool shmRecordToDouble(const vhmc_shm::SensorRecord& rec, double& out)
+{
+    if (rec.stale != 0)
+    {
+        return false;
+    }
+    if (rec.type == vhmc_shm::SensorDataType::Double)
+    {
+        out = rec.value.dVal;
+        return true;
+    }
+    if (rec.type == vhmc_shm::SensorDataType::Uint32)
+    {
+        out = static_cast<double>(rec.value.u32Val);
+        return true;
+    }
+    if (rec.type == vhmc_shm::SensorDataType::Uint64)
+    {
+        out = static_cast<double>(rec.value.u64Val);
+        return true;
+    }
+    return false;
+}
+
+// True only while waiting for the vHMC writer to publish a ready header for
+// the first time. Once the writer has been seen, a not-ready result is a real
+// failure and must not be silenced.
+bool awaitingFirstShmWriter(int err)
+{
+    return err == static_cast<int>(vhmc_shm::SensorError::WriterNotReady) &&
+           !vhmcShmReader().hasSeenWriter();
+}
+
+const char* invalidReadReason(int ret, const std::string& valueType)
+{
+    if (ret >= 0)
+    {
+        return "out of range";
+    }
+    if (valueType == "SHM")
+    {
+        return vhmc_shm::sensorErrorToString(
+            static_cast<vhmc_shm::SensorError>(ret));
+    }
+    return "read failed";
+}
+
+} // namespace
 
 SatelliteSensor::SatelliteSensor(
     std::shared_ptr<sdbusplus::asio::connection>& conn,
@@ -366,6 +425,27 @@ int SatelliteSensor::readPLDMEepromData(size_t off, uint8_t length,
     }
     return ret;
 }
+
+int SatelliteSensor::readShmData(double* data) const
+{
+    if (data == nullptr)
+    {
+        return -1;
+    }
+
+    vhmc_shm::SensorRecord rec{};
+    vhmc_shm::SensorError err = vhmcShmReader().readSensor(offset, rec);
+    if (err != vhmc_shm::SensorError::Success)
+    {
+        return static_cast<int>(err);
+    }
+    if (!shmRecordToDouble(rec, *data))
+    {
+        return static_cast<int>(vhmc_shm::SensorError::SensorNoData);
+    }
+    return 0;
+}
+
 void SatelliteSensor::restartRead()
 {
     size_t pollTime = getPollRate(); // in seconds
@@ -397,28 +477,42 @@ void SatelliteSensor::read()
     }
 
     double temp = 0;
-    int len = getLength(offset);
-    if (len == 0)
-    {
-        lg2::error("no offset is specified");
-        return;
-    }
-
     int ret = 0;
-    // Sensor reading value types are sensor-specific. So, read
-    // and interpret sensor data based on it's value type.
-    if (valueType == "Raw")
+
+    if (valueType == "SHM")
     {
-        ret = readRawEepromData(offset, len, staleOffset, staleBit, &temp);
-    }
-    else if (valueType == "PLDM")
-    {
-        ret = readPLDMEepromData(offset, len, staleOffset, staleBit, &temp);
+        ret = readShmData(&temp);
+        if (awaitingFirstShmWriter(ret))
+        {
+            markAvailable(false);
+            updateValueOnly(std::numeric_limits<double>::quiet_NaN());
+            invalidReadCount = 0;
+            restartRead();
+            return;
+        }
     }
     else
     {
-        lg2::error("Invalid ValueType for sensor: {NAME}", "NAME", name);
-        return;
+        int len = getLength(offset);
+        if (len == 0)
+        {
+            lg2::error("no offset is specified");
+            return;
+        }
+
+        if (valueType == "Raw")
+        {
+            ret = readRawEepromData(offset, len, staleOffset, staleBit, &temp);
+        }
+        else if (valueType == "PLDM")
+        {
+            ret = readPLDMEepromData(offset, len, staleOffset, staleBit, &temp);
+        }
+        else
+        {
+            lg2::error("Invalid ValueType for sensor: {NAME}", "NAME", name);
+            return;
+        }
     }
 
     // Check if the sensor reading is within the valid range. In the case where
@@ -450,9 +544,9 @@ void SatelliteSensor::read()
         if (invalidReadCount == 1 || invalidReadCount % invalidLogInterval == 0)
         {
             lg2::error(
-                "Invalid sensor read for {NAME} at offset: {OFFSET} with value: {VALUE} (count: {COUNT})",
+                "Invalid sensor read for {NAME} at offset: {OFFSET} with value: {VALUE} (count: {COUNT}, reason: {REASON})",
                 "NAME", name, "OFFSET", offset, "VALUE", temp, "COUNT",
-                invalidReadCount);
+                invalidReadCount, "REASON", invalidReadReason(ret, valueType));
         }
         incrementError();
     }
@@ -498,8 +592,8 @@ void createSensors(
                                    "NAME", name);
                     }
 
-                    uint8_t busId;
-                    uint8_t addr;
+                    uint8_t busId = 0;
+                    uint8_t addr = 0;
                     uint16_t off;
                     std::string sensorType;
                     std::string valueType;
@@ -508,38 +602,42 @@ void createSensors(
                     PowerState pwrState;
                     double minVal;
                     double maxVal;
-                    uint16_t staleOffset;
-                    size_t staleBit;
+                    uint16_t staleOffset = 0;
+                    size_t staleBit = 0;
                     try
                     {
-                        busId = loadVariant<uint8_t>(entry.second, "Bus");
-                        addr = loadVariant<uint8_t>(entry.second, "Address");
+                        valueType =
+                            loadVariant<std::string>(entry.second, "ValueType");
                         off =
                             loadVariant<uint16_t>(entry.second, "OffsetValue");
                         sensorType = loadVariant<std::string>(entry.second,
                                                               "SensorType");
-                        valueType =
-                            loadVariant<std::string>(entry.second, "ValueType");
                         rate = loadVariant<uint8_t>(entry.second, "PollRate");
                         powerSate = loadVariant<std::string>(entry.second,
                                                              "PowerState");
                         setReadState(powerSate, pwrState);
                         minVal = loadVariant<double>(entry.second, "MinValue");
                         maxVal = loadVariant<double>(entry.second, "MaxValue");
-                        try
+                        if (valueType != "SHM")
                         {
-                            staleOffset = loadVariant<uint16_t>(entry.second,
-                                                                "StaleOffset");
-                            staleBit =
-                                loadVariant<size_t>(entry.second, "StaleBit");
-                        }
-                        catch (const std::exception& e)
-                        {
-                            lg2::info(
-                                "No stale bit or offset provided for {NAME}. Ignoring stalness for this sensor.",
-                                "NAME", name);
-                            staleOffset = 0;
-                            staleBit = 0;
+                            busId = loadVariant<uint8_t>(entry.second, "Bus");
+                            addr =
+                                loadVariant<uint8_t>(entry.second, "Address");
+                            try
+                            {
+                                staleOffset = loadVariant<uint16_t>(
+                                    entry.second, "StaleOffset");
+                                staleBit = loadVariant<size_t>(entry.second,
+                                                               "StaleBit");
+                            }
+                            catch (const std::exception& e)
+                            {
+                                lg2::info(
+                                    "No stale bit or offset provided for {NAME}. Ignoring stalness for this sensor.",
+                                    "NAME", name);
+                                staleOffset = 0;
+                                staleBit = 0;
+                            }
                         }
                         if constexpr (debug)
                         {

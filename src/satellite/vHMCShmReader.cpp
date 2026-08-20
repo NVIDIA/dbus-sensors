@@ -323,6 +323,11 @@ SensorError vHMCShmReader::readSensor(SensorId id, SensorRecord& outRecord)
     return SensorError::Success;
 }
 
+bool vHMCShmReader::hasSeenWriter() const
+{
+    return seenWriter;
+}
+
 uint32_t vHMCShmReader::currentEpoch() const
 {
     if (header == nullptr)
