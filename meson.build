@@ -58,7 +58,8 @@ if nvidia_tal.found()
     default_deps += [nvidia_tal]
 endif
 
-if get_option('satellite').enabled()
+satellite_no_hmc_header = get_option('satellite-no-hmc-header')
+if get_option('satellite').enabled() and not satellite_no_hmc_header.enabled()
     add_project_arguments('-DAUTO_GEN_SENSOR_HEADER', language: 'cpp')
 endif
 

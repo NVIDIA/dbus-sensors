@@ -187,6 +187,12 @@ option(
     description: 'Enable Satellite sensor.',
 )
 option(
+    'satellite-no-hmc-header',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Build satellitesensor without HmcSensor.hpp (no HMC EEPROM length map).',
+)
+option(
     'discrete-leak-detect',
     type: 'feature',
     value: 'disabled',
