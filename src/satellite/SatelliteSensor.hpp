@@ -84,7 +84,7 @@ struct SatelliteSensor : public Sensor
                           size_t staleBit, double* data) const;
     int readPLDMEepromData(size_t off, uint8_t length, size_t staleOffset,
                            size_t staleBit, double* data) const;
-    static uint8_t getLength(uint16_t offset)
+    static uint8_t getLength([[maybe_unused]] uint16_t offset)
     {
 #ifdef AUTO_GEN_SENSOR_HEADER
         auto it = sensorMap.find(offset);
@@ -95,8 +95,7 @@ struct SatelliteSensor : public Sensor
         }
         return sensorMap[offset];
 #else
-        // return offset to avoid the unused variable error.
-        return offset;
+        return 0;
 #endif
     }
     sdbusplus::asio::object_server& objectServer;
