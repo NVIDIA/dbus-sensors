@@ -260,14 +260,7 @@ if get_option('psuredundancy').allowed()
 endif
 
 if get_option('satellite').enabled()
-    executable(
-        'satellitesensor',
-        'SatelliteSensor.cpp',
-        dependencies: [default_deps, i2c, thresholds_dep, utils_dep],
-        implicit_include_directories: false,
-        include_directories: include_directories(['../include', '../src']),
-        install: true,
-    )
+    subdir('satellite')
 endif
 
 if get_option('leak-detect').allowed()
