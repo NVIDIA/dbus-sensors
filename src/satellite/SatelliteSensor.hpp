@@ -84,6 +84,7 @@ struct SatelliteSensor : public Sensor
                           size_t staleBit, double* data) const;
     int readPLDMEepromData(size_t off, uint8_t length, size_t staleOffset,
                            size_t staleBit, double* data) const;
+    int readShmData(double* data) const;
     static uint8_t getLength([[maybe_unused]] uint16_t offset)
     {
 #ifdef AUTO_GEN_SENSOR_HEADER

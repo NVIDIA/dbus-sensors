@@ -74,6 +74,7 @@ class vHMCShmReader
     vHMCShmReader& operator=(vHMCShmReader&&) = delete;
 
     SensorError readSensor(SensorId id, SensorRecord& outRecord);
+    bool hasSeenWriter() const;
     uint32_t currentEpoch() const;
 };
 

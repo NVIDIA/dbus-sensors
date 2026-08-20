@@ -1,5 +1,6 @@
 src_inc = include_directories('..')
 include_dir = include_directories('../../include')
+sat_inc = include_directories('.')
 
 executable(
     'satellitesensor',
@@ -7,7 +8,7 @@ executable(
     'vHMCShmReader.cpp',
     dependencies: [default_deps, i2c, thresholds_dep, utils_dep],
     implicit_include_directories: false,
-    include_directories: [src_inc, include_dir],
+    include_directories: [sat_inc, src_inc, include_dir],
     install: true,
 )
 
