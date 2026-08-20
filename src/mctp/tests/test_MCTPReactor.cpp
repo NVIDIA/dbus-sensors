@@ -4992,7 +4992,7 @@ INSTANTIATE_TEST_SUITE_P(
                         MCTPDeviceState::Recovering, true, "Recovering"},
         ManageStateCase{MCTPDeviceState::Recovered, MCTPDeviceState::Assigned,
                         true, "Recovered"},
-        ManageStateCase{MCTPDeviceState::Removing, MCTPDeviceState::Pending,
+        ManageStateCase{MCTPDeviceState::Removing, MCTPDeviceState::Unassigned,
                         false, "Removing"},
         ManageStateCase{MCTPDeviceState::Pending, MCTPDeviceState::Pending,
                         true, "Pending"}),

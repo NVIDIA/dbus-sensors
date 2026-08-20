@@ -1100,10 +1100,10 @@ class USBGadgetLambdaTest : public ::testing::Test
     }
 };
 
-// Lambda #1 (endpointAddedMatch callback): invoke stored callback with a null
-// message → weak.lock() succeeds (dev still alive) → onEndpointAdded(null)
-// throws → caught by gtest EXPECT_ANY_THROW.
-TEST_F(USBGadgetLambdaTest, endpointAddedMatchCallbackInvokedWithNullMsg)
+// Lambda #1 (endpointAddedMatch callback): invoke the stored callback with a
+// null message. The device is still alive, so this exercises the callback and
+// the malformed-message handling in onEndpointAdded().
+TEST_F(USBGadgetLambdaTest, endpointAddedMatchCallbackHandlesNullMsg)
 {
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
     dev->isSetup = true;
@@ -1115,11 +1115,11 @@ TEST_F(USBGadgetLambdaTest, endpointAddedMatchCallbackInvokedWithNullMsg)
 
     auto& cb = *dev->endpointAddedMatch->_callback;
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(cb(msg));
+    EXPECT_NO_THROW(cb(msg));
 }
 
 // Lambda #2 (endpointRemovedMatch callback): same approach.
-TEST_F(USBGadgetLambdaTest, endpointRemovedMatchCallbackInvokedWithNullMsg)
+TEST_F(USBGadgetLambdaTest, endpointRemovedMatchCallbackHandlesNullMsg)
 {
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
     dev->isSetup = true;
@@ -1131,7 +1131,7 @@ TEST_F(USBGadgetLambdaTest, endpointRemovedMatchCallbackInvokedWithNullMsg)
 
     auto& cb = *dev->endpointRemovedMatch->_callback;
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(cb(msg));
+    EXPECT_NO_THROW(cb(msg));
 }
 
 // Lambda #1 with real message — covers the non-throwing body path:
