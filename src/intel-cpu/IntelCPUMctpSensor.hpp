@@ -178,6 +178,9 @@ class IntelCPUMctpSensor :
     void pollDimmTemps(size_t keyIdx);
     void handleDimmTempResponse(size_t keyIdx, const std::error_code& ec,
                                 std::span<const uint8_t> buffer);
+    // NaN out and count an error against every DIMM sensor behind the
+    // (domain, chanRank) key at activeDimmKeys[keyIdx].
+    void markDimmsFailed(size_t keyIdx);
 
     std::array<uint8_t, sizeof(peci_mctp::RdPkgConfigRequest)>
         tempTargetsTxBuf{};

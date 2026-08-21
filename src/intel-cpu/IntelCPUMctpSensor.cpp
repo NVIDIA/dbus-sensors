@@ -202,6 +202,7 @@ void IntelCPUMctpSensor::handleTempTargetsResponse(
         lg2::error("'{NAME}' temp targets query failed: {ERR}", "NAME",
                    baseName, "ERR", ec.message());
         cpuTempSensor->updateReading(std::numeric_limits<double>::quiet_NaN());
+        cpuTempSensor->incrementError();
         restartRead();
         return;
     }
@@ -214,6 +215,7 @@ void IntelCPUMctpSensor::handleTempTargetsResponse(
         lg2::error("'{NAME}' temp targets RdPkgConfig failed, cc=0x{CC}",
                    "NAME", baseName, "CC", lg2::hex, cc);
         cpuTempSensor->updateReading(std::numeric_limits<double>::quiet_NaN());
+        cpuTempSensor->incrementError();
         restartRead();
         return;
     }
@@ -282,6 +284,7 @@ void IntelCPUMctpSensor::handleGetTempResponse(const std::error_code& ec,
                        "ERR", ec.message());
         }
         cpuTempSensor->updateReading(std::numeric_limits<double>::quiet_NaN());
+        cpuTempSensor->incrementError();
         restartRead();
         return;
     }
@@ -296,6 +299,7 @@ void IntelCPUMctpSensor::handleGetTempResponse(const std::error_code& ec,
         lg2::error("'{NAME}' failed to deserialize GetTemp response", "NAME",
                    baseName);
         cpuTempSensor->updateReading(std::numeric_limits<double>::quiet_NaN());
+        cpuTempSensor->incrementError();
         restartRead();
         return;
     }
@@ -409,7 +413,13 @@ void IntelCPUMctpSensor::handlePackageEnergyResponse(
     if (ec || !peci_mctp::deserializeRdPkgConfig(buffer, cc, data) ||
         !peci_mctp::ccHasValidData(cc))
     {
+        pkgEnergyValid = false;
         lg2::error("'{NAME}' package energy read failed", "NAME", baseName);
+        // Drop the stale wattage immediately, and count the failure so the
+        // sensor is marked non-functional after errorThreshold cycles rather
+        // than silently publishing NaN forever.
+        pkgPowerSensor->updateReading(std::numeric_limits<double>::quiet_NaN());
+        pkgPowerSensor->incrementError();
         pollDimmPhase();
         return;
     }
@@ -768,11 +778,35 @@ void IntelCPUMctpSensor::pollDimmTemps(size_t keyIdx)
         });
 }
 
+void IntelCPUMctpSensor::markDimmsFailed(size_t keyIdx)
+{
+    if (keyIdx >= activeDimmKeys.size())
+    {
+        return;
+    }
+
+    auto [domainId, chanRank] = activeDimmKeys[keyIdx];
+    for (auto& dimm : dimms)
+    {
+        if (dimm.domainId == domainId && dimm.chanRank == chanRank &&
+            dimm.sensor)
+        {
+            // Drop the stale temperature and count the failure so the sensor
+            // goes non-functional after errorThreshold cycles rather than
+            // silently publishing NaN forever.
+            dimm.sensor->updateReading(
+                std::numeric_limits<double>::quiet_NaN());
+            dimm.sensor->incrementError();
+        }
+    }
+}
+
 void IntelCPUMctpSensor::handleDimmTempResponse(
     size_t keyIdx, const std::error_code& ec, std::span<const uint8_t> buffer)
 {
     if (ec)
     {
+        markDimmsFailed(keyIdx);
         pollDimmTemps(keyIdx + 1);
         return;
     }
@@ -782,6 +816,7 @@ void IntelCPUMctpSensor::handleDimmTempResponse(
     auto result = peci_mctp::deserializeRdPkgConfig(buffer, cc, data);
     if (!result || !peci_mctp::ccHasValidData(cc))
     {
+        markDimmsFailed(keyIdx);
         pollDimmTemps(keyIdx + 1);
         return;
     }
