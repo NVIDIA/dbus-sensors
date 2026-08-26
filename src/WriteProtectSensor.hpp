@@ -114,9 +114,9 @@ class WriteProtect : public std::enable_shared_from_this<WriteProtect>
     // Create write protect interface
     void createWriteProtectIf(const boost::system::error_code& e);
 
-    void addLine(const std::string& lineLabel, bool value);
+    void addLine(const Config& config, bool value);
 
-    void setLine(const std::string& lineLabel, bool value);
+    void setLine(const Config& config, bool value);
 
     void releaseLine(const std::string& lineLabel);
 

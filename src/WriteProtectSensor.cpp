@@ -21,6 +21,7 @@
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/vtable.hpp>
 
+#include <bitset>
 #include <chrono>
 #include <exception>
 #include <filesystem>
@@ -75,25 +76,31 @@ bool WriteProtect::objEmpty()
     return objIfaces.empty();
 }
 
-void WriteProtect::addLine(const std::string& lineLabel, bool value)
+void WriteProtect::addLine(const Config& config, bool value)
 {
-    if (gpioLines.find(lineLabel) == gpioLines.end())
+    if (gpioLines.find(config.gpioLine) == gpioLines.end())
     {
-        ::gpiod::line line = ::gpiod::find_line(lineLabel);
-        line.request({service, ::gpiod::line_request::DIRECTION_OUTPUT,
-                      static_cast<unsigned long long>(value)});
-        gpioLines[lineLabel] = line;
+        ::gpiod::line line = ::gpiod::find_line(config.gpioLine);
+        const auto flags = config.activeLow
+                               ? ::gpiod::line_request::FLAG_ACTIVE_LOW
+                               : ::std::bitset<32>{};
+        line.request({service, ::gpiod::line_request::DIRECTION_OUTPUT, flags},
+                     static_cast<int>(value));
+        gpioLines[config.gpioLine] = line;
     }
 }
 
-void WriteProtect::setLine(const std::string& lineLabel, bool value)
+void WriteProtect::setLine(const Config& config, bool value)
 {
-    if (gpioLines.find(lineLabel) == gpioLines.end())
+    if (gpioLines.find(config.gpioLine) == gpioLines.end())
     {
-        addLine(lineLabel, value);
+        addLine(config, value);
     }
-    gpioLines[lineLabel].set_config(::gpiod::line_request::DIRECTION_OUTPUT,
-                                    static_cast<unsigned long long>(value));
+    const auto flags = config.activeLow ? ::gpiod::line_request::FLAG_ACTIVE_LOW
+                                        : ::std::bitset<32>{};
+    gpioLines[config.gpioLine].set_config(
+        ::gpiod::line_request::DIRECTION_OUTPUT, flags,
+        static_cast<int>(value));
 }
 
 void WriteProtect::releaseLine(const std::string& lineLabel)
@@ -113,7 +120,7 @@ bool WriteProtect::setWriteProtect(const bool& value)
         auto& config = obj.second.config;
         try
         {
-            setLine(config.gpioLine, config.activeLow ? !value : value);
+            setLine(config, value);
         }
         catch (std::exception& e)
         {

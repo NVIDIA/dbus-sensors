@@ -99,6 +99,9 @@ auto DomainManager::initializeGpioSource(std::shared_ptr<Source> source,
 {
     if (source->protector)
     {
+        warning("Source {ID} already has a protector, skipping GPIO "
+                "initialization",
+                "ID", name);
         co_return;
     }
 
@@ -344,6 +347,9 @@ auto DomainManager::addGroup(sdbusplus::object_path objectPath,
     auto groupName = config->name;
     groups.emplace(groupName, group);
     resolveGroupLinks(*group, groupName);
+    // Flush the dirty mark left by graph.connect() when a source was
+    // already true at link time, so the facade observers see it.
+    graph.propagate();
     info("Successfully added group {NAME}", "NAME", groupName);
 }
 
@@ -368,34 +374,40 @@ auto DomainManager::addGpioGroup(sdbusplus::object_path objectPath,
         error("Input config missing LineName for {PATH}", "PATH", objectPath);
         co_return;
     }
+    // A completed addGpioGroup() always registers its name in groups, so
+    // this check alone identifies a genuinely duplicated input config.
     if (groups.contains(config->name))
     {
-        warning("Input {NAME} already exists, ignoring duplicate at {PATH}",
+        warning("Input {NAME} already configured, ignoring duplicate at {PATH}",
                 "NAME", config->name, "PATH", objectPath);
         co_return;
     }
 
+    // created == false means a group processed earlier reserved a
+    // placeholder source node under this name while resolving its Sources
+    // list.  Adopt that node: it is what every referencing group is
+    // already wired to.
     auto [source, created] = getOrCreateSource(config->name);
     if (!created)
     {
-        warning("Input {NAME} already exists, ignoring duplicate at {PATH}",
-                "NAME", config->name, "PATH", objectPath);
-        co_return;
+        info("Input {NAME}: adopting placeholder source node reserved by a "
+             "referencing group",
+             "NAME", config->name);
     }
-
-    GpioConfig gpio;
-    gpio.pollInterval = config->pollInterval;
-    gpio.lineName = config->lineName;
-    gpio.activeLow = config->activeLow;
-    spawnInit(config->name,
-              initializeGpioSource(source, config->name, std::move(gpio)));
+    if (source->protector)
+    {
+        // A D-Bus proxy resolved the software path before this input
+        // config arrived.  The protector cannot be replaced here: the
+        // monitor coroutine may be suspended inside it.
+        error("Input {NAME}: source already driven by a D-Bus proxy, GPIO "
+              "line {LINE} will not be opened",
+              "NAME", config->name, "LINE", config->lineName);
+    }
 
     info("Adding input {NAME}", "NAME", config->name);
     auto group = std::make_shared<Group>();
     group->name = config->name;
     group->outputNode = source->nodeId;
-
-    auto chassisPath = objectPath.parent_path();
 
     for (const auto& name : config->flashProtectedComponents)
     {
@@ -406,7 +418,19 @@ auto DomainManager::addGpioGroup(sdbusplus::object_path objectPath,
 
     auto groupName = config->name;
     groups.emplace(groupName, group);
+
+    // Resolve pending links before building the GPIO protector so that a
+    // cancelled initializeEntitySource() cannot install a proxy protector
+    // on the node the GPIO is about to drive.
     resolveGroupLinks(*group, groupName);
+
+    GpioConfig gpio;
+    gpio.pollInterval = config->pollInterval;
+    gpio.lineName = config->lineName;
+    gpio.activeLow = config->activeLow;
+    spawnInit(groupName,
+              initializeGpioSource(source, groupName, std::move(gpio)));
+
     info("Successfully added input {NAME}", "NAME", groupName);
 }
 
@@ -479,11 +503,25 @@ void DomainManager::resolveGroupLinks(const Group& group,
             scopeIt->second.request_stop();
         }
 
+        bool adopted = false;
         for (auto& link : pending->second)
         {
+            // A WriteProtectInput adopts the placeholder node as its own
+            // output: the edge to targetNode already exists and the node
+            // must stay live.
+            if (group.outputNode == static_cast<NodeId>(link.sourceNode))
+            {
+                adopted = true;
+                continue;
+            }
             graph.connect(group.outputNode, link.targetNode);
             graph.deactivate(link.sourceNode);
             info("Group {NAME}: resolved pending entity link", "NAME", name);
+        }
+        if (adopted)
+        {
+            info("Input {NAME}: kept adopted placeholder source node", "NAME",
+                 name);
         }
         pendingEntityLinks.erase(pending);
         graph.propagate();

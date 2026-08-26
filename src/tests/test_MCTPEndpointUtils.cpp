@@ -1,12 +1,74 @@
 #include "MCTPEndpointUtils.hpp"
 #include "Utils.hpp"
+#include "async_test_helpers.hpp"
 
+#include <phosphor-logging/device_error_log.hpp>
+#include <phosphor-logging/mctp_error_registry.hpp>
+#include <sdbusplus/asio/connection.hpp>
+
+#include <cstddef>
+#include <map>
+#include <optional>
+#include <utility>
+
+namespace phosphor::logging::mctp::test
+{
+// The lightweight phosphor-logging fallback used by host unit tests always
+// returns nullopt.  Keep the production source unchanged while giving this
+// one test binary a deterministic provider for the registry-present paths.
+inline std::optional<RedfishRegistry> registryResponse;
+inline std::size_t registryCalls = 0;
+} // namespace phosphor::logging::mctp::test
+
+namespace phosphor::logging::mctp
+{
+template <typename... Args>
+std::optional<RedfishRegistry> testErrorToRedfishRegistry(Args&&... /*unused*/)
+{
+    ++test::registryCalls;
+    return test::registryResponse;
+}
+} // namespace phosphor::logging::mctp
+
+namespace nv::lg2::test
+{
+inline std::size_t commitCalls = 0;
+inline uint8_t committedEid = 0;
+inline uint32_t committedErrorCode = 0;
+inline std::map<std::string, std::string> committedAdditionalData;
+} // namespace nv::lg2::test
+
+namespace nv::lg2
+{
+inline void testCommitDeviceError(
+    uint8_t eid, uint32_t errorCode, ErrorClass /*unused*/,
+    const std::map<std::string, std::string>& additionalData)
+{
+    ++test::commitCalls;
+    test::committedEid = eid;
+    test::committedErrorCode = errorCode;
+    test::committedAdditionalData = additionalData;
+}
+} // namespace nv::lg2
+
+#define errorToRedfishRegistry testErrorToRedfishRegistry
+#define CommitDeviceError testCommitDeviceError
+#include "../MCTPEndpointUtils.cpp" // NOLINT(bugprone-suspicious-include)
+#undef CommitDeviceError
+#undef errorToRedfishRegistry
+
+#include <unistd.h>
+
+#include <boost/asio/io_context.hpp>
+
+#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -1324,4 +1386,166 @@ TEST(MCTPEndpointUtils, G302getPollingIntervalBoundaryPlus1Rejected)
     SensorBaseConfigMap iface{{"PollingInterval", std::string("181")}};
     auto result = getPollingInterval(iface);
     EXPECT_FALSE(result.has_value());
+}
+
+TEST(MCTPEndpointUtils, getDeviceNamesSkipsWhitespaceOnlyCsvFields)
+{
+    SensorBaseConfigMap iface{{"Name", std::string(" GPU0 ,   ,\t, GPU1 ")}};
+    auto names = getDeviceNames(iface);
+    EXPECT_EQ(names, (std::vector<std::string>{"GPU0", "GPU1"}));
+}
+
+TEST(MCTPEndpointUtils, writeSysfsFileReportsLargeWriteFailure)
+{
+    if (!std::filesystem::exists("/dev/full"))
+    {
+        GTEST_SKIP() << "/dev/full is unavailable";
+    }
+
+    const std::string value(std::size_t{64} * 1024, 'x');
+    EXPECT_FALSE(writeSysfsFile("/dev/full", value));
+}
+
+TEST(MCTPEndpointUtils, CreateMCTPLogEntryNullConnectionReturns)
+{
+    std::shared_ptr<sdbusplus::asio::connection> conn;
+    EXPECT_NO_THROW(
+        createMCTPLogEntry(conn, "device", "Message.Id", "args", "resolution"));
+}
+
+class CreateMCTPLogEntryTest : public ::testing::Test
+{
+  protected:
+    std::array<int, 2> fds{-1, -1};
+    boost::asio::io_context io;
+    std::shared_ptr<sdbusplus::asio::connection> conn;
+
+    void SetUp() override
+    {
+        ASSERT_EQ(pipe(fds.data()), 0);
+        gFakeSdBusFd = fds[0];
+        gMockSdBusCallAsync = true;
+        gPendingAsyncCalls.clear();
+        conn = std::make_shared<sdbusplus::asio::connection>(
+            io, sdbusplus::bus_t(nullptr, &gTestSdBusInterface));
+    }
+
+    void TearDown() override
+    {
+        drainPendingAsyncCalls();
+        gMockSdBusCallAsync = false;
+        io.restart();
+        io.poll();
+        conn.reset();
+        io.stop();
+        close(fds[0]);
+        close(fds[1]);
+        gFakeSdBusFd = -1;
+    }
+};
+
+TEST_F(CreateMCTPLogEntryTest, EmptyOptionalFieldsAndSuccessfulCallback)
+{
+    createMCTPLogEntry(conn, "device", "Message.Id", "", "");
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    EXPECT_NO_THROW(driveAsyncCallSuccess());
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(CreateMCTPLogEntryTest, OptionalFieldsAndErrorCallback)
+{
+    createMCTPLogEntry(conn, "device", "Message.Id", "argument", "resolution");
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    EXPECT_NO_THROW(driveAsyncCallError());
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+class InjectedMctpRegistryTest : public ::testing::Test
+{
+  protected:
+    void SetUp() override
+    {
+        phosphor::logging::mctp::test::registryResponse.reset();
+        phosphor::logging::mctp::test::registryCalls = 0;
+        nv::lg2::test::commitCalls = 0;
+        nv::lg2::test::committedEid = 0;
+        nv::lg2::test::committedErrorCode = 0;
+        nv::lg2::test::committedAdditionalData.clear();
+    }
+
+    void TearDown() override
+    {
+        phosphor::logging::mctp::test::registryResponse.reset();
+        phosphor::logging::mctp::test::registryCalls = 0;
+        nv::lg2::test::commitCalls = 0;
+        nv::lg2::test::committedAdditionalData.clear();
+    }
+
+    static phosphor::logging::mctp::RedfishRegistry registry(
+        std::vector<std::string> args, std::string resolution,
+        std::string errorId)
+    {
+        phosphor::logging::mctp::RedfishRegistry result{};
+        result.registryId = "ResourceEvent.1.0.ResourceErrorsDetected";
+        result.args = std::move(args);
+        result.resolution = std::move(resolution);
+        result.errorId = std::move(errorId);
+        return result;
+    }
+};
+
+TEST_F(InjectedMctpRegistryTest, RegistryWithAllFieldsBuildsMultiArgumentEvent)
+{
+    phosphor::logging::mctp::test::registryResponse =
+        registry({"EID_0xb0", "MessageTransmit"}, "Reset the endpoint",
+                 "MCTP_DEVICE_TIMEOUT");
+
+    createMctpTransportRedfishEvent(static_cast<uint32_t>(ETIMEDOUT),
+                                    MCTP_DIR_TX, static_cast<uint8_t>(1), 0xb0,
+                                    "MessageTransmit", "GPU0");
+
+    EXPECT_EQ(phosphor::logging::mctp::test::registryCalls, 1U);
+    ASSERT_EQ(nv::lg2::test::commitCalls, 1U);
+    EXPECT_EQ(nv::lg2::test::committedEid, 0xb0);
+    EXPECT_EQ(nv::lg2::test::committedErrorCode,
+              static_cast<uint32_t>(ETIMEDOUT));
+    const auto& data = nv::lg2::test::committedAdditionalData;
+    EXPECT_EQ(data.at("REDFISH_MESSAGE_ID"),
+              "ResourceEvent.1.0.ResourceErrorsDetected");
+    EXPECT_EQ(data.at("REDFISH_MESSAGE_ARGS"), "GPU0,MessageTransmit");
+    EXPECT_EQ(data.at("REDFISH_RESOLUTION"), "Reset the endpoint");
+    EXPECT_EQ(data.at("REDFISH_ORIGIN_OF_CONDITION"), "GPU0");
+    EXPECT_EQ(data.at("DEVICE_NAME"), "GPU0");
+    EXPECT_EQ(data.at("ERROR_ID"), "MCTP_DEVICE_TIMEOUT");
+}
+
+TEST_F(InjectedMctpRegistryTest,
+       EmptyDeviceNameAndOptionalFieldsUseFallbackName)
+{
+    phosphor::logging::mctp::test::registryResponse =
+        registry({"EID_0xb1"}, "", "");
+
+    createMctpTransportRedfishEvent(static_cast<uint32_t>(ENODEV), MCTP_DIR_RX,
+                                    static_cast<uint8_t>(2), 0xb1,
+                                    "MessageReceive", "");
+
+    EXPECT_EQ(phosphor::logging::mctp::test::registryCalls, 1U);
+    ASSERT_EQ(nv::lg2::test::commitCalls, 1U);
+    const auto& data = nv::lg2::test::committedAdditionalData;
+    EXPECT_EQ(data.at("REDFISH_MESSAGE_ARGS"), "EID_0xb1");
+    EXPECT_EQ(data.at("REDFISH_ORIGIN_OF_CONDITION"), "EID_177");
+    EXPECT_EQ(data.at("DEVICE_NAME"), "EID_177");
+    EXPECT_FALSE(data.contains("REDFISH_RESOLUTION"));
+    EXPECT_FALSE(data.contains("ERROR_ID"));
+}
+
+TEST_F(InjectedMctpRegistryTest, MissingRegistryTakesFallbackPath)
+{
+    createMctpTransportRedfishEvent(0x7fff0001U, MCTP_DIR_TX,
+                                    static_cast<uint8_t>(3), 0xb2,
+                                    "UnknownOperation", "GPU2");
+
+    EXPECT_EQ(phosphor::logging::mctp::test::registryCalls, 1U);
+    EXPECT_EQ(nv::lg2::test::commitCalls, 0U);
+    EXPECT_TRUE(nv::lg2::test::committedAdditionalData.empty());
 }
