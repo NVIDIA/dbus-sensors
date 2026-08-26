@@ -143,6 +143,7 @@ if get_option('mctp').allowed()
         '-Wl,--wrap,libusb_free_config_descriptor',
         '-Wl,--wrap,libusb_wrap_sys_device',
         '-Wl,--wrap,libusb_get_device',
+        '-Wl,--wrap,libusb_get_device_descriptor',
         '-Wl,--wrap,libusb_kernel_driver_active',
         '-Wl,--wrap,libusb_detach_kernel_driver',
         '-Wl,--wrap,libusb_attach_kernel_driver',

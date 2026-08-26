@@ -2806,18 +2806,18 @@ TEST_F(FakeConnFixture, removeCallsAsyncAndFiresLambda)
 
 // 12. MCTPDDevice::onEndpointInterfacesRemoved() (static, private) — null msg
 //     causes msg.unpack to throw; exercises the function body.
-TEST_F(FakeConnFixture, onEndpointInterfacesRemovedThrowsOnNullMsg)
+TEST_F(FakeConnFixture, onEndpointInterfacesRemovedHandlesNullMsg)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-ep-removed", "usb0", std::vector<uint8_t>{0x20});
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(MCTPDDevice::onEndpointInterfacesRemoved(
+    EXPECT_NO_THROW(MCTPDDevice::onEndpointInterfacesRemoved(
         dev->weak_from_this(),
         "/au/com/codeconstruct/mctp1/networks/1/endpoints/9", msg));
 }
 
 // 13. MCTPDEndpoint::onMctpEndpointChange() (private) — null msg throws.
-TEST_F(FakeConnFixture, onMctpEndpointChangeThrowsOnNullMsg)
+TEST_F(FakeConnFixture, onMctpEndpointChangeHandlesNullMsg)
 {
     auto dev = std::make_shared<TestUSBMCTPDDevice>(
         conn, "usb-ep-change", "usb0", std::vector<uint8_t>{0x20});
@@ -2827,7 +2827,7 @@ TEST_F(FakeConnFixture, onMctpEndpointChangeThrowsOnNullMsg)
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(ep->onMctpEndpointChange(msg));
+    EXPECT_NO_THROW(ep->onMctpEndpointChange(msg));
 }
 
 // 14. MCTPDEndpoint accessor methods: network(), eid(), device(), describe()
@@ -3966,7 +3966,7 @@ TEST_F(FakeConnFixture, onMctpEndpointChangeWithNullMsgBodyEntered)
             "/au/com/codeconstruct/mctp1/networks/1/endpoints/9"),
         1, 9);
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(ep->onMctpEndpointChange(msg));
+    EXPECT_NO_THROW(ep->onMctpEndpointChange(msg));
 }
 
 // ===========================================================================

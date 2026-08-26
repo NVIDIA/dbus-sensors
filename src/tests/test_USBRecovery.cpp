@@ -766,6 +766,16 @@ extern "C" libusb_device* __wrap_libusb_get_device(
     return reinterpret_cast<libusb_device*>(0x1);
 }
 
+extern "C" int __wrap_libusb_get_device_descriptor(
+    libusb_device* /*dev*/, struct libusb_device_descriptor* desc)
+{
+    if (desc != nullptr)
+    {
+        *desc = libusb_device_descriptor{};
+    }
+    return LIBUSB_SUCCESS;
+}
+
 extern "C" int __wrap_libusb_wrap_sys_device(libusb_context* /*ctx*/,
                                              intptr_t /*sys_dev*/,
                                              libusb_device_handle** dev_handle)

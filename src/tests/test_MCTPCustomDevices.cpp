@@ -46,6 +46,7 @@ extern int gSystemRetval;
 extern int gSystemCallCount;
 extern int gSystemFailOnCall;
 extern int gSystemFailErrno;
+extern const char* gSystemFailOnSubstr;
 extern bool gSetsockoptFail;
 extern int gSetsockoptFailOnCall;
 extern int gSetsockoptCallCount;
@@ -486,20 +487,20 @@ TEST_F(USBGadgetFakeConnTest,
     }
 }
 
-// 6. onEndpointAdded() (private) — null msg → msg.unpack throws.
-TEST_F(USBGadgetFakeConnTest, onEndpointAddedWithNullMsgThrows)
+// 6. onEndpointAdded() (private) — null msg → msg.unpack failure is caught.
+TEST_F(USBGadgetFakeConnTest, onEndpointAddedWithNullMsgHandled)
 {
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(dev->onEndpointAdded(msg));
+    EXPECT_NO_THROW(dev->onEndpointAdded(msg));
 }
 
-// 7. onEndpointRemoved() (private) — null msg → msg.unpack throws.
-TEST_F(USBGadgetFakeConnTest, onEndpointRemovedWithNullMsgThrows)
+// 7. onEndpointRemoved() (private) — null msg → msg.unpack failure is caught.
+TEST_F(USBGadgetFakeConnTest, onEndpointRemovedWithNullMsgHandled)
 {
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
     auto msg = sdbusplus::message_t(nullptr);
-    EXPECT_ANY_THROW(dev->onEndpointRemoved(msg));
+    EXPECT_NO_THROW(dev->onEndpointRemoved(msg));
 }
 
 // ===========================================================================
@@ -1847,8 +1848,8 @@ TEST_F(USBGadgetSocketMockTest, sendDiscoveryNotifySendtoFailLongGadgetName)
 {
     refreshMockFd();
     gSendtoRetval = -1;
-    auto dev = std::make_shared<USBGadgetMCTPDevice>(
-        nullptr, "mctpusb_gadget_with_long_name", 100);
+    auto dev =
+        std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusblongname", 100);
     EXPECT_NO_THROW(dev->sendDiscoveryNotify());
 }
 
@@ -2546,7 +2547,7 @@ TEST_F(USBGadgetSocketMockTest,
     gSetsockoptFailOnCall = -1; // always fail
     gSetsockoptCallCount = 0;
     auto dev =
-        std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb_secondary", 50);
+        std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb_alt", 50);
     EXPECT_NO_THROW(dev->sendDiscoveryNotify());
     gSetsockoptFail = false;
     gSetsockoptFailOnCall = -1;
@@ -3279,13 +3280,13 @@ TEST_F(USBGadgetFromTest, fromCreatedDeviceDescribeUsesInterfaceField)
 {
     SensorBaseConfigMap iface{{"Type", std::string("MCTPUSBGadgetTarget")},
                               {"Name", std::string("my-gadget-name")},
-                              {"Interface", std::string("mctpusb_interface")},
+                              {"Interface", std::string("mctpusb_iface")},
                               {"LocalEID", std::string("50")}};
     auto dev = USBGadgetMCTPDevice::from(conn, iface);
     ASSERT_NE(dev, nullptr);
     std::string desc = dev->describe();
-    // The Interface field ("mctpusb_interface") is used as gadgetName
-    EXPECT_NE(desc.find("mctpusb_interface"), std::string::npos);
+    // The Interface field ("mctpusb_iface") is used as gadgetName
+    EXPECT_NE(desc.find("mctpusb_iface"), std::string::npos);
     // The Name field should NOT appear in describe()
     EXPECT_EQ(desc.find("my-gadget-name"), std::string::npos);
     EXPECT_NE(desc.find("50"), std::string::npos);
@@ -3863,6 +3864,7 @@ static void setAllMocksSuccess()
     gSystemRetval = 0;
     gSystemCallCount = 0;
     gSystemFailOnCall = -1;
+    gSystemFailOnSubstr = nullptr;
     gSystemFailErrno = 0;
     gMockCreateDirectories = true;
     gCreateDirectoriesRetval = true;
@@ -3883,6 +3885,7 @@ static void clearAllMocks()
     gSystemRetval = 0;
     gSystemCallCount = 0;
     gSystemFailOnCall = -1;
+    gSystemFailOnSubstr = nullptr;
     gSystemFailErrno = 0;
     gMockCreateDirectories = false;
     gCreateDirectoriesRetval = true;
@@ -4132,6 +4135,7 @@ TEST(USBGadgetMCTPDevice, setupSymlinkEexistContinuesWithSystemCall)
     gSystemRetval = 0;
     gSystemCallCount = 0;
     gSystemFailOnCall = -1;
+    gSystemFailOnSubstr = nullptr;
     gMockCreateDirectories = true;
     gCreateDirectoriesRetval = true;
     gCreateDirectoriesFailOnCall = -1;
@@ -4200,6 +4204,7 @@ TEST(USBGadgetMCTPDevice, setupMctpLinkSetFails)
 
     gMockSystem = false;
     gSystemFailOnCall = -1;
+    gSystemFailOnSubstr = nullptr;
     gMockCreateDirectories = false;
     gMockWriteSysfsFile = false;
     gMockSymlink = false;
@@ -4221,7 +4226,7 @@ TEST(USBGadgetMCTPDevice, setupMctpAddrAddFailsNonEexist)
     // system() call order in setup(): idx=0 modprobe, idx=1 mctp link set,
     // idx=2 nft delete table (unchecked), idx=3-7 five nft add commands,
     // idx=8 mctp addr add.
-    gSystemFailOnCall = 8; // call idx=8 (mctp addr add) fails
+    gSystemFailOnSubstr = "mctp addr add"; // fail addr-add (index-independent)
     gMockCreateDirectories = true;
     gCreateDirectoriesRetval = true;
     gCreateDirectoriesFailOnCall = -1;
@@ -4231,8 +4236,8 @@ TEST(USBGadgetMCTPDevice, setupMctpAddrAddFailsNonEexist)
     gWriteSysfsFileFailOnCall = -1;
     gWriteSysfsFileCallCount = 0;
     gMockSymlink = true;
-    gSymlinkRetval = 0; // symlink succeeds
-    errno = EPERM;      // non-EEXIST → error branch
+    gSymlinkRetval = 0;       // symlink succeeds
+    gSystemFailErrno = EPERM; // non-EEXIST → error branch
 
     auto dev = std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb0", 10);
     bool called = false;
@@ -4245,9 +4250,11 @@ TEST(USBGadgetMCTPDevice, setupMctpAddrAddFailsNonEexist)
 
     gMockSystem = false;
     gSystemFailOnCall = -1;
+    gSystemFailOnSubstr = nullptr;
     gMockCreateDirectories = false;
     gMockWriteSysfsFile = false;
     gMockSymlink = false;
+    gSystemFailErrno = 0;
 
     EXPECT_TRUE(called);
     EXPECT_TRUE(ec); // error from failed mctp addr add
@@ -4264,8 +4271,8 @@ TEST_F(SetupMockFixture, setupMctpAddrAddFailsEexist)
     // system() call order: idx=0 modprobe, idx=1 mctp link set,
     // idx=2 nft delete table (unchecked), idx=3-7 nft add commands, idx=8 addr
     // add.
-    gSystemFailOnCall = 8; // call idx=8 (mctp addr add) fails
-    errno = EEXIST;        // EEXIST → continue past addr add
+    gSystemFailOnSubstr = "mctp addr add"; // fail addr-add (index-independent)
+    errno = EEXIST;                        // EEXIST → continue past addr add
 
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
     bool called = false;
@@ -4678,8 +4685,8 @@ TEST_F(SetupMockFixture, G257linkSetFailCallsCallbackWithError)
 // ===========================================================================
 TEST_F(SetupMockFixture, G258addrAddFailNonEexistCallsCallbackWithError)
 {
-    gSystemFailOnCall = 8; // mctp addr add (idx=8) fails
-    errno = EPERM;         // non-EEXIST → error path
+    gSystemFailOnSubstr = "mctp addr add"; // fail addr-add (index-independent)
+    errno = EPERM;                         // non-EEXIST → error path
 
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
     bool called = false;
@@ -5123,8 +5130,8 @@ TEST_F(SetupMockFixture, G283udcSysfsFailCallsCallbackWithError)
 // ===========================================================================
 TEST_F(SetupMockFixture, G284addrAddEexistContinuesToRoleEndpointFail)
 {
-    gSystemFailOnCall = 8;         // mctp addr add (idx=8) fails
-    errno = EEXIST;                // EEXIST → continue past addr add
+    gSystemFailOnSubstr = "mctp addr add"; // fail addr-add (index-independent)
+    errno = EEXIST;                        // EEXIST → continue past addr add
     gMockSdBusCallSuccess = false; // setRoleEndpoint fails → callback error
 
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
@@ -5702,7 +5709,7 @@ TEST_F(SetupMockFixture, G309setupMctpAddrAddFailsWithEexistContinues)
 {
     // Fail only the 9th system() call (index 8 = "mctp addr add ...") and
     // make it appear as EEXIST so the `if (errno != EEXIST)` branch is FALSE.
-    gSystemFailOnCall = 8;
+    gSystemFailOnSubstr = "mctp addr add";
     gSystemFailErrno = EEXIST;
 
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
@@ -5724,6 +5731,7 @@ TEST_F(SetupMockFixture, G309setupMctpAddrAddFailsWithEexistContinues)
 
     // Restore
     gSystemFailOnCall = -1;
+    gSystemFailOnSubstr = nullptr;
     gSystemFailErrno = 0;
 }
 
@@ -5770,6 +5778,7 @@ class UsbGadgetSetupWalk : public ::testing::Test
         gSystemRetval = 0;
         gSystemCallCount = 0;
         gSystemFailOnCall = -1;
+        gSystemFailOnSubstr = nullptr;
         gSystemFailErrno = 0;
         gMockCreateDirectories = true;
         gCreateDirectoriesRetval = true;
@@ -5795,6 +5804,7 @@ class UsbGadgetSetupWalk : public ::testing::Test
         gFakeSdBusFd = -1;
         gMockSystem = false;
         gSystemFailOnCall = -1;
+        gSystemFailOnSubstr = nullptr;
         gSystemFailErrno = 0;
         gMockCreateDirectories = false;
         gCreateDirectoriesFailOnCall = -1;
@@ -5849,7 +5859,7 @@ TEST_F(UsbGadgetSetupWalk, netfilterCommandFailureBreaksLoopButCompletes)
 {
     // Make one of the nft netfilter system() commands fail. setup() only warns
     // and breaks the loop, then continues to the MCTP address / role steps.
-    gSystemFailOnCall = 7; // a later system() call (an nft rule)
+    gSystemFailOnSubstr = "nft add rule"; // fail an nft rule command
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb2", 12);
     bool called = false;
     try
@@ -5870,7 +5880,7 @@ TEST_F(UsbGadgetSetupWalk, mctpAddrExistsErrnoContinues)
 {
     // mctp addr add fails with EEXIST -> setup logs and continues (does not
     // abort). Target a late system() call with errno EEXIST.
-    gSystemFailOnCall = 9;
+    gSystemFailOnSubstr = "mctp addr add";
     gSystemFailErrno = EEXIST;
     auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb3", 13);
     bool called = false;

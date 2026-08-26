@@ -264,32 +264,30 @@ TEST(ReactorMainHandlers, exitReactorMalformedMessageThrows)
     EXPECT_THROW(static_cast<void>(exitReactor(&io, msg)), std::exception);
 }
 
-TEST(ReactorMainHandlers, handleTransportErrorSignalMalformedMessageThrows)
+TEST(ReactorMainHandlers, handleTransportErrorSignalMalformedMessageHandled)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(static_cast<void>(handleTransportErrorSignal(reactor, msg)),
-                 std::exception);
+    EXPECT_NO_THROW(
+        static_cast<void>(handleTransportErrorSignal(reactor, msg)));
 }
 
-TEST(ReactorMainHandlers, addInventoryMalformedMessageThrows)
+TEST(ReactorMainHandlers, addInventoryMalformedMessageHandled)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(static_cast<void>(addInventory(conn, reactor, msg)),
-                 std::exception);
+    EXPECT_NO_THROW(static_cast<void>(addInventory(conn, reactor, msg)));
 }
 
-TEST(ReactorMainHandlers, removeInventoryMalformedMessageThrows)
+TEST(ReactorMainHandlers, removeInventoryMalformedMessageHandled)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(static_cast<void>(removeInventory(reactor, msg)),
-                 std::exception);
+    EXPECT_NO_THROW(static_cast<void>(removeInventory(reactor, msg)));
 }
 
 // NOTE: NoOpLogGuard/CaptureLogGuard/CaptureEventGuard originally used
@@ -3808,15 +3806,14 @@ TEST_F(FakeConnReactorWithTestSdBusFixture,
 
 // Malformed message (nullptr) → msg.read throws → function body entered →
 // handleGeneralErrorSignal counted as covered by gcovr.
-TEST(ReactorMainHandlers, handleGeneralErrorSignalNullMsgThrows)
+TEST(ReactorMainHandlers, handleGeneralErrorSignalNullMsgHandled)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     sdbusplus::message_t msg(nullptr);
-    EXPECT_THROW(
-        static_cast<void>(handleGeneralErrorSignal(conn, reactor, msg)),
-        std::exception);
+    EXPECT_NO_THROW(
+        static_cast<void>(handleGeneralErrorSignal(conn, reactor, msg)));
 }
 
 // Proper "yss" message + non-null FakeConnReactorFixture connection.

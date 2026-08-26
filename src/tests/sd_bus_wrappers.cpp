@@ -1,3 +1,4 @@
+#include <string_view>
 /* sd_bus_wrappers.cpp
  *
  * ld --wrap implementations that intercept sd-bus calls so tests can
@@ -258,6 +259,10 @@ int gSystemFailOnCall = -1;
 // exercise branches that inspect errno after a system() failure (e.g., the
 // EEXIST check in MCTPCustomDevices.cpp::setup()).
 int gSystemFailErrno = 0;
+// gSystemFailOnSubstr: when non-null, fail (return 1) any system() call whose
+// command contains this substring. Robust against call-index drift for commands
+// whose position depends on device configuration (e.g. "mctp addr add").
+const char* gSystemFailOnSubstr = nullptr;
 
 bool gMockSymlink = false;
 int gSymlinkRetval = 0;
@@ -391,8 +396,10 @@ int __wrap_system(const char* cmd)
         return __real_system(cmd);
     }
     int idx = gSystemCallCount++;
-    (void)cmd;
-    if (gSystemFailOnCall >= 0 && idx == gSystemFailOnCall)
+    bool substrMatch = gSystemFailOnSubstr != nullptr && cmd != nullptr &&
+                       std::string_view(cmd).find(gSystemFailOnSubstr) !=
+                           std::string_view::npos;
+    if ((gSystemFailOnCall >= 0 && idx == gSystemFailOnCall) || substrMatch)
     {
         if (gSystemFailErrno != 0)
         {
