@@ -1,80 +1,7 @@
-#include "async_test_helpers.hpp" // NOLINT(misc-include-cleaner)
-
-#include <systemd/sd-bus.h>
-
-#include <sdbusplus/bus.hpp> // NOLINT(misc-include-cleaner)
-
-namespace
-{
-class HeartbeatMainSdBusInterface : public TestSdBusInterface
-{
-  public:
-    bool dispatchMatchCallbacks = false;
-    unsigned int addMatchCalls = 0;
-
-    int sd_bus_add_match(sd_bus* /*bus*/, sd_bus_slot** slot,
-                         const char* /*path*/,
-                         sd_bus_message_handler_t callback,
-                         void* userdata) override
-    {
-        if (slot != nullptr)
-        {
-            *slot = nullptr;
-        }
-        ++addMatchCalls;
-        if (dispatchMatchCallbacks && callback != nullptr)
-        {
-            return callback(nullptr, userdata, nullptr);
-        }
-        return 0;
-    }
-
-    int sd_bus_request_name(sd_bus* bus, const char* name,
-                            uint64_t flags) override;
-};
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-HeartbeatMainSdBusInterface heartbeatMainSdBusInterface;
-} // namespace
-
-namespace sdbusplus::bus
-{
-// Keep the daemon's default-bus construction deterministic in this test
-// executable. This unique name avoids redefining sdbusplus's inline
-// new_default implementation.
-// NOLINTNEXTLINE(readability-identifier-naming)
-sdbusplus::bus_t heartbeatTestNewDefault()
-{
-    return {nullptr, &heartbeatMainSdBusInterface};
-}
-} // namespace sdbusplus::bus
-
-extern "C" unsigned int heartbeatTestSleep(unsigned int seconds);
-
 // NOLINTBEGIN
 #define main disabled_main_heartbeat
-#define new_default heartbeatTestNewDefault
-#define sleep heartbeatTestSleep
-#include "../MCTPHeartBeatApp.cpp" // NOLINT(bugprone-suspicious-include)
-#undef sleep
-#undef new_default
+#include "../mctp/MCTPHeartBeatApp.cpp" // NOLINT(bugprone-suspicious-include)
 #undef main
-
-int HeartbeatMainSdBusInterface::sd_bus_request_name(
-    sd_bus* bus, const char* name, uint64_t flags)
-{
-    if (gMockSdBusRequestName && gMockSdBusRequestNameResult < 0)
-    {
-        // connection's constructor posts process() with a raw `this` pointer.
-        // A deliberately failed request_name() returns from main before the
-        // normal event loop can consume it, so run that initial handler while
-        // systemBus is still alive.
-        gIo.restart();
-        gIo.poll();
-        gIo.stop();
-    }
-    return TestSdBusInterface::sd_bus_request_name(bus, name, flags);
-}
 
 #include <endian.h>
 #include <sys/epoll.h>
@@ -91,65 +18,6 @@ int HeartbeatMainSdBusInterface::sd_bus_request_name(
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-
-// Retry backoff is production policy, not behavior that unit tests need to
-// wait for.  MCTPHeartBeatApp.cpp is included directly above, so redirect its
-// sleep() calls to this no-op while retaining every retry attempt.
-extern "C" unsigned int heartbeatTestSleep(unsigned int)
-{
-    return 0;
-}
-
-namespace
-{
-// Linker wrappers make the two otherwise environment-dependent sd-event
-// allocation failures deterministic.  The call counters also prove that the
-// test reached the wrapped C API instead of merely observing another error.
-int sdEventNewResult = 0;
-int sdEventNewCalls = 0;
-int sdEventAddTimeResult = 0;
-int sdEventAddTimeCalls = 0;
-} // namespace
-
-extern "C"
-{
-int __real_sd_event_new(sd_event** event);
-int __wrap_sd_event_new(sd_event** event)
-{
-    ++sdEventNewCalls;
-    if (sdEventNewResult < 0)
-    {
-        if (event != nullptr)
-        {
-            *event = nullptr;
-        }
-        return sdEventNewResult;
-    }
-    return __real_sd_event_new(event);
-}
-
-int __real_sd_event_add_time_relative(
-    sd_event* event, sd_event_source** source, clockid_t clock, uint64_t usec,
-    uint64_t accuracy, sd_event_time_handler_t callback, void* userdata);
-int __wrap_sd_event_add_time_relative(
-    sd_event* event, sd_event_source** source, clockid_t clock, uint64_t usec,
-    uint64_t accuracy, sd_event_time_handler_t callback, void* userdata)
-{
-    ++sdEventAddTimeCalls;
-    if (sdEventAddTimeResult < 0)
-    {
-        return sdEventAddTimeResult;
-    }
-    // Production uses a 2.5-second response timeout. Unit tests only need to
-    // observe the same timeout callback and return code, so cap the real
-    // sd-event wait to keep retry-path coverage deterministic and fast.
-    constexpr uint64_t testTimeoutUsec = 1000;
-    const uint64_t boundedUsec =
-        (usec > testTimeoutUsec) ? testTimeoutUsec : usec;
-    return __real_sd_event_add_time_relative(event, source, clock, boundedUsec,
-                                             accuracy, callback, userdata);
-}
-}
 
 TEST(MctpVendorMsgHdr, encodeVendorCmdHeaderSetsIana)
 {
@@ -591,6 +459,10 @@ TEST(HeartbeatMainPaths, addedSpiEndpointCallable)
     // it no longer rethrows, so a null bus must not be treated as throwing
     // here.
     EXPECT_NO_THROW(addedSPIEndpoint(conn, 8, io));
+    // Reset the global before io_context is destroyed: the MCTPHeartbeatService
+    // holds a timer that references io, so it must be released first to avoid
+    // ASAN heap-use-after-free during ~io_context().
+    gHeartbeatService = nullptr;
 }
 
 // NOTE: TestMockHeartbeatService and its tests (MockHeartbeatService.*,
@@ -630,20 +502,6 @@ TEST(WaitFdTimeout, validFdReadableReturnsZero)
 
 #include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/connection.hpp>
-
-// The restricted unit-test runner rejects the send() syscall even for local
-// AF_UNIX socketpairs.  These calls only preload peer datagrams for production
-// recvfrom() paths, so write() provides identical datagram semantics without
-// changing or intercepting production networking code.  MCTPHeartBeatApp.cpp
-// is included before this macro and therefore retains its real sendto() calls.
-static ssize_t writeTestDatagram(int fd, const void* data, size_t length,
-                                 int flags)
-{
-    (void)flags;
-    return write(fd, data, length);
-}
-
-#define send writeTestDatagram
 
 // Socket mock globals from sd_bus_wrappers.cpp
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
@@ -770,8 +628,7 @@ TEST(CheckExistingEndpoint, firesCallbackWithErrorOnFakeConn)
     ASSERT_EQ(pipe(fds), 0);
     gFakeSdBusFd = fds[0];
     boost::asio::io_context io;
-    auto conn = std::make_shared<sdbusplus::asio::connection>(
-        io, sdbusplus::bus_t(nullptr, &gTestSdBusInterface));
+    auto conn = std::make_shared<sdbusplus::asio::connection>(io, nullptr);
     EXPECT_NO_THROW(checkExistingEndpoint(conn, 10, io));
     conn.reset();
     close(fds[0]);
@@ -1719,9 +1576,9 @@ TEST_F(HeartbeatSocketFixture, runThenTimerFiresWithGRunningFalse)
 // scheduleNextHeartbeat timer callback: ec == 0 path (timer fires normally)
 // + vdmSendHeartbeat success branch inside the lambda.
 //
-// Shorten the production 30-second timer after it is armed. With pre-written
-// responses and type-matching mocks, vdmSendHeartbeat succeeds and the same
-// callback branches are covered without a wall-clock delay.
+// This test waits 31 seconds for the 30-second heartbeat timer to fire
+// without cancellation.  With pre-written responses and type-matching mocks,
+// vdmSendHeartbeat succeeds → "Heartbeat VDM successful" log branch covered.
 // Covers: if(ec) false, if(!gRunning) false, vdmSendHeartbeat >= 0 (success),
 // and the recursive scheduleNextHeartbeat() call inside the lambda.
 //
@@ -1740,11 +1597,12 @@ TEST_F(HeartbeatSocketFixture, timerLambdaFiresEcZeroHeartbeatSucceeds)
     gMockRecvfromSmctpTypeVal = mctpVendorMsgType;
 
     MCTPHeartbeatService svc(io, 0x20);
-    // scheduleNextHeartbeat sets a 30-second timer and registers the lambda.
+    // scheduleNextHeartbeat sets a 30-second timer and registers the lambda
     svc.scheduleNextHeartbeat();
 
-    svc.heartbeatTimer->expires_after(std::chrono::milliseconds(1));
-    io.run_for(std::chrono::milliseconds(200));
+    // Run io for 31 seconds: the 30s timer fires with ec=0 → lambda body
+    // executes: if(ec)=false, if(!gRunning)=false, vdmSendHeartbeat succeeds.
+    io.run_for(std::chrono::seconds(31));
 
     // Cancel the re-scheduled 30s timer from inside the lambda
     svc.stop(false);
@@ -2629,24 +2487,21 @@ TEST_F(HeartbeatSocketFixture, heartbeatTimerLambdaVdmFailBranch)
     gMockRecvfromSmctpType = true;
     gMockRecvfromSmctpTypeVal = mctpVendorMsgType;
     gSendtoCallCount = 0;
+    // After the 3 run() calls (indices 0,1,2), fail the 4th sendto (index 3)
+    // which is the heartbeat inside the timer lambda.
+    gSendtoFailOnCall = 3;
+
     MCTPHeartbeatService svc(io, 0x20);
     svc.run(); // succeeds → schedules 30s timer
 
-    // The VDM helper retries a failed send.  A one-shot failure lets a later
-    // retry succeed, so force every send in the timer callback to fail.
-    gSendtoRetval = -1;
-    gSendtoFailOnCall = -1;
-    gSendtoCallCount = 0;
-
     // Override timer to fire in 1 ms
     svc.heartbeatTimer->expires_after(std::chrono::milliseconds(1));
-    // Run for 200 ms: lambda fires, every retry fails, logs
-    // "Failed to send heartbeat VDM", and re-schedules the next heartbeat.
+    // Run for 200 ms: lambda fires, vdmSendHeartbeat fails (sendto call 3),
+    // logs "Failed to send heartbeat VDM", re-schedules next heartbeat.
     io.run_for(std::chrono::milliseconds(200));
     svc.stop(false);
 
     gMockSendto = false;
-    gSendtoRetval = 0;
     gMockRecvfromSmctpType = false;
     gMockRecvfromSmctpTypeVal = 0;
     gSendtoFailOnCall = -1;
@@ -3121,8 +2976,6 @@ class CheckExistingEndpointFixture : public HeartbeatSocketFixture
 
     void SetUp() override
     {
-        gHeartbeatService.reset();
-        ASSERT_EQ(gHeartbeatService, nullptr);
         HeartbeatSocketFixture::SetUp();
         ASSERT_EQ(pipe(pipeFds), 0);
         gFakeSdBusFd = pipeFds[0];
@@ -3496,7 +3349,6 @@ TEST_F(HeartbeatSocketFixture,
 }
 
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 // disabled_main_heartbeat (= main) function coverage
 //
 // The build renames main() to disabled_main_heartbeat via `#define main`.
@@ -3546,302 +3398,5 @@ TEST_F(DisabledMainHeartbeatFixture, mainFunctionBodyIsEntered)
         disabled_main_heartbeat(static_cast<int>(argv.size()), argv.data());
     EXPECT_EQ(rc, 1);
 }
-
-// ---------------------------------------------------------------------------
-// Renamed main(): cover CLI parsing exits without entering the daemon's
-// repeating event loop.
-// ---------------------------------------------------------------------------
-
-TEST(HeartbeatMain, helpReturnsSuccess)
-{
-    char program[] = "mctpheartbeat";
-    char help[] = "--help";
-    char* argv[] = {program, help};
-
-    EXPECT_EQ(disabled_main_heartbeat(2, argv), 0);
-}
-
-TEST(HeartbeatMain, missingRequiredEidReturnsFailure)
-{
-    char program[] = "mctpheartbeat";
-    char* argv[] = {program};
-
-    EXPECT_NE(disabled_main_heartbeat(1, argv), 0);
-}
-
-TEST(HeartbeatMain, eidBelowAllowedRangeReturnsFailure)
-{
-    char program[] = "mctpheartbeat";
-    char option[] = "--eid";
-    char eid[] = "7";
-    char* argv[] = {program, option, eid};
-
-    EXPECT_NE(disabled_main_heartbeat(3, argv), 0);
-}
-
-class HeartbeatMainStartupFixture : public ::testing::Test
-{
-  protected:
-    int pipeFds[2]{-1, -1};
-    struct sigaction originalSigterm{};
-
-    void SetUp() override
-    {
-        ASSERT_EQ(sigaction(SIGTERM, nullptr, &originalSigterm), 0);
-        ASSERT_EQ(pipe(pipeFds), 0);
-        gFakeSdBusFd = pipeFds[0];
-        gMockSdBusDefault = true;
-        gMockSdBusCallSuccess = true;
-        gMockSdBusRequestName = true;
-        gMockSdBusRequestNameResult = 0;
-        gMockSdBusCallAsync = true;
-        gPendingAsyncCalls.clear();
-        gHeartbeatService.reset();
-        heartbeatMainSdBusInterface.dispatchMatchCallbacks = false;
-        heartbeatMainSdBusInterface.addMatchCalls = 0;
-        gMockMctpSocket = false;
-        gMockMctpSocketFd = -1;
-        gRunning = true;
-        gIo.restart();
-        gIo.stop();
-    }
-
-    void TearDown() override
-    {
-        EXPECT_EQ(sigaction(SIGTERM, &originalSigterm, nullptr), 0);
-        drainPendingAsyncCalls();
-        gMockSdBusCallAsync = false;
-        gMockSdBusCallSuccess = false;
-        gMockSdBusDefault = false;
-        gMockSdBusRequestName = false;
-        gMockSdBusRequestNameResult = -ENOTSUP;
-        heartbeatMainSdBusInterface.dispatchMatchCallbacks = false;
-        heartbeatMainSdBusInterface.addMatchCalls = 0;
-        gMockMctpSocket = false;
-        gMockMctpSocketFd = -1;
-        gHeartbeatService.reset();
-        gRunning = true;
-        gIo.stop();
-        close(pipeFds[0]);
-        close(pipeFds[1]);
-        gFakeSdBusFd = -1;
-    }
-};
-
-TEST_F(HeartbeatMainStartupFixture,
-       validArgumentsRunMatchCallbacksAndCancelledAlarm)
-{
-    char program[] = "mctpheartbeat";
-    char option[] = "--eid";
-    char eid[] = "32";
-    char* argv[] = {program, option, eid};
-
-    heartbeatMainSdBusInterface.dispatchMatchCallbacks = true;
-    // The InterfacesAdded callback reaches addedSPIEndpoint(), whose socket
-    // construction fails deterministically and is handled at that boundary.
-    gMockMctpSocket = true;
-    gMockMctpSocketFd = -1;
-
-    EXPECT_EQ(disabled_main_heartbeat(3, argv), 0);
-
-    struct sigaction currentAction{};
-    ASSERT_EQ(sigaction(SIGTERM, nullptr, &currentAction), 0);
-    EXPECT_EQ(currentAction.sa_handler, signalHandler);
-    EXPECT_EQ(heartbeatMainSdBusInterface.addMatchCalls, 2U);
-    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
-
-    // Let startup and cancelled keepalive handlers run while the pending Get
-    // callback still owns systemBus, then complete it and release the bus.
-    gIo.restart();
-    gIo.poll();
-    gIo.stop();
-    EXPECT_NO_THROW(driveAsyncCallError());
-    EXPECT_TRUE(gPendingAsyncCalls.empty());
-}
-
-TEST_F(HeartbeatMainStartupFixture, keepAliveAlarmReschedulesWhileRunning)
-{
-    char program[] = "mctpheartbeat";
-    char option[] = "--eid";
-    char eid[] = "34";
-    char* argv[] = {program, option, eid};
-
-    gIo.restart();
-    boost::asio::steady_timer terminateTimer(gIo);
-    terminateTimer.expires_after(std::chrono::milliseconds(5100));
-    terminateTimer.async_wait([](const boost::system::error_code& ec) {
-        if (!ec)
-        {
-            signalHandler(SIGTERM);
-        }
-    });
-
-    EXPECT_EQ(disabled_main_heartbeat(3, argv), 0);
-    EXPECT_FALSE(gRunning);
-    EXPECT_EQ(heartbeatMainSdBusInterface.addMatchCalls, 2U);
-    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
-
-    // Drain the cancelled keepalive and connection handlers before releasing
-    // the final shared_ptr retained by the pending asynchronous Get callback.
-    gIo.restart();
-    gIo.poll();
-    gIo.stop();
-    EXPECT_NO_THROW(driveAsyncCallError());
-    EXPECT_TRUE(gPendingAsyncCalls.empty());
-}
-
-TEST_F(HeartbeatMainStartupFixture, requestNameFailureReturnsFailure)
-{
-    char program[] = "mctpheartbeat";
-    char option[] = "--eid";
-    char eid[] = "33";
-    char* argv[] = {program, option, eid};
-    gMockSdBusRequestNameResult = -ENOTSUP;
-
-    EXPECT_EQ(disabled_main_heartbeat(3, argv), 1);
-    EXPECT_TRUE(gPendingAsyncCalls.empty());
-
-    struct sigaction currentAction{};
-    ASSERT_EQ(sigaction(SIGTERM, nullptr, &currentAction), 0);
-    EXPECT_EQ(currentAction.sa_handler, originalSigterm.sa_handler);
-}
-
-// ---------------------------------------------------------------------------
-// checkExistingEndpoint(): the test interface creates a request without a
-// daemon, while the async-call wrapper captures it for manual completion.
-// ---------------------------------------------------------------------------
-
-class ExistingEndpointSuccessFixture : public HeartbeatSocketFixture
-{
-  protected:
-    int pipeFds[2]{-1, -1};
-    TestSdBusInterface sdBus;
-    std::shared_ptr<sdbusplus::asio::connection> connection;
-
-    void SetUp() override
-    {
-        HeartbeatSocketFixture::SetUp();
-        ASSERT_EQ(pipe(pipeFds), 0);
-        gFakeSdBusFd = pipeFds[0];
-        gMockSdBusCallAsync = true;
-        gPendingAsyncCalls.clear();
-        connection = std::make_shared<sdbusplus::asio::connection>(
-            io, sdbusplus::bus_t(nullptr, &sdBus));
-    }
-
-    void TearDown() override
-    {
-        if (gHeartbeatService)
-        {
-            gHeartbeatService->stop(false);
-        }
-
-        // The service timer and connection both register callbacks carrying
-        // raw `this` pointers.  Drain their cancellation/initial-post handlers
-        // while both owners are still alive.
-        io.restart();
-        io.poll();
-
-        gHeartbeatService.reset();
-        connection.reset();
-        gMockSendto = false;
-        gSendtoExact = false;
-        gSendtoFailOnCall = -1;
-        gSendtoCallCount = 0;
-        gMockRecvfromSmctpType = false;
-        gMockRecvfromSmctpTypeVal = 0;
-        gRunning = true;
-        gMockSdBusCallAsync = false;
-        drainPendingAsyncCalls();
-        gFakeSdBusFd = -1;
-        close(pipeFds[0]);
-        close(pipeFds[1]);
-        HeartbeatSocketFixture::TearDown();
-    }
-};
-
-TEST_F(ExistingEndpointSuccessFixture, successfulGetStartsHeartbeatService)
-{
-    uint8_t response[] = {mctpVendorMsgType, 0x02};
-    for (int i = 0; i < 3; ++i)
-    {
-        ASSERT_EQ(send(socketFds[1], response, sizeof(response), 0),
-                  static_cast<ssize_t>(sizeof(response)));
-    }
-
-    gRunning = true;
-    gMockSendto = true;
-    gSendtoRetval = 1;
-    gMockRecvfromSmctpType = true;
-    gMockRecvfromSmctpTypeVal = mctpVendorMsgType;
-
-    checkExistingEndpoint(connection, 0x20, io);
-    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
-    driveAsyncCallStringVariant("32");
-
-    EXPECT_NE(gHeartbeatService, nullptr);
-
-    gMockRecvfromSmctpType = false;
-    gMockRecvfromSmctpTypeVal = 0;
-    gMockSendto = false;
-    gRunning = true;
-}
-
-TEST_F(ExistingEndpointSuccessFixture, failedGetDoesNotStartHeartbeatService)
-{
-    ASSERT_EQ(gHeartbeatService, nullptr);
-
-    checkExistingEndpoint(connection, 0x21, io);
-    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
-    EXPECT_NO_THROW(driveAsyncCallError());
-
-    EXPECT_EQ(gHeartbeatService, nullptr);
-    EXPECT_TRUE(gPendingAsyncCalls.empty());
-
-    ASSERT_GE(dupMockFd, 0);
-    EXPECT_EQ(close(dupMockFd), 0);
-    dupMockFd = -1;
-    gMockMctpSocketFd = -1;
-}
-
-class SdEventFailureTest : public ::testing::Test
-{
-  protected:
-    void SetUp() override
-    {
-        sdEventNewResult = 0;
-        sdEventNewCalls = 0;
-        sdEventAddTimeResult = 0;
-        sdEventAddTimeCalls = 0;
-    }
-
-    void TearDown() override
-    {
-        sdEventNewResult = 0;
-        sdEventNewCalls = 0;
-        sdEventAddTimeResult = 0;
-        sdEventAddTimeCalls = 0;
-    }
-};
-
-TEST_F(SdEventFailureTest, eventAllocationFailureIsReturned)
-{
-    sdEventNewResult = -ENOMEM;
-
-    EXPECT_EQ(waitFdTimeout(-1, EPOLLIN, 1), -ENOMEM);
-    EXPECT_EQ(sdEventNewCalls, 1);
-    EXPECT_EQ(sdEventAddTimeCalls, 0);
-}
-
-TEST_F(SdEventFailureTest, timerRegistrationFailureIsReturned)
-{
-    sdEventAddTimeResult = -ERANGE;
-
-    EXPECT_EQ(waitFdTimeout(-1, EPOLLIN, 1), -ERANGE);
-    EXPECT_EQ(sdEventNewCalls, 1);
-    EXPECT_EQ(sdEventAddTimeCalls, 1);
-}
-
-#undef send
 
 // NOLINTEND

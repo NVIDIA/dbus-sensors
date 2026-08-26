@@ -340,8 +340,7 @@ class BridgePoolFakeConnTest : public ::testing::Test
     {
         ASSERT_EQ(pipe(fds.data()), 0);
         gFakeSdBusFd = fds[0];
-        conn = std::make_shared<sdbusplus::asio::connection>(
-            io, sdbusplus::bus_t(nullptr, &gTestSdBusInterface));
+        conn = std::make_shared<sdbusplus::asio::connection>(io, nullptr);
     }
 
     void TearDown() override
