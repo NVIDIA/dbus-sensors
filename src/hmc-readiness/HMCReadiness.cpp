@@ -152,7 +152,7 @@ int main(int argc, char* argv[])
     // Live updates: recovery object appears -> not ready; disappears -> ready.
     const std::string watchPath = cfg.recoveryPath;
     auto onAdded = [applyReadiness, watchPath](sdbusplus::message_t& msg) {
-        sdbusplus::message::object_path path;
+        sdbusplus::object_path path;
         msg.read(path);
         if (path.str == watchPath)
         {
@@ -160,7 +160,7 @@ int main(int argc, char* argv[])
         }
     };
     auto onRemoved = [applyReadiness, watchPath](sdbusplus::message_t& msg) {
-        sdbusplus::message::object_path path;
+        sdbusplus::object_path path;
         msg.read(path);
         if (path.str == watchPath)
         {
