@@ -167,7 +167,7 @@ class ShmFile : public testing::Test
             records[i].seqAtom.store(0, std::memory_order_relaxed);
             records[i].type = SensorDataType::None;
             records[i].lastUpdated = 0;
-            records[i].stale = 1;
+            records[i].available = 0;
             records[i].value.u64Val = 0;
         }
 
@@ -216,7 +216,7 @@ TEST_F(ShmFile, typeNoneWithTimestampIsSensorNoData)
     records[0].seqAtom.store(0, std::memory_order_relaxed);
     records[0].type = SensorDataType::None;
     records[0].lastUpdated = 1;
-    records[0].stale = 0;
+    records[0].available = 1;
 
     vHMCShmReader reader(path.string());
     SensorRecord rec{};
@@ -228,7 +228,7 @@ TEST_F(ShmFile, typedSlotWithZeroTimestampIsSensorNoData)
     records[0].seqAtom.store(0, std::memory_order_relaxed);
     records[0].type = SensorDataType::Double;
     records[0].lastUpdated = 0;
-    records[0].stale = 0;
+    records[0].available = 1;
     records[0].value.dVal = 1.0;
 
     vHMCShmReader reader(path.string());
@@ -323,7 +323,7 @@ TEST_F(ShmFile, garbageMagicIsWriterNotReady)
 
 TEST_F(ShmFile, magicDroppedAfterMapIsWriterNotReady)
 {
-    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 0);
+    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 1);
     vHMCShmReader reader(path.string());
     SensorRecord rec{};
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::Success);
@@ -334,7 +334,7 @@ TEST_F(ShmFile, magicDroppedAfterMapIsWriterNotReady)
 
 TEST_F(ShmFile, missingWriterLockIsWriterNotReady)
 {
-    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 0);
+    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 1);
     vHMCShmReader reader(path.string());
     SensorRecord rec{};
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::Success);
@@ -385,7 +385,7 @@ TEST_F(ShmFile, readyCookieWithoutResizeIsPickedUpAfterBackoff)
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::WriterNotReady);
 
     header->magicCookie.store(readyMagic, std::memory_order_release);
-    seqlockWrite(&records[0], SensorDataType::Double, 3.5, 0);
+    seqlockWrite(&records[0], SensorDataType::Double, 3.5, 1);
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::WriterNotReady);
 
     const std::chrono::steady_clock::time_point deadline =
@@ -406,7 +406,7 @@ TEST_F(ShmFile, readyCookieWithoutResizeIsPickedUpAfterBackoff)
 
 TEST_F(ShmFile, truncateInPlaceUnmapsBeforeHeaderAccess)
 {
-    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 0);
+    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 1);
     vHMCShmReader reader(path.string());
     SensorRecord rec{};
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::Success);
@@ -423,7 +423,7 @@ TEST_F(ShmFile, truncateInPlaceUnmapsBeforeHeaderAccess)
     EXPECT_EQ(reader.readSensor(0, rec), SensorError::WriterNotReady);
 
     createReadyFile(testRecordCount, 3);
-    seqlockWrite(&records[0], SensorDataType::Double, 5.0, 0);
+    seqlockWrite(&records[0], SensorDataType::Double, 5.0, 1);
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::Success);
     EXPECT_DOUBLE_EQ(rec.value.dVal, 5.0);
     EXPECT_EQ(reader.currentEpoch(), 3U);
@@ -431,7 +431,7 @@ TEST_F(ShmFile, truncateInPlaceUnmapsBeforeHeaderAccess)
 
 TEST_F(ShmFile, unlinkedFileIsWriterNotReady)
 {
-    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 0);
+    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 1);
     vHMCShmReader reader(path.string());
     SensorRecord rec{};
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::Success);
@@ -443,9 +443,9 @@ TEST_F(ShmFile, unlinkedFileIsWriterNotReady)
 
 TEST_F(ShmFile, readsDoubleUint32Uint64)
 {
-    seqlockWrite(&records[0], SensorDataType::Double, 42.5, 0);
-    seqlockWrite(&records[1], SensorDataType::Uint32, uint32_t{7}, 0);
-    seqlockWrite(&records[2], SensorDataType::Uint64, uint64_t{99}, 0);
+    seqlockWrite(&records[0], SensorDataType::Double, 42.5, 1);
+    seqlockWrite(&records[1], SensorDataType::Uint32, uint32_t{7}, 1);
+    seqlockWrite(&records[2], SensorDataType::Uint64, uint64_t{99}, 1);
 
     vHMCShmReader reader(path.string());
     SensorRecord rec{};
@@ -453,7 +453,7 @@ TEST_F(ShmFile, readsDoubleUint32Uint64)
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::Success);
     EXPECT_EQ(rec.type, SensorDataType::Double);
     EXPECT_DOUBLE_EQ(rec.value.dVal, 42.5);
-    EXPECT_EQ(rec.stale, 0);
+    EXPECT_EQ(rec.available, 1);
 
     ASSERT_EQ(reader.readSensor(1, rec), SensorError::Success);
     EXPECT_EQ(rec.type, SensorDataType::Uint32);
@@ -471,7 +471,7 @@ TEST_F(ShmFile, oddSeqIsReadContention)
     records[0].seqAtom.store(1, std::memory_order_release);
     records[0].type = SensorDataType::Double;
     records[0].lastUpdated = 1;
-    records[0].stale = 0;
+    records[0].available = 0;
 
     vHMCShmReader reader(path.string());
     SensorRecord rec{};
@@ -480,13 +480,13 @@ TEST_F(ShmFile, oddSeqIsReadContention)
 
 TEST_F(ShmFile, epochChangeRemaps)
 {
-    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 0);
+    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 1);
     vHMCShmReader reader(path.string());
     SensorRecord rec{};
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::Success);
     EXPECT_EQ(reader.currentEpoch(), 1U);
 
-    seqlockWrite(&records[0], SensorDataType::Double, 2.0, 0);
+    seqlockWrite(&records[0], SensorDataType::Double, 2.0, 1);
     header->epoch.store(2, std::memory_order_release);
 
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::Success);
@@ -496,14 +496,14 @@ TEST_F(ShmFile, epochChangeRemaps)
 
 TEST_F(ShmFile, replacedFileRemaps)
 {
-    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 0);
+    seqlockWrite(&records[0], SensorDataType::Double, 1.0, 1);
     vHMCShmReader reader(path.string());
     SensorRecord rec{};
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::Success);
     EXPECT_DOUBLE_EQ(rec.value.dVal, 1.0);
 
     createReadyFile(testRecordCount, 5);
-    seqlockWrite(&records[0], SensorDataType::Double, 9.0, 0);
+    seqlockWrite(&records[0], SensorDataType::Double, 9.0, 1);
 
     ASSERT_EQ(reader.readSensor(0, rec), SensorError::Success);
     EXPECT_EQ(reader.currentEpoch(), 5U);

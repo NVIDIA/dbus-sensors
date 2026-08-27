@@ -78,7 +78,7 @@ vhmc_shm::vHMCShmReader& vhmcShmReader()
 
 bool shmRecordToDouble(const vhmc_shm::SensorRecord& rec, double& out)
 {
-    if (rec.stale != 0)
+    if (rec.available == 0)
     {
         return false;
     }

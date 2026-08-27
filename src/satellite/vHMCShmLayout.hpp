@@ -78,7 +78,7 @@ struct alignas(cacheLineSize) SensorRecord
     std::atomic<uint32_t> seqAtom; // even=stable, odd=write in progress
     SensorDataType type;
     uint64_t lastUpdated;          // ms since epoch
-    uint8_t stale;                 // 1=invalid, 0=valid
+    uint8_t available; // 0=invalid, 1=valid; default 0 until first valid write
     uint8_t padAlign[7];
     union
     {
@@ -115,14 +115,14 @@ inline uint64_t getCurrentTimeMs()
 
 template <typename T>
 inline void seqlockWrite(SensorRecord* rec, SensorDataType type, const T& val,
-                         uint8_t stale)
+                         uint8_t available)
 {
     rec->seqAtom.fetch_add(1, std::memory_order_relaxed);
     std::atomic_thread_fence(std::memory_order_release);
 
     rec->type = type;
     rec->lastUpdated = getCurrentTimeMs();
-    rec->stale = stale;
+    rec->available = available;
 
     if constexpr (std::is_same_v<T, double>)
     {
@@ -203,7 +203,7 @@ inline bool seqlockRead(const SensorRecord* ptr, SensorRecord& outCopy)
 
         outCopy.type = ptr->type;
         outCopy.lastUpdated = ptr->lastUpdated;
-        outCopy.stale = ptr->stale;
+        outCopy.available = ptr->available;
         std::memcpy(&outCopy.value, &ptr->value, sizeof(ptr->value));
 
         std::atomic_thread_fence(std::memory_order_acquire);
