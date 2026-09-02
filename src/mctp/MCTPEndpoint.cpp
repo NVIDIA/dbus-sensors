@@ -783,15 +783,12 @@ void MCTPDDevice::performHealthCheck()
 
                         const bool wasUnresponsive =
                             self->unresponsiveBridgePoolEids.contains(eid);
-                        if (wasUnresponsive)
+
+                        if (!self->discoveryNeeded && wasUnresponsive)
                         {
                             info("Bridge pool EID {EID} accessible", "EID",
                                  eid);
                             self->unresponsiveBridgePoolEids.erase(eid);
-                        }
-
-                        if (!self->discoveryNeeded && wasUnresponsive)
-                        {
                             self->connection->async_method_call(
                                 [weak,
                                  eid](const boost::system::error_code& ec) {
