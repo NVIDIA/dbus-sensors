@@ -187,7 +187,6 @@ if get_option('mctp').allowed()
         executable(
             'test_MCTPEndpoint',
             'test_MCTPEndpoint.cpp',
-            'test_MCTPDeviceRepository.cpp',
             '../mctp/MCTPEndpoint.cpp',
             '../mctp/MCTPEndpointUtils.cpp',
             'sd_bus_wrappers.cpp',

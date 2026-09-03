@@ -542,6 +542,17 @@ void resetFakeHandleState()
     gLibusbExitCount = 0;
 }
 
+TEST(USBRecoveryApxDevice, descriptorReadFailureReturnsFalse)
+{
+    resetFakeHandleState();
+    gGetDeviceDescriptorRc = LIBUSB_ERROR_IO;
+    // Opaque sentinel; the wrapper does not dereference the device.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,performance-no-int-to-ptr)
+    auto* device = reinterpret_cast<libusb_device*>(0x1);
+
+    EXPECT_FALSE(isNvidiaApxDevice(device));
+}
+
 TEST(USBRecoveryFindBulkOutEndpoint, BothDescriptorFetchesFailReturnsNullopt)
 {
     resetFakeConfigState();

@@ -60,6 +60,7 @@ struct ResolveScript
     bool poolStartFails = false; // model Bridge1.PoolStart not yet populated
     bool subtreeThrows = false;  // model GetSubTree failure
     bool configuredByPathIsBare = false;
+    bool introspectThrows = false;
     bool introspectHasEndpoint = true; // warm-boot: endpoint already present
     int poolGetCount = 0;              // internal: PoolStart then PoolEnd
 };
@@ -161,6 +162,10 @@ std::function<int(sd_bus_message*, sd_bus_message**)> makeResolveHandler(
         }
         if (std::strcmp(member, "Introspect") == 0)
         {
+            if (s->introspectThrows)
+            {
+                return -ENOTSUP;
+            }
             return buildIntrospectReply(req, reply, s->introspectHasEndpoint);
         }
         if (std::strcmp(member, "Get") == 0)
@@ -556,6 +561,17 @@ TEST_F(BridgePoolFakeConnTest, setupDefersAndReportsHostUnreachable)
     EXPECT_EQ(captured, std::make_error_code(std::errc::host_unreachable));
 }
 
+TEST_F(BridgePoolFakeConnTest, setupWithoutCallbackDefersSafely)
+{
+    auto dev = makeDevice();
+    std::function<void(const std::error_code&,
+                       const std::shared_ptr<MCTPEndpoint>&)>
+        callback;
+
+    EXPECT_NO_THROW(dev->setup(std::move(callback)));
+    EXPECT_FALSE(dev->resolved);
+}
+
 TEST_F(BridgePoolFakeConnTest, onEndpointAddedNullMsgThrows)
 {
     auto dev = makeDevice();
@@ -674,6 +690,40 @@ TEST_F(BridgePoolFakeConnTest, resolveBridgeUnparseableNetworkDefers)
     EXPECT_FALSE(dev->resolveBridge());
 }
 
+TEST_F(BridgePoolFakeConnTest, resolveBridgeMissingEndpointsSegmentDefers)
+{
+    auto s = std::make_shared<ResolveScript>();
+    // Keep this a valid D-Bus object path so the scripted calls reach the
+    // network parser.
+    s->bridgePath = "/au/com/codeconstruct/mctp1/networks/1/bridges/8";
+    gSyncCallHandler = makeResolveHandler(s);
+
+    auto dev = makeDevice();
+    EXPECT_FALSE(dev->resolveBridge());
+    EXPECT_EQ(s->poolGetCount, 2);
+}
+
+TEST_F(BridgePoolFakeConnTest, resolveBridgeNonNumericNetworkDefers)
+{
+    auto s = std::make_shared<ResolveScript>();
+    s->bridgePath =
+        "/au/com/codeconstruct/mctp1/networks/not-a-number/endpoints/8";
+    gSyncCallHandler = makeResolveHandler(s);
+
+    auto dev = makeDevice();
+    EXPECT_FALSE(dev->resolveBridge());
+}
+
+TEST_F(BridgePoolFakeConnTest, resolveBridgePartiallyNumericNetworkDefers)
+{
+    auto s = std::make_shared<ResolveScript>();
+    s->bridgePath = "/au/com/codeconstruct/mctp1/networks/1x/endpoints/8";
+    gSyncCallHandler = makeResolveHandler(s);
+
+    auto dev = makeDevice();
+    EXPECT_FALSE(dev->resolveBridge());
+}
+
 // setup() drives resolveBridge() then armWatches() (match creation) then the
 // Introspect probe. Match creation goes through sdbusplus' SdBusImpl virtual
 // dispatch, which --wrap cannot reach, so use a TestSdBusInterface-backed
@@ -749,6 +799,22 @@ TEST_F(BridgePoolAsyncFixture, setupSuccessEndpointAbsentWaits)
     // Resolution succeeded but endpoint absent: callback deferred to the watch.
     EXPECT_FALSE(invoked);
     EXPECT_TRUE(dev->resolved);
+}
+
+TEST_F(BridgePoolAsyncFixture, setupIntrospectFailureWaitsForWatch)
+{
+    auto s = std::make_shared<ResolveScript>();
+    s->introspectThrows = true;
+    gSyncCallHandler = makeResolveHandler(s);
+
+    auto dev = makeDevice(2);
+    bool invoked = false;
+    dev->setup([&](const std::error_code&,
+                   const std::shared_ptr<MCTPEndpoint>&) { invoked = true; });
+
+    EXPECT_FALSE(invoked);
+    EXPECT_TRUE(dev->resolved);
+    EXPECT_TRUE(dev->setupCallback);
 }
 
 // ===========================================================================
@@ -886,6 +952,20 @@ TEST_F(BridgePoolFakeConnTest, onEndpointRemovedMatchingPathNotifies)
     EXPECT_EQ(removed, 1);
 }
 
+TEST_F(BridgePoolFakeConnTest,
+       onEndpointRemovedMatchingPathWithoutSubscriberIsSafe)
+{
+    auto dev = makeDevice(2);
+    dev->networkId = 1;
+    dev->bridgedEid = 12;
+    sd_bus_message* raw = buildIfacesRemoved(dev->predictedEndpointPath(),
+                                             kEndpointCtrlIface, true);
+    ASSERT_NE(raw, nullptr);
+    sdbusplus::message_t msg(raw, std::false_type{});
+
+    EXPECT_NO_THROW(dev->onEndpointRemoved(msg));
+}
+
 TEST_F(BridgePoolFakeConnTest, onEndpointRemovedWrongPathIgnored)
 {
     auto dev = makeDevice(2);
@@ -956,4 +1036,36 @@ TEST_F(BridgePoolAsyncFixture, armWatchesCallbacksInvokeHandlers)
     }
     EXPECT_EQ(added, 1);
     EXPECT_EQ(removed, 1);
+}
+
+TEST_F(BridgePoolAsyncFixture, armWatchesCallbacksIgnoreExpiredDevice)
+{
+    auto dev = makeDevice(2);
+    dev->networkId = 1;
+    dev->bridgedEid = 12;
+    const std::string endpointPath = dev->predictedEndpointPath();
+    dev->armWatches();
+    ASSERT_TRUE(dev->endpointAddedMatch);
+    ASSERT_TRUE(dev->endpointRemovedMatch);
+
+    auto addedMatch = std::move(dev->endpointAddedMatch);
+    auto removedMatch = std::move(dev->endpointRemovedMatch);
+    std::weak_ptr<BridgePoolMCTPDevice> weakDevice = dev;
+    dev.reset();
+    ASSERT_TRUE(weakDevice.expired());
+
+    {
+        sd_bus_message* raw =
+            buildIfacesAdded(endpointPath, kEndpointCtrlIface, true);
+        ASSERT_NE(raw, nullptr);
+        sdbusplus::message_t msg(raw, std::false_type{});
+        EXPECT_NO_THROW((*addedMatch->_callback)(msg));
+    }
+    {
+        sd_bus_message* raw =
+            buildIfacesRemoved(endpointPath, kEndpointCtrlIface, true);
+        ASSERT_NE(raw, nullptr);
+        sdbusplus::message_t msg(raw, std::false_type{});
+        EXPECT_NO_THROW((*removedMatch->_callback)(msg));
+    }
 }

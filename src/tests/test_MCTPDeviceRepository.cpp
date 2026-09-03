@@ -197,6 +197,37 @@ TEST(MCTPDeviceRepository, removeOneDeviceLeavesOthers)
     EXPECT_TRUE(repo.contains(dev2));
 }
 
+TEST(MCTPDeviceRepository,
+     reverseLookupSelectsEarlierInventoryAddedAfterLaterInventory)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<MockMCTPDevice>();
+
+    repo.add("/inv/z-later", device);
+    repo.add("/inv/a-earlier", device);
+
+    EXPECT_EQ(repo.inventoryFor(device).value_or(""), "/inv/a-earlier");
+    EXPECT_EQ(repo.deviceFor("/inv/z-later"), device);
+    EXPECT_EQ(repo.deviceFor("/inv/a-earlier"), device);
+}
+
+TEST(MCTPDeviceRepository, reverseLookupRefreshSkipsUnrelatedDevice)
+{
+    MCTPDeviceRepository repo;
+    auto unrelated = std::make_shared<MockMCTPDevice>();
+    auto target = std::make_shared<MockMCTPDevice>();
+
+    repo.add("/inv/a-unrelated", unrelated);
+    repo.add("/inv/b-target", target);
+    repo.add("/inv/c-target", target);
+    ASSERT_EQ(repo.inventoryFor(target).value_or(""), "/inv/b-target");
+
+    repo.remove(target);
+
+    EXPECT_EQ(repo.inventoryFor(target).value_or(""), "/inv/c-target");
+    EXPECT_EQ(repo.deviceFor("/inv/a-unrelated"), unrelated);
+}
+
 TEST(MCTPDeviceRepository, getNameForEidReturnsMappedNames)
 {
     MCTPDeviceRepository repo;
