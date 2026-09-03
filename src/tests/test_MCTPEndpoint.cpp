@@ -15417,3 +15417,253 @@ TEST_F(InterfaceResolverTempDirTest, I3cFactoryCreatesEveryEndpointIdLayout)
     EXPECT_EQ(bridge->getNameForEid(12),
               std::optional<std::string>{"i3c-bridge"});
 }
+
+TEST(USBMCTPDDevice, fromIgnoreEidsWithEmptyTokensIsHandled)
+{
+    SensorBaseConfigMap iface{{"Type", "MCTPUSBDevice"},
+                              {"Name", "usb-empty-tokens"},
+                              {"Interface", "usb0"},
+                              {"StaticEndpointID", "15"},
+                              {"IgnoreEIDs", ", 11, ,12,,"}};
+
+    auto device = USBMCTPDDevice::from({}, iface);
+    ASSERT_NE(device, nullptr);
+    EXPECT_EQ(device->getEid().value_or(0), 15);
+}
+
+TEST_F(FakeConnFixture, onDiscoveryMatchRuleWithEmptyInterfaceReturnsEarly)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-empty-interface", "", std::vector<uint8_t>{0x20});
+
+    EXPECT_NO_THROW(dev->onDiscoveryMatchRule());
+    EXPECT_EQ(dev->discoveryNotifyMatch, nullptr);
+    EXPECT_EQ(dev->discoveryCheckTimer, nullptr);
+}
+
+TEST_F(InterfaceResolverTempDirTest, I2cIgnoreMessageTypesSkipsEmptyCsvFields)
+{
+    redirect("/sys/bus/i2c/devices/i2c-7/net");
+    createDirectory(root / "mctpi2c-empty-fields");
+    SensorBaseConfigMap config{{"Type", std::string("MCTPI2CTarget")},
+                               {"Name", std::string("i2c-empty-fields")},
+                               {"Address", std::string("32")},
+                               {"Bus", std::string("7")},
+                               {"IgnoreMessageTypes", std::string("1, ,2,,3")}};
+
+    EXPECT_NE(I2CMCTPDDevice::from({}, config), nullptr);
+}
+
+TEST(I3CMCTPDDevice, invalidBusTextThrows)
+{
+    SensorBaseConfigMap config{{"Type", std::string("MCTPI3CTarget")},
+                               {"Name", std::string("i3c-invalid-bus")},
+                               {"Address", std::vector<uint64_t>{0x22}},
+                               {"Bus", std::string("not-a-bus")}};
+
+    EXPECT_THROW(I3CMCTPDDevice::from({}, config), std::invalid_argument);
+}
+
+TEST(USBMCTPDDeviceCfg, ignoreMessageTypesSkipsEmptyCsvFields)
+{
+    auto config = usbBaseConfig();
+    config["IgnoreMessageTypes"] = std::string("1, ,2,,3");
+    EXPECT_NE(USBMCTPDDevice::from({}, config), nullptr);
+}
+
+TEST(USBMCTPDDeviceCfg, rootHubWithoutNetdevRetainsDeferredDevice)
+{
+    std::string root = makeUsbSysfsTree("1", 1, 0, false, "");
+    ASSERT_FALSE(root.empty());
+    SensorBaseConfigMap config{
+        {"Type", std::string("MCTPUSBDevice")},
+        {"Name", std::string("usb-deferred")},
+        {"RootHubPath", root},
+        {"Port", std::string("1")},
+        {"Configuration", uint64_t{1}},
+        {"InterfaceNum", uint64_t{0}}};
+
+    auto dev = USBMCTPDDevice::from({}, config);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_TRUE(dev->getInterface().empty());
+    std::filesystem::remove_all(root);
+}
+
+TEST(PCIeMCTPDDevice, ignoreEidsSkipsEmptyCsvFields)
+{
+    SensorBaseConfigMap config{{"Type", std::string("MCTPPCIeTarget")},
+                               {"Name", std::string("pcie-empty-fields")},
+                               {"Interface", std::string("mctp-pcie-empty")},
+                               {"Address", std::string("02:1f.7")},
+                               {"IgnoreEIDs", std::string("10, ,20,,30")}};
+
+    EXPECT_NE(PCIeMCTPDDevice::from({}, config), nullptr);
+}
+
+TEST_F(AsyncFixture, DiscoveryAndRecoveryTimersIgnoreExpiredDevices)
+{
+    auto discoveryDevice = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-discovery-timer-expired", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto endpoint = attachEndpointForBranchCoverage(discoveryDevice, conn, 9);
+    discoveryDevice->discoveryCheckTimer =
+        std::make_unique<boost::asio::steady_timer>(io);
+    sdbusplus::message_t message(nullptr);
+    discoveryDevice->onDiscoveryNotify(message);
+    auto discoveryTimer = std::move(discoveryDevice->discoveryCheckTimer);
+    discoveryDevice->setEndpointForTest(nullptr);
+    endpoint.reset();
+    discoveryDevice.reset();
+
+    auto recoveryDevice = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-recovery-timer-expired", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(10), std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::optional<uint8_t>(1));
+    recoveryDevice->armRecoveryTimeout();
+    auto recoveryTimer = std::move(recoveryDevice->recoveryTimer);
+    recoveryDevice.reset();
+
+    EXPECT_GE(io.run_for(std::chrono::milliseconds(10200)), 2U);
+    EXPECT_NE(discoveryTimer, nullptr);
+    EXPECT_NE(recoveryTimer, nullptr);
+}
+
+namespace
+{
+struct IndeterministicPoolSpaceValue
+{
+    std::string value;
+    bool expected;
+};
+
+class IndeterministicPoolSpaceParsingTest :
+    public InterfaceResolverTempDirTest,
+    public testing::WithParamInterface<IndeterministicPoolSpaceValue>
+{
+  protected:
+    // TEST_P instance names contain '/', which is invalid in a directory name;
+    // sanitize it so the per-test temp directory can be created.
+    void SetUp() override
+    {
+        const auto* info =
+            ::testing::UnitTest::GetInstance()->current_test_info();
+        ASSERT_NE(info, nullptr);
+        std::string testName = info->name();
+        for (char& character : testName)
+        {
+            if (character == '/')
+            {
+                character = '-';
+            }
+        }
+        root = std::filesystem::temp_directory_path() /
+               ("mctp-interface-resolver-" + std::to_string(getpid()) + "-" +
+                testName);
+        std::filesystem::remove_all(root);
+        createDirectory(root);
+    }
+};
+} // namespace
+
+TEST_P(IndeterministicPoolSpaceParsingTest, I2cAcceptsSupportedSpellings)
+{
+    const auto& [value, expected] = GetParam();
+    redirect("/sys/bus/i2c/devices/i2c-7/net");
+    createDirectory(root / "mctpi2c7");
+    SensorBaseConfigMap config{{"Type", std::string("MCTPI2CTarget")},
+                               {"Name", std::string("i2c-pool-space")},
+                               {"Address", std::string("32")},
+                               {"Bus", std::string("7")},
+                               {"IndeterministicPoolSpace", value}};
+
+    auto dev = I2CMCTPDDevice::from({}, config);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(dev->indeterministicPoolSpace, expected);
+}
+
+TEST_P(IndeterministicPoolSpaceParsingTest, I3cAcceptsSupportedSpellings)
+{
+    const auto& [value, expected] = GetParam();
+    redirect("/sys/devices/virtual/net");
+    createDirectory(root / "mctpi3c8");
+    SensorBaseConfigMap config{{"Type", std::string("MCTPI3CTarget")},
+                               {"Name", std::string("i3c-pool-space")},
+                               {"Address", std::vector<uint64_t>{0x22}},
+                               {"Bus", std::string("8")},
+                               {"IndeterministicPoolSpace", value}};
+
+    auto dev = I3CMCTPDDevice::from({}, config);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(dev->indeterministicPoolSpace, expected);
+}
+
+TEST_P(IndeterministicPoolSpaceParsingTest, UsbAcceptsSupportedSpellings)
+{
+    const auto& [value, expected] = GetParam();
+    SensorBaseConfigMap config{{"Type", std::string("MCTPUSBDevice")},
+                               {"Name", std::string("usb-pool-space")},
+                               {"Interface", std::string("mctpusb0")},
+                               {"IndeterministicPoolSpace", value}};
+
+    auto dev = USBMCTPDDevice::from({}, config);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(dev->indeterministicPoolSpace, expected);
+}
+
+TEST_P(IndeterministicPoolSpaceParsingTest, SpiAcceptsSupportedSpellings)
+{
+    const auto& [value, expected] = GetParam();
+    SensorBaseConfigMap config{{"Type", std::string("MCTPSPIDevice")},
+                               {"Name", std::string("spi-pool-space")},
+                               {"Bus", std::string("3")},
+                               {"ChipSelect", std::string("2")},
+                               {"IndeterministicPoolSpace", value}};
+
+    auto dev = SPIMCTPDDevice::from({}, config);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(dev->indeterministicPoolSpace, expected);
+}
+
+TEST_P(IndeterministicPoolSpaceParsingTest, XrotAcceptsSupportedSpellings)
+{
+    const auto& [value, expected] = GetParam();
+    SensorBaseConfigMap config{{"Type", std::string("MCTPXROTTarget")},
+                               {"Name", std::string("xrot-pool-space")},
+                               {"Interface", std::string("mctpxrot0")},
+                               {"IndeterministicPoolSpace", value}};
+
+    auto dev = XROTMCTPDDevice::from({}, config);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(dev->indeterministicPoolSpace, expected);
+}
+
+TEST_P(IndeterministicPoolSpaceParsingTest, PcieAcceptsSupportedSpellings)
+{
+    const auto& [value, expected] = GetParam();
+    SensorBaseConfigMap config{{"Type", std::string("MCTPPCIeTarget")},
+                               {"Name", std::string("pcie-pool-space")},
+                               {"Interface", std::string("mctppcie0")},
+                               {"Address", std::string("0000:00:00.0")},
+                               {"IndeterministicPoolSpace", value}};
+
+    auto dev = PCIeMCTPDDevice::from({}, config);
+    ASSERT_NE(dev, nullptr);
+    EXPECT_EQ(dev->indeterministicPoolSpace, expected);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BooleanSpellings, IndeterministicPoolSpaceParsingTest,
+    testing::Values(IndeterministicPoolSpaceValue{"True", true},
+                    IndeterministicPoolSpaceValue{"1", true},
+                    IndeterministicPoolSpaceValue{"false", false}),
+    [](const testing::TestParamInfo<IndeterministicPoolSpaceValue>& info) {
+        if (info.param.value == "True")
+        {
+            return "CapitalTrue";
+        }
+        if (info.param.value == "1")
+        {
+            return "One";
+        }
+        return "False";
+    });

@@ -1205,6 +1205,55 @@ TEST_F(USBGadgetLambdaTest, endpointRemovedMatchCallbackInvokedWithNullMsg)
     }
 }
 
+// With the default-bus interposers active (gMockSdBusDefault), sd_bus_add_match
+// succeeds so subscribe() actually installs both match objects. This lets us
+// invoke the stored endpointAdded/endpointRemoved callback lambdas, exercising
+// their weak.lock()+dispatch bodies (which the throwing-subscribe fixtures
+// above cannot reach because the match is never created).
+TEST(USBGadgetMatchCallbacks, subscribeInstallsMatchesAndInvokesCallbacks)
+{
+    std::array<int, 2> fds{-1, -1};
+    ASSERT_EQ(pipe(fds.data()), 0);
+    gFakeSdBusFd = fds[0];
+    gMockSdBusDefault = true;
+
+    boost::asio::io_context io;
+    auto conn = std::make_shared<sdbusplus::asio::connection>(io, nullptr);
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    dev->isSetup = true;
+
+    ASSERT_NO_THROW(
+        dev->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                       [](const std::shared_ptr<MCTPEndpoint>&) {},
+                       [](const std::shared_ptr<MCTPEndpoint>&) {}));
+    ASSERT_NE(dev->endpointAddedMatch, nullptr);
+    ASSERT_NE(dev->endpointRemovedMatch, nullptr);
+
+    // Invoke both stored lambdas. weak.lock() succeeds (dev is alive) and the
+    // lambda forwards to onEndpointAdded/onEndpointRemoved. A null message may
+    // throw inside those handlers; the lambda body itself is what we cover.
+    auto nullMsg = []() { return sdbusplus::message_t(nullptr); };
+    auto& addedCb = *dev->endpointAddedMatch->_callback;
+    auto& removedCb = *dev->endpointRemovedMatch->_callback;
+    {
+        auto msg = nullMsg();
+        EXPECT_NO_THROW(addedCb(msg));
+    }
+    {
+        auto msg = nullMsg();
+        EXPECT_NO_THROW(removedCb(msg));
+    }
+
+    gMockSdBusDefault = false;
+    io.restart();
+    io.poll();
+    conn.reset();
+    io.stop();
+    close(fds[0]);
+    close(fds[1]);
+    gFakeSdBusFd = -1;
+}
+
 // Lambda #1 with real message — covers the non-throwing body path:
 // weak.lock() succeeds, onEndpointAdded(real_msg) is called without throw.
 TEST_F(USBGadgetSocketMockTest, endpointAddedMatchCallbackWithRealMsgNoThrow)
@@ -4067,6 +4116,29 @@ TEST_P(SetupWriteSysfsFileFailTest, setupNthWriteSysfsFileFails)
 }
 
 INSTANTIATE_TEST_SUITE_P(WriteSysfsFileFailures, SetupWriteSysfsFileFailTest,
+                         testing::Range(0, 10));
+
+// Exercise the setup() completion-callback exception path for each
+// writeSysfsFile failure site: the user callback throws and setup() must
+// propagate it.
+class ThrowingWriteFailureCallbackTest :
+    public SetupMockFixture,
+    public testing::WithParamInterface<int>
+{};
+
+TEST_P(ThrowingWriteFailureCallbackTest, propagatesCallbackException)
+{
+    gWriteSysfsFileFailOnCall = GetParam();
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+
+    EXPECT_THROW(dev->setup([](const std::error_code&,
+                               const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("setup completion failure");
+    }),
+                 std::runtime_error);
+}
+
+INSTANTIATE_TEST_SUITE_P(WriteFailureSites, ThrowingWriteFailureCallbackTest,
                          testing::Range(0, 10));
 
 // ===========================================================================

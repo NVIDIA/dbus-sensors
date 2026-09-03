@@ -83,6 +83,14 @@ if get_option('mctp').allowed()
         '-UBOOST_ASIO_DISABLE_EPOLL',
     ]
 
+    coverage_test_override_options = []
+    # GCC -Og records exception-cleanup edges as ordinary branch arcs, so
+    # gcovr's exclude-throw-branches cannot filter them. Keep coverage test
+    # objects at O0 so their branch data reflects source-level control flow.
+    if get_option('b_coverage')
+        coverage_test_override_options += ['optimization=0']
+    endif
+
     # ld --wrap flags to intercept sd-bus calls in fake-connection tests
     sd_bus_wrap_link_args = [
         '-Wl,--wrap,sd_bus_get_fd',
@@ -131,6 +139,7 @@ if get_option('mctp').allowed()
             dependencies: [gmock_dep, ut_deps_list, utils_dep, libusb_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
+            override_options: coverage_test_override_options,
         ),
     )
 
@@ -169,6 +178,7 @@ if get_option('mctp').allowed()
             dependencies: [gmock_dep, ut_deps_list, utils_dep, libusb_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
+            override_options: coverage_test_override_options,
         ),
     )
 
@@ -188,6 +198,7 @@ if get_option('mctp').allowed()
             dependencies: [gmock_dep, ut_deps_list, utils_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
+            override_options: coverage_test_override_options,
         ),
     )
 
@@ -203,6 +214,7 @@ if get_option('mctp').allowed()
             dependencies: [gmock_dep, ut_deps_list, utils_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
+            override_options: coverage_test_override_options,
         ),
     )
 
@@ -219,6 +231,7 @@ if get_option('mctp').allowed()
             dependencies: [gmock_dep, ut_deps_list, utils_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
+            override_options: coverage_test_override_options,
         ),
     )
 
@@ -232,14 +245,18 @@ if get_option('mctp').allowed()
             '../mctp/MCTPEndpointUtils.cpp',
             'sd_bus_wrappers.cpp',
             'filesystem_wrappers.cpp',
+            'reactor_main_interposers.cpp',
             'phosphor_logging_drain.cpp',
             cpp_args: boost_asio_test_backend_args + ['-fno-access-control'],
             link_args: custom_devices_wrap_link_args + [
                 '-Wl,--wrap,_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode',
+                '-Wl,--wrap,uname',
+                '-Wl,--wrap,_ZNSt10filesystem6statusERKNS_7__cxx114pathE',
             ],
             dependencies: [gmock_dep, ut_deps_list, utils_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
+            override_options: coverage_test_override_options,
         ),
     )
 
@@ -259,6 +276,7 @@ if get_option('mctp').allowed()
             dependencies: [gmock_dep, ut_deps_list, utils_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
+            override_options: coverage_test_override_options,
         ),
     )
 
@@ -283,6 +301,7 @@ if get_option('mctp').allowed()
             dependencies: [gmock_dep, ut_deps_list, utils_dep, libusb_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
+            override_options: coverage_test_override_options,
         ),
     )
 
@@ -303,6 +322,7 @@ if get_option('mctp').allowed()
             dependencies: [gmock_dep, ut_deps_list, utils_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
+            override_options: coverage_test_override_options,
         ),
         timeout: 120,
     )

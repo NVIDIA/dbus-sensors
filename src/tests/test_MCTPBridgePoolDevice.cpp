@@ -59,6 +59,7 @@ struct ResolveScript
     bool providePoolEnd = true;
     bool poolStartFails = false; // model Bridge1.PoolStart not yet populated
     bool subtreeThrows = false;  // model GetSubTree failure
+    bool configuredByPathIsBare = false;
     bool introspectHasEndpoint = true; // warm-boot: endpoint already present
     int poolGetCount = 0;              // internal: PoolStart then PoolEnd
 };
@@ -90,10 +91,11 @@ int buildSubtreeReply(sd_bus_message* req, sd_bus_message** reply,
 // Build a Properties.Get reply for configured_by "endpoints": variant<as> with
 // a single EM object path whose trailing segment is emName.
 int buildConfiguredByReply(sd_bus_message* req, sd_bus_message** reply,
-                           const char* emName)
+                           const char* emName, bool pathIsBare)
 {
     std::string emPath =
-        std::string("/xyz/openbmc_project/inventory/") + emName;
+        pathIsBare ? std::string(emName)
+                   : std::string("/xyz/openbmc_project/inventory/") + emName;
     sd_bus_message_new_method_return(req, reply);
     sd_bus_message* r = *reply;
     sd_bus_message_open_container(r, 'v', "as");
@@ -166,7 +168,8 @@ std::function<int(sd_bus_message*, sd_bus_message**)> makeResolveHandler(
             if (path != nullptr &&
                 std::string(path).ends_with("/configured_by"))
             {
-                return buildConfiguredByReply(req, reply, s->emName);
+                return buildConfiguredByReply(req, reply, s->emName,
+                                              s->configuredByPathIsBare);
             }
             // Bridge1 PoolStart (first) then PoolEnd (second).
             int idx = s->poolGetCount++;
@@ -624,6 +627,20 @@ TEST_F(BridgePoolFakeConnTest, resolveBridgeReversedPoolBoundsDefers)
     auto dev = makeDevice();
     EXPECT_FALSE(dev->resolveBridge());
     EXPECT_FALSE(dev->resolved);
+}
+
+// configured_by target reported as a bare EM name (no inventory path prefix)
+// still matches the bridge name, exercising the bare-path branch of resolve.
+TEST_F(BridgePoolFakeConnTest, resolveBridgeBareConfiguredByNameMatches)
+{
+    auto s = std::make_shared<ResolveScript>();
+    s->configuredByPathIsBare = true;
+    gSyncCallHandler = makeResolveHandler(s);
+
+    auto dev = makeDevice(2);
+    EXPECT_TRUE(dev->resolveBridge());
+    EXPECT_TRUE(dev->resolved);
+    EXPECT_EQ(dev->bridgedEid.value_or(0), 12);
 }
 
 TEST_F(BridgePoolFakeConnTest, resolveBridgeConfiguredByMismatchDefers)
