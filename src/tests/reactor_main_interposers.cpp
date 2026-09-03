@@ -10,6 +10,7 @@
 
 #include <dlfcn.h>
 #include <sys/utsname.h>
+#include <systemd/sd-bus-protocol.h>
 #include <systemd/sd-bus-vtable.h>
 #include <systemd/sd-bus.h>
 
@@ -107,16 +108,16 @@ int sd_bus_get_events(sd_bus* bus)
 
 // Match libsystemd's public parameter name exactly.
 // NOLINTNEXTLINE(readability-identifier-naming)
-int sd_bus_get_timeout(sd_bus* bus, uint64_t* timeout_usec)
+int sd_bus_get_timeout(sd_bus* bus, uint64_t* ret)
 {
     if (!gMockSdBusDefault)
     {
         using Function = int (*)(sd_bus*, uint64_t*);
-        return callNext<Function>("sd_bus_get_timeout", bus, timeout_usec);
+        return callNext<Function>("sd_bus_get_timeout", bus, ret);
     }
-    if (timeout_usec != nullptr)
+    if (ret != nullptr)
     {
-        *timeout_usec = UINT64_MAX;
+        *ret = UINT64_MAX;
     }
     return 0;
 }
@@ -189,7 +190,7 @@ int sd_bus_request_name(sd_bus* bus, const char* name, uint64_t flags)
     return 0;
 }
 
-int sd_bus_message_new_method_call(sd_bus* bus, sd_bus_message** message,
+int sd_bus_message_new_method_call(sd_bus* bus, sd_bus_message** ret,
                                    const char* destination, const char* path,
                                    const char* interface, const char* member)
 {
@@ -197,13 +198,12 @@ int sd_bus_message_new_method_call(sd_bus* bus, sd_bus_message** message,
     {
         using Function = int (*)(sd_bus*, sd_bus_message**, const char*,
                                  const char*, const char*, const char*);
-        return callNext<Function>("sd_bus_message_new_method_call", bus,
-                                  message, destination, path, interface,
-                                  member);
+        return callNext<Function>("sd_bus_message_new_method_call", bus, ret,
+                                  destination, path, interface, member);
     }
-    if (message != nullptr)
+    if (ret != nullptr)
     {
-        *message = nullptr;
+        *ret = nullptr;
     }
     return -ENOTSUP;
 }
