@@ -3,6 +3,7 @@
 #include "Utils.hpp"
 #include "async_test_helpers.hpp"
 
+#include <net/if.h>
 #include <sys/socket.h>
 #include <systemd/sd-bus-protocol.h>
 #include <systemd/sd-bus.h>
@@ -18,6 +19,8 @@
 #include <cerrno>
 #include <cstdint>
 #include <exception>
+#include <fstream>
+#include <ios>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -56,6 +59,35 @@ extern bool gSendtoExact;
 extern int gSendtoCallCount;
 extern int gSendtoFailOnCall;
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
+
+namespace
+{
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::string udcInputPath;
+constexpr const char* productionUdcPath =
+    "/sys/kernel/config/usb_gadget/g_multi/UDC";
+} // namespace
+
+extern "C" void realIfstreamConstructor(
+    std::ifstream* stream, const char* path,
+    std::ios_base::openmode
+        mode) asm("__real__ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode");
+extern "C" void wrapIfstreamConstructor(
+    std::ifstream* stream, const char* path,
+    std::ios_base::openmode
+        mode) asm("__wrap__ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode");
+
+extern "C" void wrapIfstreamConstructor(std::ifstream* stream, const char* path,
+                                        std::ios_base::openmode mode)
+{
+    const char* redirectedPath = path;
+    if (!udcInputPath.empty() && path != nullptr &&
+        std::string(path) == productionUdcPath)
+    {
+        redirectedPath = udcInputPath.c_str();
+    }
+    realIfstreamConstructor(stream, redirectedPath, mode);
+}
 
 TEST(USBGadgetMCTPDevice, matchInterfacesRelevant)
 {
@@ -270,6 +302,22 @@ TEST_F(USBGadgetDeviceTest, eidReturnsConstructedValue)
     EXPECT_EQ(device->eid(), 99);
 }
 
+TEST_F(USBGadgetDeviceTest, idIsStableAndIncludesIdentityFields)
+{
+    auto first =
+        std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10, "usb0");
+    auto same =
+        std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10, "usb0");
+    auto differentEid =
+        std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 11, "usb0");
+    auto differentName =
+        std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10, "usb1");
+
+    EXPECT_EQ(first->id(), same->id());
+    EXPECT_NE(first->id(), differentEid->id());
+    EXPECT_NE(first->id(), differentName->id());
+}
+
 TEST_F(USBGadgetDeviceTest, getNameForEidReturnsConfiguredNameOrGadgetName)
 {
     auto namedDevice = std::make_shared<USBGadgetMCTPDevice>(
@@ -294,10 +342,34 @@ TEST_F(USBGadgetDeviceTest, setupWhenAlreadySetupReturnsError)
     EXPECT_TRUE(callbackInvoked);
 }
 
+TEST_F(USBGadgetDeviceTest, setupWhenAlreadySetupPropagatesCallbackError)
+{
+    auto device = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    device->isSetup = true;
+
+    EXPECT_THROW(device->setup([](const std::error_code&,
+                                  const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("setup callback failed");
+    }),
+                 std::runtime_error);
+}
+
 TEST_F(USBGadgetDeviceTest, removeWithoutSubscribeDoesNotCrash)
 {
     auto device = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
     EXPECT_NO_THROW(device->remove());
+}
+
+TEST_F(USBGadgetDeviceTest, removePropagatesSubscriberErrorBeforeReset)
+{
+    auto device = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    device->isSetup = true;
+    device->notifyRemoved = [](const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("removed subscriber failed");
+    };
+
+    EXPECT_THROW(device->remove(), std::runtime_error);
+    EXPECT_TRUE(device->isSetup);
 }
 
 TEST_F(USBGadgetDeviceTest, subscribeWithoutSetupDoesNotCrash)
@@ -307,6 +379,20 @@ TEST_F(USBGadgetDeviceTest, subscribeWithoutSetupDoesNotCrash)
         device->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
                           [](const std::shared_ptr<MCTPEndpoint>&) {},
                           [](const std::shared_ptr<MCTPEndpoint>&) {}));
+}
+
+TEST(USBGadgetMCTPDeviceCtor, constructorRejectsEmptyInterfaceName)
+{
+    EXPECT_THROW((void)std::make_shared<USBGadgetMCTPDevice>(nullptr, "", 16),
+                 std::invalid_argument);
+}
+
+TEST(USBGadgetMCTPDeviceCtor, constructorRejectsInterfaceNameAtIfNameSize)
+{
+    const std::string interfaceName(IFNAMSIZ, 'a');
+    EXPECT_THROW(
+        (void)std::make_shared<USBGadgetMCTPDevice>(nullptr, interfaceName, 16),
+        std::invalid_argument);
 }
 
 TEST(USBGadgetMCTPDevice, matchConfigReturnsCorrectMap)
@@ -5974,4 +6060,327 @@ TEST_F(UsbGadgetSetupWalk, netfilterFailAtEachRuleTolerated)
         {}
         EXPECT_TRUE(called) << "failAt=" << failAt;
     }
+}
+
+TEST_F(USBGadgetFromTest, fromRejectsCommandInjectionInterface)
+{
+    SensorBaseConfigMap iface{{"Type", std::string("MCTPUSBGadgetTarget")},
+                              {"Name", std::string("usb0")},
+                              {"Interface", std::string("usb0;id")},
+                              {"LocalEID", std::string("10")}};
+
+    EXPECT_THROW(USBGadgetMCTPDevice::from(conn, iface), std::invalid_argument);
+}
+
+// 6. onEndpointAdded() (private) — null msg is ignored.
+TEST(USBGadgetMCTPDevice, onEndpointAddedWithNullMsgIsIgnored)
+{
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb0", 10);
+    auto msg = sdbusplus::message_t(nullptr);
+    EXPECT_NO_THROW(dev->onEndpointAdded(msg));
+}
+
+// 7. onEndpointRemoved() (private) — null msg is ignored.
+TEST(USBGadgetMCTPDevice, onEndpointRemovedWithNullMsgIsIgnored)
+{
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb0", 10);
+    auto msg = sdbusplus::message_t(nullptr);
+    EXPECT_NO_THROW(dev->onEndpointRemoved(msg));
+}
+// sendDiscoveryNotify: sendto returns -1 (failure) for a device with
+// a valid gadget name — exercises the error logging with name substitution.
+TEST_F(USBGadgetSocketMockTest, sendDiscoveryNotifySendtoFailGadgetName)
+{
+    refreshMockFd();
+    gSendtoRetval = -1;
+    auto dev =
+        std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb_gdgt", 100);
+    EXPECT_NO_THROW(dev->sendDiscoveryNotify());
+}
+
+TEST(USBGadgetMCTPDevice, constructorRejectsShellMetacharacters)
+{
+    EXPECT_THROW(
+        (void)std::make_shared<USBGadgetMCTPDevice>(nullptr, "usb0;id", 16),
+        std::invalid_argument);
+}
+
+TEST_F(SetupMockFixture, modprobeFailurePropagatesCallbackException)
+{
+    gSystemFailOnCall = 0;
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    EXPECT_THROW(dev->setup([](const std::error_code&,
+                               const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("setup completion failure");
+    }),
+                 std::runtime_error);
+}
+
+TEST_F(SetupMockFixture, symlinkFailurePropagatesCallbackException)
+{
+    gSymlinkRetval = -1;
+    errno = EACCES;
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    EXPECT_THROW(dev->setup([](const std::error_code&,
+                               const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("setup completion failure");
+    }),
+                 std::runtime_error);
+}
+
+TEST_F(SetupMockFixture, linkUpFailurePropagatesCallbackException)
+{
+    gSystemFailOnCall = 1;
+    gSystemFailErrno = EIO;
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    EXPECT_THROW(dev->setup([](const std::error_code&,
+                               const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("setup completion failure");
+    }),
+                 std::runtime_error);
+}
+
+TEST_F(SetupMockFixture, addressFailurePropagatesCallbackException)
+{
+    gSystemFailOnCall = 8;
+    gSystemFailErrno = EIO;
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    EXPECT_THROW(dev->setup([](const std::error_code&,
+                               const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("setup completion failure");
+    }),
+                 std::runtime_error);
+}
+
+TEST_F(SetupMockFixture, roleFailurePropagatesCallbackException)
+{
+    gMockSdBusCallSuccess = false;
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    EXPECT_THROW(dev->setup([](const std::error_code&,
+                               const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("setup completion failure");
+    }),
+                 std::runtime_error);
+}
+
+TEST_F(SetupMockFixture, successPropagatesCallbackException)
+{
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    EXPECT_THROW(dev->setup([](const std::error_code&,
+                               const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("setup completion failure");
+    }),
+                 std::runtime_error);
+    EXPECT_TRUE(dev->isSetup);
+}
+
+TEST(USBGadgetMCTPDevice, onEndpointAddedMalformedMessageIsIgnored)
+{
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb0", 10);
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW(dev->onEndpointAdded(msg));
+}
+
+TEST(USBGadgetMCTPDevice, onEndpointRemovedMalformedMessageIsIgnored)
+{
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(nullptr, "mctpusb0", 10);
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW(dev->onEndpointRemoved(msg));
+}
+
+TEST_F(SetupMockFixture, udcAlreadySetSkipsUdcWrite)
+{
+    udcInputPath = "/tmp/dbus-sensors-udc-" + std::to_string(getpid());
+    {
+        std::ofstream output(udcInputPath);
+        ASSERT_TRUE(output.is_open());
+        output << "1e6a0000.usb-vhub:p2\n";
+    }
+
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    bool called = false;
+    std::error_code ec;
+    dev->setup([&](const std::error_code& receivedEc,
+                   const std::shared_ptr<MCTPEndpoint>&) {
+        called = true;
+        ec = receivedEc;
+    });
+
+    EXPECT_TRUE(called);
+    EXPECT_FALSE(ec);
+    EXPECT_EQ(gWriteSysfsFileCallCount, 9);
+}
+
+TEST_F(SetupMockFixture, differentUdcValueWritesConfiguredUdc)
+{
+    udcInputPath = "/tmp/dbus-sensors-udc-" + std::to_string(getpid());
+    {
+        std::ofstream output(udcInputPath);
+        ASSERT_TRUE(output.is_open());
+        output << "different-controller\n";
+    }
+
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    bool called = false;
+    std::error_code ec;
+    dev->setup([&](const std::error_code& receivedEc,
+                   const std::shared_ptr<MCTPEndpoint>&) {
+        called = true;
+        ec = receivedEc;
+    });
+
+    EXPECT_TRUE(called);
+    EXPECT_FALSE(ec);
+    EXPECT_EQ(gWriteSysfsFileCallCount, 10);
+}
+
+TEST_F(SetupMockFixture, setupNetfilterCommandFailureIsNonFatal)
+{
+    // 0=modprobe, 1=link up, 2=delete old nft table, 3=first nft command.
+    gSystemFailOnCall = 3;
+
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    bool called = false;
+    std::error_code ec;
+    std::shared_ptr<MCTPEndpoint> endpoint;
+
+    dev->setup([&](const std::error_code& receivedEc,
+                   const std::shared_ptr<MCTPEndpoint>& receivedEndpoint) {
+        called = true;
+        ec = receivedEc;
+        endpoint = receivedEndpoint;
+    });
+
+    EXPECT_TRUE(called);
+    EXPECT_FALSE(ec);
+    EXPECT_NE(endpoint, nullptr);
+    EXPECT_TRUE(dev->isSetup);
+    // The nft loop breaks immediately; setup then issues mctp addr add.
+    EXPECT_EQ(gSystemCallCount, 5);
+}
+
+enum class ManagedObjectsReplyShape
+{
+    networkWithoutInterface,
+    interfaceWithoutLocalEids,
+    localEidsWithWrongType,
+};
+
+void driveManagedObjectsReply(ManagedObjectsReplyShape shape)
+{
+    static constexpr const char* networkPath =
+        "/au/com/codeconstruct/mctp1/networks/1";
+    static constexpr const char* networkInterface =
+        "au.com.codeconstruct.MCTP.Network1";
+
+    ASSERT_FALSE(gPendingAsyncCalls.empty());
+    PendingAsync pending = gPendingAsyncCalls.front();
+    gPendingAsyncCalls.erase(gPendingAsyncCalls.begin());
+
+    sd_bus_message* reply = nullptr;
+    ASSERT_GE(sd_bus_message_new_method_return(pending.request, &reply), 0);
+    ASSERT_GE(
+        sd_bus_message_open_container(reply, SD_BUS_TYPE_ARRAY, "{oa{sa{sv}}}"),
+        0);
+    ASSERT_GE(sd_bus_message_open_container(reply, SD_BUS_TYPE_DICT_ENTRY,
+                                            "oa{sa{sv}}"),
+              0);
+    ASSERT_GE(sd_bus_message_append_basic(reply, SD_BUS_TYPE_OBJECT_PATH,
+                                          networkPath),
+              0);
+    ASSERT_GE(
+        sd_bus_message_open_container(reply, SD_BUS_TYPE_ARRAY, "{sa{sv}}"), 0);
+
+    if (shape != ManagedObjectsReplyShape::networkWithoutInterface)
+    {
+        ASSERT_GE(sd_bus_message_open_container(reply, SD_BUS_TYPE_DICT_ENTRY,
+                                                "sa{sv}"),
+                  0);
+        ASSERT_GE(sd_bus_message_append_basic(reply, SD_BUS_TYPE_STRING,
+                                              networkInterface),
+                  0);
+        ASSERT_GE(
+            sd_bus_message_open_container(reply, SD_BUS_TYPE_ARRAY, "{sv}"), 0);
+
+        if (shape == ManagedObjectsReplyShape::localEidsWithWrongType)
+        {
+            static constexpr const char* property = "LocalEIDs";
+            static constexpr const char* wrongValue = "not-a-byte-array";
+            ASSERT_GE(sd_bus_message_open_container(
+                          reply, SD_BUS_TYPE_DICT_ENTRY, "sv"),
+                      0);
+            ASSERT_GE(sd_bus_message_append_basic(reply, SD_BUS_TYPE_STRING,
+                                                  property),
+                      0);
+            ASSERT_GE(
+                sd_bus_message_open_container(reply, SD_BUS_TYPE_VARIANT, "s"),
+                0);
+            ASSERT_GE(sd_bus_message_append_basic(reply, SD_BUS_TYPE_STRING,
+                                                  wrongValue),
+                      0);
+            ASSERT_GE(sd_bus_message_close_container(reply), 0); // variant
+            ASSERT_GE(sd_bus_message_close_container(reply), 0); // property
+        }
+
+        ASSERT_GE(sd_bus_message_close_container(reply), 0); // properties
+        ASSERT_GE(sd_bus_message_close_container(reply), 0); // interface
+    }
+
+    ASSERT_GE(sd_bus_message_close_container(reply), 0); // interfaces
+    ASSERT_GE(sd_bus_message_close_container(reply), 0); // object
+    ASSERT_GE(sd_bus_message_close_container(reply), 0); // objects
+
+    static uint64_t replySerial = 20000;
+    ASSERT_GE(sd_bus_message_seal(reply, ++replySerial, 0), 0);
+    EXPECT_GE(pending.callback(reply, pending.userdata, nullptr), 0);
+    sd_bus_message_unref(reply);
+    sd_bus_message_unref(pending.request);
+}
+
+TEST_F(SetupMockFixture, subscribeManagedObjectsCallbackIgnoresExpiredDevice)
+{
+    gMockSdBusCallAsync = true;
+    std::weak_ptr<USBGadgetMCTPDevice> weakDevice;
+    {
+        auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+        weakDevice = dev;
+        dev->isSetup = true;
+        dev->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                       [](const std::shared_ptr<MCTPEndpoint>&) {},
+                       [](const std::shared_ptr<MCTPEndpoint>&) {});
+        ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+    }
+
+    ASSERT_TRUE(weakDevice.expired());
+    EXPECT_NO_THROW(driveAsyncCallManagedObjectsEmpty());
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+}
+
+TEST_F(SetupMockFixture, subscribeManagedObjectsWithoutLocalEidsIsIgnored)
+{
+    gMockSdBusCallAsync = true;
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    dev->isSetup = true;
+    dev->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                   [](const std::shared_ptr<MCTPEndpoint>&) {},
+                   [](const std::shared_ptr<MCTPEndpoint>&) {});
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveManagedObjectsReply(
+        ManagedObjectsReplyShape::interfaceWithoutLocalEids);
+    EXPECT_TRUE(dev->netLocalEIDs.empty());
+}
+
+TEST_F(SetupMockFixture, subscribeManagedObjectsWrongLocalEidsTypeIsIgnored)
+{
+    gMockSdBusCallAsync = true;
+    auto dev = std::make_shared<USBGadgetMCTPDevice>(conn, "mctpusb0", 10);
+    dev->isSetup = true;
+    dev->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                   [](const std::shared_ptr<MCTPEndpoint>&) {},
+                   [](const std::shared_ptr<MCTPEndpoint>&) {});
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveManagedObjectsReply(ManagedObjectsReplyShape::localEidsWithWrongType);
+    EXPECT_TRUE(dev->netLocalEIDs.empty());
 }

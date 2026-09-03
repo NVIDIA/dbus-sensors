@@ -4688,3 +4688,397 @@ TEST(MCTPReactorIfacesAdded, NullMessageHandledGracefully)
     sdbusplus::message_t msg(nullptr);
     EXPECT_NO_THROW(reactor->onMctpdEndpointInterfacesAdded(msg));
 }
+
+TEST(MCTPReactorBranchCoverage, tickVisitsAssigningState)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    ON_CALL(*device, id()).WillByDefault(testing::Return(81U));
+    EXPECT_CALL(*device, setup(testing::_)).Times(0);
+
+    reactor->devices.add("/branch/tick-assigning", device);
+    reactor->states[device->id()] = MCTPDeviceState::Assigning;
+    reactor->tick();
+
+    EXPECT_EQ(reactor->states.at(device->id()), MCTPDeviceState::Assigning);
+}
+
+TEST(MCTPReactorBranchCoverage, trackEndpointDescribeExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto endpoint = std::make_shared<testing::NiceMock<MockMCTPEndpoint>>();
+    EXPECT_CALL(*endpoint, describe())
+        .WillOnce(testing::Throw(std::runtime_error("describe failed")));
+
+    EXPECT_THROW(static_cast<void>(reactor->trackEndpoint(endpoint)),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, trackEndpointDeviceExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto endpoint = std::make_shared<testing::NiceMock<MockMCTPEndpoint>>();
+    ON_CALL(*endpoint, network()).WillByDefault(testing::Return(1));
+    ON_CALL(*endpoint, eid()).WillByDefault(testing::Return(9));
+    EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_));
+    EXPECT_CALL(*endpoint, device())
+        .WillOnce(testing::Throw(std::runtime_error("device lookup failed")));
+
+    EXPECT_THROW(static_cast<void>(reactor->trackEndpoint(endpoint)),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, trackEndpointDeviceIdExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto endpoint = std::make_shared<testing::NiceMock<MockMCTPEndpoint>>();
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    ON_CALL(*endpoint, network()).WillByDefault(testing::Return(1));
+    ON_CALL(*endpoint, eid()).WillByDefault(testing::Return(9));
+    ON_CALL(*endpoint, device()).WillByDefault(testing::Return(device));
+    EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_));
+    EXPECT_CALL(*device, id())
+        .WillOnce(testing::Throw(std::runtime_error("device id failed")));
+
+    EXPECT_THROW(static_cast<void>(reactor->trackEndpoint(endpoint)),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, associationExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto endpoint = std::make_shared<testing::NiceMock<MockMCTPEndpoint>>();
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    ON_CALL(*device, id()).WillByDefault(testing::Return(82U));
+    ON_CALL(*device, describe())
+        .WillByDefault(testing::Return("association-throw-device"));
+    ON_CALL(*endpoint, network()).WillByDefault(testing::Return(1));
+    ON_CALL(*endpoint, eid()).WillByDefault(testing::Return(9));
+    ON_CALL(*endpoint, device()).WillByDefault(testing::Return(device));
+    EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_));
+    EXPECT_CALL(assoc, associate(testing::_, testing::_))
+        .WillOnce(testing::Throw(std::runtime_error("associate failed")));
+
+    reactor->devices.add("/branch/association-throw", device);
+    reactor->states[device->id()] = MCTPDeviceState::Assigning;
+    EXPECT_THROW(static_cast<void>(reactor->trackEndpoint(endpoint)),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, disassociationExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto endpoint = std::make_shared<testing::NiceMock<MockMCTPEndpoint>>();
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    std::function<void(const std::shared_ptr<MCTPEndpoint>&)> removed;
+    ON_CALL(*device, id()).WillByDefault(testing::Return(83U));
+    ON_CALL(*device, describe())
+        .WillByDefault(testing::Return("disassociation-throw-device"));
+    ON_CALL(*endpoint, network()).WillByDefault(testing::Return(1));
+    ON_CALL(*endpoint, eid()).WillByDefault(testing::Return(9));
+    ON_CALL(*endpoint, device()).WillByDefault(testing::Return(device));
+    EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_))
+        .WillOnce(testing::SaveArg<2>(&removed));
+    EXPECT_CALL(assoc, associate(testing::_, testing::_));
+    EXPECT_CALL(assoc, disassociate(testing::_))
+        .WillOnce(testing::Throw(std::runtime_error("disassociate failed")));
+
+    reactor->devices.add("/branch/disassociation-throw", device);
+    reactor->states[device->id()] = MCTPDeviceState::Assigning;
+    reactor->trackEndpoint(endpoint);
+    ASSERT_TRUE(static_cast<bool>(removed));
+    EXPECT_THROW(static_cast<void>(removed(endpoint)), std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, usbFailureWithoutRecoveryBackend)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(
+        assoc, std::unique_ptr<USBRecovery>(nullptr));
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-no-backend", 1);
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+
+    reactor->manageMCTPDevice("/branch/usb-no-backend", device);
+    EXPECT_TRUE(reactor->isRetrying(0));
+    reactor->unmanageMCTPDevice("/branch/usb-no-backend");
+}
+
+TEST(MCTPReactorBranchCoverage, usbRecoveryBackendExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery));
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-throw", 1);
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt("usb-throw", testing::_))
+        .WillOnce(testing::Throw(std::runtime_error("recovery failed")));
+
+    EXPECT_THROW(
+        reactor->manageMCTPDevice("/branch/usb-recovery-throw", device),
+        std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, unknownInventoryCompletionExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    std::function<void()> removed = [] {
+        throw std::runtime_error("completion failed");
+    };
+
+    EXPECT_THROW(
+        reactor->unmanageMCTPDevice("/branch/unknown", std::move(removed)),
+        std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, replacementRemoveExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto initial = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    auto replacement = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    ON_CALL(*initial, id()).WillByDefault(testing::Return(84U));
+    ON_CALL(*initial, describe())
+        .WillByDefault(testing::Return("initial-device"));
+    ON_CALL(*replacement, id()).WillByDefault(testing::Return(84U));
+    ON_CALL(*replacement, describe())
+        .WillByDefault(testing::Return("replacement-device"));
+    EXPECT_CALL(*initial, remove())
+        .WillOnce(testing::Throw(std::runtime_error("remove failed")));
+    EXPECT_CALL(*replacement, setup(testing::_)).Times(0);
+
+    reactor->devices.add("/branch/replacement-remove", initial);
+    reactor->states[initial->id()] = MCTPDeviceState::Assigned;
+    EXPECT_THROW(
+        reactor->manageMCTPDevice("/branch/replacement-remove", replacement),
+        std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, assignedUnmanageRemoveExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    ON_CALL(*device, id()).WillByDefault(testing::Return(85U));
+    ON_CALL(*device, describe())
+        .WillByDefault(testing::Return("assigned-remove-throw"));
+    EXPECT_CALL(*device, remove())
+        .WillOnce(testing::Throw(std::runtime_error("remove failed")));
+
+    reactor->devices.add("/branch/assigned-remove", device);
+    reactor->states[device->id()] = MCTPDeviceState::Assigned;
+    EXPECT_THROW(reactor->unmanageMCTPDevice("/branch/assigned-remove"),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, pendingUnmanageRemoveExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    ON_CALL(*device, id()).WillByDefault(testing::Return(86U));
+    ON_CALL(*device, describe())
+        .WillByDefault(testing::Return("pending-remove-throw"));
+    EXPECT_CALL(*device, remove())
+        .WillOnce(testing::Throw(std::runtime_error("remove failed")));
+
+    reactor->devices.add("/branch/pending-remove", device);
+    reactor->states[device->id()] = MCTPDeviceState::Pending;
+    EXPECT_THROW(reactor->unmanageMCTPDevice("/branch/pending-remove"),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, setupInvocationExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    ON_CALL(*device, describe())
+        .WillByDefault(testing::Return("setup-throw-device"));
+    EXPECT_CALL(*device, setup(testing::_))
+        .WillOnce(testing::Throw(std::runtime_error("setup failed")));
+
+    EXPECT_THROW(static_cast<void>(reactor->setupEndpoint(device)),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, setupDescriptionExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    EXPECT_CALL(*device, describe())
+        .WillOnce(testing::Throw(std::runtime_error("describe failed")));
+    EXPECT_CALL(*device, setup(testing::_)).Times(0);
+
+    EXPECT_THROW(static_cast<void>(reactor->setupEndpoint(device)),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, setupErrorDescriptionExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    std::function<void(const std::error_code&,
+                       const std::shared_ptr<MCTPEndpoint>&)>
+        complete;
+    EXPECT_CALL(*device, describe())
+        .WillOnce(testing::Return("setup-error-device"))
+        .WillOnce(testing::Throw(std::runtime_error("describe failed")));
+    EXPECT_CALL(*device, setup(testing::_))
+        .WillOnce([&complete](auto&& callback) {
+            complete = std::forward<decltype(callback)>(callback);
+        });
+
+    reactor->setupEndpoint(device);
+    ASSERT_TRUE(static_cast<bool>(complete));
+    EXPECT_THROW(complete(std::make_error_code(std::errc::io_error), nullptr),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, setupErrorDeviceIdExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    std::function<void(const std::error_code&,
+                       const std::shared_ptr<MCTPEndpoint>&)>
+        complete;
+    ON_CALL(*device, describe())
+        .WillByDefault(testing::Return("setup-error-id-device"));
+    EXPECT_CALL(*device, setup(testing::_))
+        .WillOnce([&complete](auto&& callback) {
+            complete = std::forward<decltype(callback)>(callback);
+        });
+    EXPECT_CALL(*device, id())
+        .WillOnce(testing::Throw(std::runtime_error("id failed")));
+
+    reactor->setupEndpoint(device);
+    ASSERT_TRUE(static_cast<bool>(complete));
+    EXPECT_THROW(complete(std::make_error_code(std::errc::io_error), nullptr),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, nullEndpointDescriptionExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    std::function<void(const std::error_code&,
+                       const std::shared_ptr<MCTPEndpoint>&)>
+        complete;
+    EXPECT_CALL(*device, describe())
+        .WillOnce(testing::Return("null-endpoint-device"))
+        .WillOnce(testing::Throw(std::runtime_error("describe failed")));
+    EXPECT_CALL(*device, setup(testing::_))
+        .WillOnce([&complete](auto&& callback) {
+            complete = std::forward<decltype(callback)>(callback);
+        });
+
+    reactor->setupEndpoint(device);
+    ASSERT_TRUE(static_cast<bool>(complete));
+    EXPECT_THROW(complete({}, nullptr), std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, trackingCatchDescriptionExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    auto endpoint = std::make_shared<testing::NiceMock<MockMCTPEndpoint>>();
+    ON_CALL(*device, describe())
+        .WillByDefault(testing::Return("tracking-catch-device"));
+    ON_CALL(*endpoint, network()).WillByDefault(testing::Return(1));
+    ON_CALL(*endpoint, eid()).WillByDefault(testing::Return(9));
+    EXPECT_CALL(*endpoint, describe())
+        .WillOnce(testing::Return("tracking-catch-endpoint"))
+        .WillOnce(testing::Throw(std::runtime_error("describe failed")));
+    EXPECT_CALL(*endpoint, subscribe(testing::_, testing::_, testing::_))
+        .WillOnce(testing::Throw(MCTPException("subscribe failed")));
+    EXPECT_CALL(*device, setup(testing::_))
+        .WillOnce(testing::InvokeArgument<0>(std::error_code(), endpoint));
+
+    EXPECT_THROW(static_cast<void>(reactor->setupEndpoint(device)),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, manageDescriptionExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    ON_CALL(*device, id()).WillByDefault(testing::Return(87U));
+    EXPECT_CALL(*device, describe())
+        .WillOnce(testing::Throw(std::runtime_error("describe failed")));
+    EXPECT_CALL(*device, setup(testing::_)).Times(0);
+
+    EXPECT_THROW(reactor->manageMCTPDevice("/branch/manage-describe", device),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, replacementDescriptionExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto initial = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    auto replacement = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    ON_CALL(*initial, id()).WillByDefault(testing::Return(88U));
+    EXPECT_CALL(*initial, describe())
+        .WillOnce(testing::Throw(std::runtime_error("describe failed")));
+    ON_CALL(*replacement, id()).WillByDefault(testing::Return(88U));
+    ON_CALL(*replacement, describe())
+        .WillByDefault(testing::Return("replacement-device"));
+    EXPECT_CALL(*initial, remove()).Times(0);
+    EXPECT_CALL(*replacement, setup(testing::_)).Times(0);
+
+    reactor->devices.add("/branch/replacement-describe", initial);
+    reactor->states[initial->id()] = MCTPDeviceState::Assigned;
+    EXPECT_THROW(
+        reactor->manageMCTPDevice("/branch/replacement-describe", replacement),
+        std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, unmanageStateLookupExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    EXPECT_CALL(*device, id())
+        .WillOnce(testing::Return(89U))
+        .WillOnce(testing::Throw(std::runtime_error("id failed")));
+
+    reactor->devices.add("/branch/unmanage-state", device);
+    reactor->states[device->id()] = MCTPDeviceState::Assigned;
+    EXPECT_THROW(reactor->unmanageMCTPDevice("/branch/unmanage-state"),
+                 std::runtime_error);
+}
+
+TEST(MCTPReactorBranchCoverage, pendingUnmanageDescriptionExceptionPropagates)
+{
+    testing::NiceMock<MockAssociationServer> assoc;
+    auto reactor = std::make_shared<MCTPReactor>(assoc);
+    auto device = std::make_shared<testing::NiceMock<MockMCTPDevice>>();
+    ON_CALL(*device, id()).WillByDefault(testing::Return(90U));
+    EXPECT_CALL(*device, describe())
+        .WillOnce(testing::Throw(std::runtime_error("describe failed")));
+    EXPECT_CALL(*device, remove()).Times(0);
+
+    reactor->devices.add("/branch/pending-describe", device);
+    reactor->states[device->id()] = MCTPDeviceState::Pending;
+    EXPECT_THROW(reactor->unmanageMCTPDevice("/branch/pending-describe"),
+                 std::runtime_error);
+}

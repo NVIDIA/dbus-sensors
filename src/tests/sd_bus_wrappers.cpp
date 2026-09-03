@@ -74,10 +74,12 @@ int gSdBusCallCount =
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::function<int(sd_bus_message*, sd_bus_message**)> gSyncCallHandler;
 
-// When gMockSdBusRequestName=true, __wrap_sd_bus_request_name returns
-// -ENOTSUP to simulate a name-claim failure (causes request_name() to throw).
+// When gMockSdBusRequestName=true, request-name calls return the configured
+// result. The default -ENOTSUP simulates a name-claim failure.
 bool gMockSdBusRequestName =
-    false; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+    false;    // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+int gMockSdBusRequestNameResult =
+    -ENOTSUP; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 TestSdBusInterface gTestSdBusInterface;
@@ -215,10 +217,9 @@ int __wrap_sd_bus_default(sd_bus** bus)
     return 0;
 }
 
-// When gMockSdBusRequestName is true, return -ENOTSUP so that
-// sdbusplus::bus::request_name() throws SdBusError.  This allows tests to
-// call disabled_main_reactor() and verify that the function body executes up
-// to (but not including) io.run(), without blocking indefinitely.
+// Linker-wrap fallback for code paths that call libsystemd directly. Most
+// sdbusplus tests instead use TestSdBusInterface's virtual override because
+// calls made inside the shared library bypass --wrap.
 extern int __real_sd_bus_request_name(sd_bus* bus, const char* name,
                                       uint64_t flags);
 int __wrap_sd_bus_request_name(sd_bus* bus, const char* name, uint64_t flags)
@@ -230,7 +231,7 @@ int __wrap_sd_bus_request_name(sd_bus* bus, const char* name, uint64_t flags)
     (void)bus;
     (void)name;
     (void)flags;
-    return -ENOTSUP;
+    return gMockSdBusRequestNameResult;
 }
 
 // NOLINTEND(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp,readability-identifier-naming)
@@ -631,9 +632,35 @@ void driveAsyncCallError()
         p.request, &reply, "org.freedesktop.DBus.Error.Failed", "Mock failure");
     (void)sd_bus_message_seal(reply, static_cast<uint64_t>(++gAsyncReplySerial),
                               0);
-    (void)p.callback(reply, p.userdata, nullptr);
+    try
+    {
+        (void)p.callback(reply, p.userdata, nullptr);
+    }
+    catch (...)
+    {
+        sd_bus_message_unref(reply);
+        sd_bus_message_unref(p.request);
+        throw;
+    }
     sd_bus_message_unref(reply);
     sd_bus_message_unref(p.request);
+}
+
+void drainPendingAsyncCalls()
+{
+    const std::size_t pendingCount = gPendingAsyncCalls.size();
+    for (std::size_t i = 0; i < pendingCount && !gPendingAsyncCalls.empty();
+         ++i)
+    {
+        try
+        {
+            driveAsyncCallError();
+        }
+        catch (...) // NOLINT(bugprone-empty-catch)
+        {
+            // Cleanup is best-effort; driveAsyncCallError released this call.
+        }
+    }
 }
 
 void driveAsyncCallUnknownInterface()
@@ -718,6 +745,22 @@ void driveAsyncCallManagedObjectsEmpty()
     (void)sd_bus_message_new_method_return(p.request, &reply);
     (void)sd_bus_message_open_container(reply, SD_BUS_TYPE_ARRAY,
                                         "{oa{sa{sv}}}");
+    (void)sd_bus_message_close_container(reply);
+    (void)sd_bus_message_seal(reply, static_cast<uint64_t>(++gAsyncReplySerial),
+                              0);
+    (void)p.callback(reply, p.userdata, nullptr);
+    sd_bus_message_unref(reply);
+    sd_bus_message_unref(p.request);
+}
+
+void driveAsyncCallSubTreeEmpty()
+{
+    assert(!gPendingAsyncCalls.empty());
+    PendingAsync p = gPendingAsyncCalls.front();
+    gPendingAsyncCalls.erase(gPendingAsyncCalls.begin());
+    sd_bus_message* reply = nullptr;
+    (void)sd_bus_message_new_method_return(p.request, &reply);
+    (void)sd_bus_message_open_container(reply, SD_BUS_TYPE_ARRAY, "{sa{sas}}");
     (void)sd_bus_message_close_container(reply);
     (void)sd_bus_message_seal(reply, static_cast<uint64_t>(++gAsyncReplySerial),
                               0);

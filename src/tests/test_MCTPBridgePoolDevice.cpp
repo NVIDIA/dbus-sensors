@@ -441,6 +441,16 @@ TEST_F(BridgePoolFakeConnTest, removeWithoutSubscribeDoesNotCrash)
     EXPECT_NO_THROW(dev->remove());
 }
 
+TEST_F(BridgePoolFakeConnTest, removePropagatesSubscriberError)
+{
+    auto dev = makeDevice();
+    dev->subscribe({}, {}, [](const std::shared_ptr<MCTPEndpoint>&) {
+        throw std::runtime_error("subscriber failed");
+    });
+
+    EXPECT_THROW(dev->remove(), std::runtime_error);
+}
+
 TEST_F(BridgePoolFakeConnTest, deviceReturnsSelf)
 {
     auto dev = makeDevice();
@@ -476,6 +486,20 @@ TEST_F(BridgePoolFakeConnTest, notifyEndpointPresentFiresSetupCallbackOnce)
 TEST_F(BridgePoolFakeConnTest, notifyEndpointPresentWithoutCallbackIsNoop)
 {
     auto dev = makeDevice();
+    EXPECT_NO_THROW(dev->notifyEndpointPresent());
+}
+
+TEST_F(BridgePoolFakeConnTest,
+       notifyEndpointPresentPropagatesCallbackErrorAndClearsCallback)
+{
+    auto dev = makeDevice();
+    dev->setupCallback =
+        [](const std::error_code&, const std::shared_ptr<MCTPEndpoint>&) {
+            throw std::runtime_error("setup callback failed");
+        };
+
+    EXPECT_THROW(dev->notifyEndpointPresent(), std::runtime_error);
+    EXPECT_FALSE(dev->setupCallback);
     EXPECT_NO_THROW(dev->notifyEndpointPresent());
 }
 
@@ -586,6 +610,18 @@ TEST_F(BridgePoolFakeConnTest, resolveBridgePoolIndexOutOfRangeDefers)
     gSyncCallHandler = makeResolveHandler(s);
 
     auto dev = makeDevice(9); // poolIndex 9 > (12-10) -> out of range
+    EXPECT_FALSE(dev->resolveBridge());
+    EXPECT_FALSE(dev->resolved);
+}
+
+TEST_F(BridgePoolFakeConnTest, resolveBridgeReversedPoolBoundsDefers)
+{
+    auto s = std::make_shared<ResolveScript>();
+    s->poolStart = 20;
+    s->poolEnd = 10;
+    gSyncCallHandler = makeResolveHandler(s);
+
+    auto dev = makeDevice();
     EXPECT_FALSE(dev->resolveBridge());
     EXPECT_FALSE(dev->resolved);
 }

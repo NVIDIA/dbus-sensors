@@ -1,4 +1,9 @@
 // NOLINTBEGIN
+#include "MCTPReactor.hpp"
+#include "USBRecovery.hpp"
+
+#include <stdexcept>
+#include <utility>
 #define main disabled_main_reactor
 #include "../mctp/MCTPReactorMain.cpp" // NOLINT(bugprone-suspicious-include)
 #undef main
@@ -552,6 +557,25 @@ TEST(ManageMCTPEntity, withTwoUSBGadgetDevicesDefersSetupOnFailure)
 #include <unistd.h>
 
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <phosphor-logging/device_error_log.hpp>
+#include <phosphor-logging/lg2.hpp>
+#include <sdbusplus/asio/connection.hpp>
+#include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/bus.hpp>
+#include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/message.hpp>
+#include <sdbusplus/message/native_types.hpp>
+
+#include <cerrno>
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <functional>
+#include <tuple>
 
 // Declared in sd_bus_wrappers.cpp
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
@@ -747,6 +771,8 @@ TEST(ManageMCTPEntity, withI2CDeviceThrowsOnNullConn)
 extern bool gMockSystem;
 extern int gSystemRetval;
 extern int gSystemCallCount;
+extern int gSystemFailOnCall;
+extern int gSystemFailErrno;
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 // ---------------------------------------------------------------------------
@@ -3857,3 +3883,343 @@ TEST_F(FakeConnReactorFixture,
 }
 
 // NOLINTEND
+
+class SecurityMockMCTPDevice : public MCTPDevice
+{
+  public:
+    ~SecurityMockMCTPDevice() override = default;
+
+    MOCK_METHOD(void, setup,
+                (std::function<void(const std::error_code& ec,
+                                    const std::shared_ptr<MCTPEndpoint>& ep)> &&
+                 added),
+                (override));
+    MOCK_METHOD(void, remove, (), (override));
+    MOCK_METHOD(std::string, describe, (), (const, override));
+    MOCK_METHOD(std::size_t, id, (), (const, override));
+};
+
+class SecurityMockMCTPEndpoint : public MCTPEndpoint
+{
+  public:
+    ~SecurityMockMCTPEndpoint() override = default;
+
+    MOCK_METHOD(int, network, (), (const, override));
+    MOCK_METHOD(uint8_t, eid, (), (const, override));
+    MOCK_METHOD(void, subscribe,
+                (Event && degraded, Event&& available, Event&& removed),
+                (override));
+    MOCK_METHOD(void, remove, (), (override));
+    MOCK_METHOD(std::string, describe, (), (const, override));
+    MOCK_METHOD(std::shared_ptr<MCTPDevice>, device, (), (const, override));
+};
+
+TEST(ReactorMainHandlers, handleTransportErrorSignalMalformedMessageIsIgnored)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW(handleTransportErrorSignal(reactor, msg));
+}
+
+TEST(ReactorMainHandlers, generalErrorMatchSpecPinsMctpdSender)
+{
+    const std::string matchSpec = buildGeneralErrorMatchSpec();
+    EXPECT_NE(matchSpec.find("sender='au.com.codeconstruct.MCTP1'"),
+              std::string::npos);
+    EXPECT_NE(matchSpec.find("member='GeneralError'"), std::string::npos);
+}
+
+TEST(ReactorMainHandlers, addInventoryMalformedMessageIsIgnored)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW(addInventory(conn, reactor, msg));
+}
+
+TEST(ReactorMainHandlers, removeInventoryMalformedMessageIsIgnored)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW(removeInventory(reactor, msg));
+}
+
+class ScopedSystemMock
+{
+  public:
+    explicit ScopedSystemMock(int retval) :
+        previousMock(gMockSystem), previousRetval(gSystemRetval),
+        previousCallCount(gSystemCallCount),
+        previousFailOnCall(gSystemFailOnCall),
+        previousFailErrno(gSystemFailErrno)
+    {
+        gMockSystem = true;
+        gSystemRetval = retval;
+        gSystemCallCount = 0;
+        gSystemFailOnCall = -1;
+        gSystemFailErrno = 0;
+    }
+
+    ~ScopedSystemMock()
+    {
+        gMockSystem = previousMock;
+        gSystemRetval = previousRetval;
+        gSystemCallCount = previousCallCount;
+        gSystemFailOnCall = previousFailOnCall;
+        gSystemFailErrno = previousFailErrno;
+    }
+
+    ScopedSystemMock(const ScopedSystemMock&) = delete;
+    ScopedSystemMock& operator=(const ScopedSystemMock&) = delete;
+
+  private:
+    bool previousMock;
+    int previousRetval;
+    int previousCallCount;
+    int previousFailOnCall;
+    int previousFailErrno;
+};
+
+class ReactorMainUSBRecovery : public USBRecovery
+{
+  public:
+    explicit ReactorMainUSBRecovery(bool result) : result(result) {}
+
+    bool clearBulkOutHalt(const std::string& interface,
+                          std::string& status) override
+    {
+        lastInterface = interface;
+        status = result ? "cleared" : "clear failed";
+        return result;
+    }
+
+    bool result;
+    std::string lastInterface;
+};
+
+TEST(ReactorMainDebugProperty, setterAndGetterSynchronizeRuntimeState)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    EXPECT_TRUE(reactor->setAutoUSBRecoveryEnabled(true));
+    EXPECT_TRUE(reactor->isAutoUSBRecoveryEnabled());
+    EXPECT_FALSE(reactor->setAutoUSBRecoveryEnabled(false));
+    EXPECT_FALSE(reactor->isAutoUSBRecoveryEnabled());
+}
+
+TEST(ReactorMainDebugMethod, reportsRecoverySuccess)
+{
+    MockAssocServer server;
+    auto recovery = std::make_unique<ReactorMainUSBRecovery>(true);
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(server, std::move(recovery));
+
+    std::string status;
+    bool success = reactor->forceUSBRecovery("usb-debug-success", status);
+    EXPECT_TRUE(success);
+    EXPECT_EQ(status, "cleared");
+    EXPECT_EQ(recoveryPtr->lastInterface, "usb-debug-success");
+}
+
+TEST(ReactorMainDebugMethod, reportsRecoveryFailure)
+{
+    MockAssocServer server;
+    auto recovery = std::make_unique<ReactorMainUSBRecovery>(false);
+    auto* recoveryPtr = recovery.get();
+    auto reactor = std::make_shared<MCTPReactor>(server, std::move(recovery));
+
+    std::string status;
+    bool success = reactor->forceUSBRecovery("usb-debug-failure", status);
+    EXPECT_FALSE(success);
+    EXPECT_EQ(status, "clear failed");
+    EXPECT_EQ(recoveryPtr->lastInterface, "usb-debug-failure");
+}
+
+TEST(MCTPDeviceRepository, removeUnknownDeviceThrowsNoSuchDevice)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto device = std::make_shared<MCTPDDevice>(
+        nullptr, "AbsentDevice", "mctpabsentremove", std::vector<uint8_t>{0x31},
+        std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
+
+    EXPECT_FALSE(reactor->devices.contains(device));
+    try
+    {
+        reactor->devices.remove(device);
+        FAIL() << "Removing an unknown device did not throw";
+    }
+    catch (const std::system_error& error)
+    {
+        EXPECT_EQ(error.code(),
+                  std::make_error_code(std::errc::no_such_device));
+    }
+}
+
+// Malformed message (nullptr) is ignored after the guarded read.
+TEST(ReactorMainHandlers, handleGeneralErrorSignalNullMsgIsIgnored)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW(handleGeneralErrorSignal(conn, reactor, msg));
+}
+
+class ThrowingRemoveMCTPDevice : public MCTPDevice
+{
+  public:
+    enum class ErrorType
+    {
+        logic,
+        system,
+    };
+
+    ThrowingRemoveMCTPDevice(std::size_t identifier, ErrorType errorType) :
+        identifier(identifier), errorType(errorType)
+    {}
+
+    void setup(
+        std::function<void(const std::error_code&,
+                           const std::shared_ptr<MCTPEndpoint>&)>&& /*added*/)
+        override
+    {}
+
+    void remove() override
+    {
+        ++removeCalls;
+        if (errorType == ErrorType::logic)
+        {
+            throw std::logic_error("test remove logic failure");
+        }
+        throw std::system_error(std::make_error_code(std::errc::io_error),
+                                "test remove system failure");
+    }
+
+    std::string describe() const override
+    {
+        return "throwing-remove-device";
+    }
+
+    std::size_t id() const override
+    {
+        return identifier;
+    }
+
+    int removeCalls = 0;
+
+  private:
+    std::size_t identifier;
+    ErrorType errorType;
+};
+
+TEST(ReactorMainHandlers, removeInventoryCatchesLogicErrorFromDevice)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    const std::string path = "/test/remove/logic_error";
+    auto device = std::make_shared<ThrowingRemoveMCTPDevice>(
+        0x9001, ThrowingRemoveMCTPDevice::ErrorType::logic);
+    reactor->devices.add(path, device);
+    reactor->states[device->id()] = MCTPDeviceState::Assigned;
+
+    auto msg = makeRemoveInventoryMsg(
+        path, {"xyz.openbmc_project.Configuration.MCTPPCIeTarget"});
+    ASSERT_TRUE(msg);
+
+    EXPECT_NO_THROW(removeInventory(reactor, msg));
+    EXPECT_EQ(device->removeCalls, 1);
+    EXPECT_EQ(reactor->devices.deviceFor(path), nullptr);
+    EXPECT_EQ(reactor->states.at(device->id()), MCTPDeviceState::Removing);
+}
+
+TEST(ReactorMainHandlers, removeInventoryCatchesSystemErrorFromDevice)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    const std::string path = "/test/remove/system_error";
+    auto device = std::make_shared<ThrowingRemoveMCTPDevice>(
+        0x9002, ThrowingRemoveMCTPDevice::ErrorType::system);
+    reactor->devices.add(path, device);
+    reactor->states[device->id()] = MCTPDeviceState::Assigned;
+
+    auto msg = makeRemoveInventoryMsg(
+        path, {"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget"});
+    ASSERT_TRUE(msg);
+
+    EXPECT_NO_THROW(removeInventory(reactor, msg));
+    EXPECT_EQ(device->removeCalls, 1);
+    EXPECT_EQ(reactor->devices.deviceFor(path), nullptr);
+    EXPECT_EQ(reactor->states.at(device->id()), MCTPDeviceState::Removing);
+}
+
+TEST(ManageMCTPEntity, changedGadgetAtSamePathCatchesSystemError)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    const sdbusplus::object_path path("/test/manage/config_change");
+    const std::string configInterface =
+        "xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget";
+
+    auto entitiesForEid = [&](const std::string& eid) {
+        return ManagedObjectType{
+            {path,
+             {{configInterface,
+               {{"Type", std::string("MCTPUSBGadgetTarget")},
+                {"Name", std::string("usb-config-change")},
+                {"Interface", std::string("mctpusb0")},
+                {"LocalEID", eid}}}}}};
+    };
+
+    ScopedSystemMock systemMock(1);
+
+    auto firstEntities = entitiesForEid("10");
+    manageMCTPEntity(nullptr, reactor, firstEntities);
+    auto firstDevice = reactor->devices.deviceFor(path.str);
+    ASSERT_NE(firstDevice, nullptr);
+
+    auto replacementEntities = entitiesForEid("11");
+    EXPECT_NO_THROW(manageMCTPEntity(nullptr, reactor, replacementEntities));
+
+    EXPECT_EQ(reactor->devices.deviceFor(path.str), firstDevice);
+    EXPECT_EQ(gSystemCallCount, 1);
+}
+
+TEST(ReactorMainHandlers, addInventoryChangedGadgetCatchesSystemError)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    const std::string path = "/test/add/config_change";
+    const std::string configInterface =
+        "xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget";
+
+    ScopedSystemMock systemMock(1);
+
+    auto firstMsg = makeAddInventoryMsg(
+        path, configInterface,
+        {{"Type", "MCTPUSBGadgetTarget"},
+         {"Name", "usb-config-change"},
+         {"Interface", "mctpusb0"},
+         {"LocalEID", "10"}});
+    ASSERT_TRUE(firstMsg);
+    addInventory(nullptr, reactor, firstMsg);
+    auto firstDevice = reactor->devices.deviceFor(path);
+    ASSERT_NE(firstDevice, nullptr);
+
+    auto replacementMsg = makeAddInventoryMsg(
+        path, configInterface,
+        {{"Type", "MCTPUSBGadgetTarget"},
+         {"Name", "usb-config-change"},
+         {"Interface", "mctpusb0"},
+         {"LocalEID", "11"}});
+    ASSERT_TRUE(replacementMsg);
+    EXPECT_NO_THROW(addInventory(nullptr, reactor, replacementMsg));
+
+    EXPECT_EQ(reactor->devices.deviceFor(path), firstDevice);
+    EXPECT_EQ(gSystemCallCount, 1);
+}

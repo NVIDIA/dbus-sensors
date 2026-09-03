@@ -150,6 +150,12 @@ if get_option('mctp').allowed()
         '-Wl,--wrap,libusb_claim_interface',
         '-Wl,--wrap,libusb_release_interface',
         '-Wl,--wrap,libusb_clear_halt',
+        '-Wl,--wrap,libusb_init',
+        '-Wl,--wrap,libusb_close',
+        '-Wl,--wrap,libusb_exit',
+        '-Wl,--wrap,open',
+        '-Wl,--wrap,open64',
+        '-Wl,--wrap,_ZNSt10filesystem16weakly_canonicalERKNS_7__cxx114pathERSt10error_code',
     ]
 
     test(
@@ -205,10 +211,12 @@ if get_option('mctp').allowed()
         executable(
             'test_MCTPEndpointUtils',
             'test_MCTPEndpointUtils.cpp',
-            '../mctp/MCTPEndpointUtils.cpp',
+            'sd_bus_wrappers.cpp',
+            'filesystem_wrappers.cpp',
             'phosphor_logging_drain.cpp',
-            cpp_args: boost_asio_test_backend_args,
-            dependencies: [ut_deps_list, utils_dep],
+            cpp_args: boost_asio_test_backend_args + ['-fno-access-control'],
+            link_args: custom_devices_wrap_link_args,
+            dependencies: [gmock_dep, ut_deps_list, utils_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
         ),
@@ -226,7 +234,9 @@ if get_option('mctp').allowed()
             'filesystem_wrappers.cpp',
             'phosphor_logging_drain.cpp',
             cpp_args: boost_asio_test_backend_args + ['-fno-access-control'],
-            link_args: custom_devices_wrap_link_args,
+            link_args: custom_devices_wrap_link_args + [
+                '-Wl,--wrap,_ZNSt14basic_ifstreamIcSt11char_traitsIcEEC1EPKcSt13_Ios_Openmode',
+            ],
             dependencies: [gmock_dep, ut_deps_list, utils_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
@@ -286,7 +296,10 @@ if get_option('mctp').allowed()
                 '-fno-access-control',
                 '-DMCTP_HEARTBEAT_RESTART_NOTIFICATION=false',
             ],
-            link_args: socket_wrap_link_args,
+            link_args: socket_wrap_link_args + [
+                '-Wl,--wrap,sd_event_new',
+                '-Wl,--wrap,sd_event_add_time_relative',
+            ],
             dependencies: [gmock_dep, ut_deps_list, utils_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',

@@ -3,9 +3,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <optional>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -26,6 +31,15 @@ class MockMCTPDevice : public MCTPDevice
     MOCK_METHOD(void, remove, (), (override));
     MOCK_METHOD(std::string, describe, (), (const, override));
     MOCK_METHOD(std::size_t, id, (), (const, override));
+};
+
+class ThrowingNameMCTPDevice : public MockMCTPDevice
+{
+  public:
+    std::optional<std::string> getNameForEid(uint8_t /*eid*/) const override
+    {
+        throw std::runtime_error("name lookup failed");
+    }
 };
 
 TEST(MCTPDeviceRepository, addAndContains)
@@ -814,4 +828,266 @@ TEST(MCTPDeviceRepository, G305getNameForEidContinuesAfterBridgePoolMiss)
 
     // EID 43 is outside both devices' ranges → nullopt
     EXPECT_FALSE(repo.getNameForEid(43).has_value());
+}
+
+// Registering the same device under two inventory paths sets its reverse-lookup
+// reference count to 2. Removing it once drives removeReverseLookup() down the
+// count>1 branch, which calls the private refreshReverseLookup() to re-point
+// the device at its still-registered inventory path. This exercises
+// refreshReverseLookup(), which is otherwise unreached.
+TEST(MCTPDeviceRepository, removeMultiInventoryDeviceRefreshesReverseLookup)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*device, describe())
+        .WillRepeatedly(testing::Return("mock device"));
+
+    repo.add("/inv/alpha", device);
+    // Same device, different inventory path → reverse-lookup count becomes 2.
+    repo.add("/inv/beta", device);
+    EXPECT_TRUE(repo.contains(device));
+
+    // First removal takes the count>1 branch → refreshReverseLookup() runs and
+    // the device remains, now pointing at the surviving inventory path.
+    EXPECT_NO_THROW(repo.remove(device));
+    EXPECT_TRUE(repo.contains(device));
+    auto inventory = repo.inventoryFor(device);
+    ASSERT_TRUE(inventory.has_value());
+    EXPECT_EQ(inventory.value_or(""), "/inv/beta");
+
+    // Second removal now takes the count<=1 branch and fully removes it.
+    EXPECT_NO_THROW(repo.remove(device));
+    EXPECT_FALSE(repo.contains(device));
+}
+
+TEST(MCTPDeviceRepository, iteratorsExposeRegisteredInventory)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<MockMCTPDevice>();
+    repo.add("/inv/iterated", device);
+
+    auto entry = repo.begin();
+    ASSERT_NE(entry, repo.end());
+    EXPECT_EQ(entry->first, "/inv/iterated");
+    EXPECT_EQ(entry->second, device);
+    EXPECT_EQ(++entry, repo.end());
+}
+
+TEST(MCTPDeviceRepository, getNameForEidPropagatesDeviceFailure)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<ThrowingNameMCTPDevice>();
+    repo.add("/inv/throwing-name", device);
+
+    EXPECT_THROW(repo.getNameForEid(9), std::runtime_error);
+}
+
+static std::filesystem::path findRepositoryHeaderForTest()
+{
+    const auto testSource = std::filesystem::path(__FILE__);
+    std::vector<std::filesystem::path> candidates{
+        testSource.parent_path().parent_path() / "MCTPDeviceRepository.hpp",
+        "src/mctp/MCTPDeviceRepository.hpp",
+        "../src/mctp/MCTPDeviceRepository.hpp", "MCTPDeviceRepository.hpp"};
+
+    for (const auto& candidate : candidates)
+    {
+        if (std::ifstream candidateFile(candidate); candidateFile.good())
+        {
+            return candidate;
+        }
+    }
+
+    std::error_code ec;
+    auto cwd = std::filesystem::current_path(ec);
+    for (int depth = 0; !ec && depth < 8; ++depth)
+    {
+        auto candidate = cwd / "src/mctp/MCTPDeviceRepository.hpp";
+        if (std::ifstream candidateFile(candidate); candidateFile.good())
+        {
+            return candidate;
+        }
+
+        auto parent = cwd.parent_path();
+        if (parent == cwd)
+        {
+            break;
+        }
+        cwd = parent;
+    }
+
+    return candidates.front();
+}
+
+TEST(MCTPDeviceRepository, DR09lookupUsesReverseIndexNotLinearSourceScan)
+{
+    const auto headerPath = findRepositoryHeaderForTest();
+    std::ifstream header(headerPath);
+    ASSERT_TRUE(header.good()) << "Unable to inspect " << headerPath;
+
+    std::ostringstream buffer;
+    buffer << header.rdbuf();
+    const auto source = buffer.str();
+
+    const bool hasLegacyLinearLookup =
+        source.find("std::ranges::find_if(devices") != std::string::npos ||
+        source.find("return it.second == device") != std::string::npos;
+    const bool hasReverseLookup =
+        source.find("inventoryByDevice.find(device)") != std::string::npos;
+
+    std::cout << "DR-09 repro: inspected \"" << headerPath.string()
+              << "\", legacy linear lookup=" << hasLegacyLinearLookup
+              << ", reverse index lookup=" << hasReverseLookup << "\n";
+    std::cout << "DR-09 repro: old lookup scanned the inventory map for each "
+                 "contains(), inventoryFor(), and remove() call\n";
+
+    EXPECT_FALSE(hasLegacyLinearLookup)
+        << "DR-09 reproduced: lookup still uses a linear scan over devices.";
+    EXPECT_TRUE(hasReverseLookup)
+        << "DR-09 reproduced: lookup is not backed by the reverse index.";
+}
+
+TEST(MCTPDeviceRepository, DR09largeRepoLifecycleLookupStaysSynchronized)
+{
+    MCTPDeviceRepository repo;
+    std::vector<std::shared_ptr<MockMCTPDevice>> devices;
+    devices.reserve(64);
+
+    std::cout << "DR-09 repro: adding 64 MCTP inventory entries\n";
+    for (int i = 0; i < 64; ++i)
+    {
+        auto device = std::make_shared<MockMCTPDevice>();
+        devices.push_back(device);
+        repo.add("/inv/dr09/device" + std::to_string(i), device);
+    }
+
+    auto target = devices.back();
+    const std::string targetPath = "/inv/dr09/device63";
+    std::cout << "DR-09 repro: resolving last device through contains(), "
+                 "inventoryFor(), and remove(); legacy code performed up to "
+                 "64 pointer comparisons per lookup\n";
+    EXPECT_TRUE(repo.contains(target));
+    EXPECT_EQ(repo.inventoryFor(target).value_or(""), targetPath);
+
+    repo.remove(target);
+    const bool targetPresent = repo.contains(target);
+    const bool firstDeviceStillPresent = repo.contains(devices.front());
+    std::cout << "DR-09 repro: removed " << targetPath
+              << ", target present=" << targetPresent
+              << ", first device still present=" << firstDeviceStillPresent
+              << "\n";
+    EXPECT_FALSE(targetPresent);
+    EXPECT_TRUE(firstDeviceStillPresent);
+
+    auto duplicate = std::make_shared<MockMCTPDevice>();
+    repo.add("/inv/dr09/duplicateA", duplicate);
+    repo.add("/inv/dr09/duplicateB", duplicate);
+    auto selectedPath = repo.inventoryFor(duplicate).value_or("");
+    std::cout << "DR-09 repro: registered one device under duplicate "
+                 "inventory paths; selected path="
+              << selectedPath << "\n";
+    EXPECT_EQ(selectedPath, "/inv/dr09/duplicateA");
+
+    repo.remove(duplicate);
+    const bool duplicateAPresent =
+        repo.deviceFor("/inv/dr09/duplicateA") != nullptr;
+    const bool duplicateBPresent =
+        repo.deviceFor("/inv/dr09/duplicateB") != nullptr;
+    const bool sharedLookupPresent = repo.contains(duplicate);
+    std::cout << "DR-09 repro: after first duplicate remove, duplicateA "
+                 "present="
+              << duplicateAPresent
+              << ", duplicateB present=" << duplicateBPresent
+              << ", shared lookup present=" << sharedLookupPresent << "\n";
+    EXPECT_FALSE(duplicateAPresent);
+    EXPECT_TRUE(duplicateBPresent);
+    EXPECT_TRUE(sharedLookupPresent);
+    EXPECT_EQ(repo.inventoryFor(duplicate).value_or(""),
+              "/inv/dr09/duplicateB");
+}
+
+class ThrowingDescribeMCTPDevice : public MCTPDevice
+{
+  public:
+    void setup(std::function<void(const std::error_code&,
+                                  const std::shared_ptr<MCTPEndpoint>&)>&&
+               /*added*/) override
+    {}
+
+    void remove() override {}
+
+    std::string describe() const override
+    {
+        throw std::runtime_error("describe failed");
+    }
+
+    std::size_t id() const override
+    {
+        return 0;
+    }
+};
+
+TEST(MCTPDeviceRepository, addConflictPropagatesDescribeFailure)
+{
+    MCTPDeviceRepository repo;
+    auto existing = std::make_shared<MockMCTPDevice>();
+    auto conflicting = std::make_shared<ThrowingDescribeMCTPDevice>();
+
+    repo.add("/test/inventory", existing);
+
+    EXPECT_THROW(repo.add("/test/inventory", conflicting), std::runtime_error);
+    EXPECT_EQ(repo.deviceFor("/test/inventory"), existing);
+}
+
+TEST(MCTPDeviceRepository, removeUnknownDeviceThrowsNoSuchDevice)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*device, describe())
+        .WillOnce(testing::Return("unknown device"));
+
+    try
+    {
+        repo.remove(device);
+        FAIL() << "Removing an unknown device should throw";
+    }
+    catch (const std::system_error& error)
+    {
+        EXPECT_EQ(error.code(),
+                  std::make_error_code(std::errc::no_such_device));
+    }
+
+    EXPECT_FALSE(repo.contains(device));
+}
+
+TEST(MCTPDeviceRepository, removeUnknownPropagatesDescribeFailure)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<ThrowingDescribeMCTPDevice>();
+
+    EXPECT_THROW(repo.remove(device), std::runtime_error);
+    EXPECT_FALSE(repo.contains(device));
+}
+
+// G552: removing a device registered under multiple inventory paths keeps the
+// reverse lookup synchronized with the remaining path.
+TEST(MCTPDeviceRepository, G552removeSamePointerDifferentPathKeepsLookupSynced)
+{
+    MCTPDeviceRepository repo;
+    auto device = std::make_shared<MockMCTPDevice>();
+    EXPECT_CALL(*device, describe()).WillRepeatedly(testing::Return("shared"));
+
+    repo.add("/inv/pathA", device);
+    repo.add("/inv/pathB", device);
+
+    repo.remove(device);
+    EXPECT_FALSE(repo.deviceFor("/inv/pathA"));
+    EXPECT_EQ(repo.deviceFor("/inv/pathB").get(), device.get());
+    EXPECT_TRUE(repo.contains(device));
+    EXPECT_EQ(repo.inventoryFor(device).value_or(""), "/inv/pathB");
+
+    repo.remove(device);
+    EXPECT_FALSE(repo.contains(device));
+    EXPECT_FALSE(repo.inventoryFor(device).has_value());
+    EXPECT_FALSE(repo.deviceFor("/inv/pathB"));
 }
