@@ -1,0 +1,14 @@
+[Unit]
+Description=LPU telemetry sensor
+StopWhenUnneeded=false
+Requires=xyz.openbmc_project.EntityManager.service
+# The power-sequence monitor owns LPU_LOG_SET_POLLING. Telemetry consumes its
+# per-LPU Functional state and confirms the driver's read-only polling mask.
+Wants=lpu-pwrseq-monitord.service
+After=xyz.openbmc_project.EntityManager.service lpu-pwrseq-monitord.service
+[Service]
+Restart=always
+RestartSec=5
+ExecStart=/usr/libexec/dbus-sensors/lputelemetry
+[Install]
+WantedBy=multi-user.target

@@ -193,6 +193,12 @@ option(
     description: 'Build satellitesensor without HmcSensor.hpp (no HMC EEPROM length map).',
 )
 option(
+    'lpu',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Enable LPU telemetry.',
+)
+option(
     'discrete-leak-detect',
     type: 'feature',
     value: 'disabled',

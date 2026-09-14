@@ -263,6 +263,10 @@ if get_option('satellite').enabled()
     subdir('satellite')
 endif
 
+if get_option('lpu').allowed()
+    subdir('lpu')
+endif
+
 if get_option('leak-detect').allowed()
     executable(
         'leakdetectsensor',
