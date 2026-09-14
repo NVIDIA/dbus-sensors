@@ -134,6 +134,8 @@ static const I2CDeviceTypeMap sensorTypes{
     {"RAA229001", I2CDeviceType{"raa229001", true}},
     {"RAA229004", I2CDeviceType{"raa229004", true}},
     {"RAA229126", I2CDeviceType{"raa229126", true}},
+    {"RAA229140", I2CDeviceType{"raa229140", true}},
+    {"RRV97791", I2CDeviceType{"rrv97791", true}},
     {"RTQ6056", I2CDeviceType{"rtq6056", false}},
     {"SBRMI", I2CDeviceType{"sbrmi", true}},
     {"smpro_hwmon", I2CDeviceType{"smpro", false}},
@@ -146,6 +148,7 @@ static const I2CDeviceTypeMap sensorTypes{
     {"XDPE11280", I2CDeviceType{"xdpe11280", true}},
     {"XDPE12284", I2CDeviceType{"xdpe12284", true}},
     {"XDPE152C4", I2CDeviceType{"xdpe152c4", true}},
+    {"XDPE19284", I2CDeviceType{"xdpe19284", true}},
     {"XDPE1A2G7C", I2CDeviceType{"xdpe1a2g7c", true}},
 };
 
