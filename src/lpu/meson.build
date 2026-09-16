@@ -6,6 +6,7 @@ executable(
         'LpuCommon.cpp',
         'LpuMain.cpp',
         'LpuOnBootFields.cpp',
+        'LpuPowerModeService.cpp',
         'LpuProcessorMetrics.cpp',
         'LpuVrSensors.cpp',
     ),

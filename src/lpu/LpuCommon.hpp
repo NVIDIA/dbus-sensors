@@ -88,6 +88,7 @@ namespace lpu_em
 inline constexpr const char* kRecordTypeLpu = "LPU";
 inline constexpr const char* kRecordTypeLpuMetrics = "LPU_Metrics";
 inline constexpr const char* kRecordTypeLpuVrMetrics = "LPU_VR_Metrics";
+inline constexpr const char* kRecordTypeLpuPowerProfile = "LPU_Power_Profile";
 
 inline constexpr const char* kType = "Type";
 inline constexpr const char* kName = "Name";

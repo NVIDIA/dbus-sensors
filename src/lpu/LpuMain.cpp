@@ -1,6 +1,7 @@
 #include "../Utils.hpp"
 #include "LpuCommon.hpp"
 #include "LpuOnBootFields.hpp"
+#include "LpuPowerModeService.hpp"
 #include "LpuVrSensors.hpp"
 #include "LpuVrSource.hpp"
 
@@ -519,7 +520,8 @@ void syncVrPollingConfiguration(
 
 void refreshFromEntityManager(
     boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
-    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection)
+    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
+    lpu::power::Service& powerMode)
 {
     if (!dbusConnection)
     {
@@ -528,7 +530,7 @@ void refreshFromEntityManager(
     }
 
     dbusConnection->async_method_call(
-        [&io, &objectServer,
+        [&io, &objectServer, &powerMode,
          connection = dbusConnection](boost::system::error_code ec,
                                       const ManagedObjectType& resp) mutable {
             if (ec)
@@ -536,6 +538,7 @@ void refreshFromEntityManager(
                 lg2::error("Error contacting entity manager");
                 return;
             }
+            powerMode.updateProfileCatalog(resp);
             lpuOnBootFieldsApplyManagedObjects(io, objectServer, connection,
                                                resp);
             configuredVrInstances = lpu_vr_source::configuredInstances(resp);
@@ -571,6 +574,7 @@ int main()
     objectServer.add_manager(
         "/xyz/openbmc_project/inventory/system/accelerator");
     objectServer.add_manager("/xyz/openbmc_project/sensors");
+    lpu::power::Service powerMode(objectServer);
 
 #ifdef NVIDIA_SHMEM
     tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
@@ -648,7 +652,7 @@ int main()
 #endif
 
     boost::asio::post(io, [&]() {
-        refreshFromEntityManager(io, objectServer, systemBus);
+        refreshFromEntityManager(io, objectServer, systemBus, powerMode);
     });
 
     // Entity Manager is the source of truth for C00/C02 ownership. Resend
@@ -686,7 +690,8 @@ int main()
                                ec.message());
                     return;
                 }
-                refreshFromEntityManager(io, objectServer, systemBus);
+                refreshFromEntityManager(io, objectServer, systemBus,
+                                         powerMode);
                 if (lpuOnBootFieldsPublishersEmpty() &&
                     lpuVrSensorsPublishersEmpty())
                 {
@@ -697,9 +702,10 @@ int main()
 
     // Rebuilding all publishers is only required for EntityManager LPU
     // configuration changes, not for values published below inventory.
-    const std::array<const char*, 3> configTypes = {
+    const std::array<const char*, 4> configTypes = {
         lpu_em::kRecordTypeLpu, lpu_em::kRecordTypeLpuMetrics,
-        lpu_em::kRecordTypeLpuVrMetrics};
+        lpu_em::kRecordTypeLpuVrMetrics,
+        lpu_em::kRecordTypeLpuPowerProfile};
     auto configMatches =
         setupPropertiesChangedMatches(*systemBus, configTypes, eventHandler);
 
