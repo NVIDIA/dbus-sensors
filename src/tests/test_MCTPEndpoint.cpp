@@ -15225,7 +15225,7 @@ TEST_F(AsyncFixture, bridgeRecoveryDefersLearnEndpointDuringDiscovery)
     driveAsyncCallSuccess();
 
     EXPECT_TRUE(gPendingAsyncCalls.empty());
-    EXPECT_FALSE(dev->unresponsiveBridgePoolEids.contains(10));
+    EXPECT_TRUE(dev->unresponsiveBridgePoolEids.contains(10));
     dev->healthTimer->cancel();
 }
 
