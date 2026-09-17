@@ -146,6 +146,7 @@ static const I2CDeviceTypeMap sensorTypes{
     {"XDPE11280", I2CDeviceType{"xdpe11280", true}},
     {"XDPE12284", I2CDeviceType{"xdpe12284", true}},
     {"XDPE152C4", I2CDeviceType{"xdpe152c4", true}},
+    {"XDPE1A2G7C", I2CDeviceType{"xdpe1a2g7c", true}},
 };
 
 enum class DevTypes
