@@ -495,7 +495,7 @@ TEST_F(MCTPReactorFixture, manageNullDevice)
 {
     reactor->manageMCTPDevice("/test", {});
     EXPECT_FALSE(reactor->getDeviceName(9).has_value());
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, manageMockDeviceSetupFailure)
@@ -604,7 +604,7 @@ TEST_F(MCTPReactorFixture, manageMockDeviceRemoved)
     reactor->manageMCTPDevice("/test", device);
     removeHandler(endpoint);
     reactor->tick();
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, removedCallbackAfterReactorDestroyedDoesNotCrash)
@@ -685,7 +685,7 @@ TEST_F(MCTPReactorFixture, removedCallbackForForeignDeviceDoesNotDeferSetup)
     ASSERT_TRUE(static_cast<bool>(removeHandler));
     removeHandler(endpoint);
     reactor->tick();
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, setupSuccessWithNullEndpointDoesNotAssociate)
@@ -699,7 +699,7 @@ TEST_F(MCTPReactorFixture, setupSuccessWithNullEndpointDoesNotAssociate)
     EXPECT_CALL(*device, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", device);
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, specificEidRetryIgnoresFailedNonMctpdDevice)
@@ -713,7 +713,7 @@ TEST_F(MCTPReactorFixture, specificEidRetryIgnoresFailedNonMctpdDevice)
     reactor->manageMCTPDevice("/test", device);
     EXPECT_TRUE(reactor->isRetrying(0));
     EXPECT_FALSE(reactor->isRetrying(9));
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, removedCallbackAfterUnmanageDoesNotRequeueSetup)
@@ -743,7 +743,7 @@ TEST_F(MCTPReactorFixture, removedCallbackAfterUnmanageDoesNotRequeueSetup)
     EXPECT_CALL(*endpoint, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", device);
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
     ASSERT_TRUE(static_cast<bool>(removeHandler));
     removeHandler(endpoint);
     reactor->tick();
@@ -825,7 +825,7 @@ TEST(MCTPReactor, replaceConfiguration)
 
 TEST_F(MCTPReactorFixture, unmanageUnknownInventoryIsNoop)
 {
-    reactor->unmanageMCTPDevice("/unknown");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/unknown"));
     EXPECT_FALSE(reactor->getDeviceName(9).has_value());
 }
 
@@ -915,7 +915,7 @@ TEST(MCTPReactor, requestSetupCallbackTriggersReactorSetupPathForMctpdDevice)
         device->triggerRequestSetup();
 
         EXPECT_GE(setupCalls, 2);
-        reactor->unmanageMCTPDevice("/test/mctpd");
+        reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/mctpd"));
     }
     catch (const std::exception& ex)
     {
@@ -980,7 +980,7 @@ TEST(MCTPReactor, usbRecoveryNotTriggeredBeforeFiveConsecutiveFailures)
     reactor->tick();                                      // failure 3
     reactor->tick();                                      // failure 4
 
-    reactor->unmanageMCTPDevice("/test/usb-fail4");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/usb-fail4"));
 }
 
 TEST(MCTPReactor, usbRecoveryTriggeredAtFifthConsecutiveFailure)
@@ -1009,7 +1009,7 @@ TEST(MCTPReactor, usbRecoveryTriggeredAtFifthConsecutiveFailure)
     reactor->tick();                                      // failure 4
     reactor->tick(); // failure 5 -> recovery
 
-    reactor->unmanageMCTPDevice("/test/usb-fail5");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/usb-fail5"));
 }
 
 TEST(MCTPReactor, usbFailureStreakResetsAfterSuccessfulSetup)
@@ -1069,7 +1069,7 @@ TEST(MCTPReactor, usbFailureStreakResetsAfterSuccessfulSetup)
     reactor->tick(); // failure 4
     reactor->tick(); // failure 5 -> recovery
 
-    reactor->unmanageMCTPDevice("/test/usb-reset");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/usb-reset"));
 }
 
 TEST(MCTPReactor, nonUsbFailuresDoNotTriggerUsbRecovery)
@@ -1096,7 +1096,7 @@ TEST(MCTPReactor, nonUsbFailuresDoNotTriggerUsbRecovery)
     reactor->tick();
     reactor->tick();
 
-    reactor->unmanageMCTPDevice("/test/non-usb-fail");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/non-usb-fail"));
 }
 
 TEST(MCTPReactor, unmanageClearsUsbFailureStreak)
@@ -1120,13 +1120,15 @@ TEST(MCTPReactor, unmanageClearsUsbFailureStreak)
     reactor->tick();                                               // failure 3
     reactor->tick();                                               // failure 4
 
-    reactor->unmanageMCTPDevice("/test/usb-unmanage-reset");
+    reactor->unmanageMCTPDevice(
+        sdbusplus::object_path("/test/usb-unmanage-reset"));
 
     reactor->manageMCTPDevice("/test/usb-unmanage-reset", device); // reset to 1
     reactor->tick();                                               // 2
     reactor->tick();                                               // 3
     reactor->tick();                                               // 4
-    reactor->unmanageMCTPDevice("/test/usb-unmanage-reset");
+    reactor->unmanageMCTPDevice(
+        sdbusplus::object_path("/test/usb-unmanage-reset"));
 }
 
 TEST(MCTPReactor, forceUSBRecoveryRejectsEmptyInterface)
@@ -1225,7 +1227,8 @@ TEST(MCTPReactor, usbRecoveryDisabledWhenRecoveryThresholdZero)
     {
         reactor->tick();
     }
-    reactor->unmanageMCTPDevice("/test/usb-threshold-zero");
+    reactor->unmanageMCTPDevice(
+        sdbusplus::object_path("/test/usb-threshold-zero"));
 }
 
 TEST(MCTPReactor, usbRecoverySkippedWhenAutoRecoveryDisabled)
@@ -1253,7 +1256,8 @@ TEST(MCTPReactor, usbRecoverySkippedWhenAutoRecoveryDisabled)
     reactor->tick();                                              // failure 3
     reactor->tick();                                              // failure 4
     reactor->tick();                                              // failure 5
-    reactor->unmanageMCTPDevice("/test/usb-auto-disabled");
+    reactor->unmanageMCTPDevice(
+        sdbusplus::object_path("/test/usb-auto-disabled"));
 }
 
 TEST_F(MCTPReactorFixture, setupFailureMarksBroadcastAsRetrying)
@@ -1267,7 +1271,7 @@ TEST_F(MCTPReactorFixture, setupFailureMarksBroadcastAsRetrying)
 
     reactor->manageMCTPDevice("/test", device);
     EXPECT_TRUE(reactor->isRetrying(0));
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
     EXPECT_FALSE(reactor->isRetrying(0));
 }
 
@@ -1328,7 +1332,7 @@ TEST(MCTPReactor, endpointWithMissingInventorySkipsAssociation)
     EXPECT_CALL(*managed, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", managed);
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, subscribeFailureDefersSetup)
@@ -1345,7 +1349,7 @@ TEST_F(MCTPReactorFixture, subscribeFailureDefersSetup)
 
     reactor->manageMCTPDevice("/test", device);
     EXPECT_FALSE(reactor->isRetrying(0));
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
     EXPECT_FALSE(reactor->isRetrying(0));
 }
 
@@ -1376,7 +1380,7 @@ TEST_F(MCTPReactorFixture, endpointDegradedAndAvailableCallbacksExecute)
     ASSERT_TRUE(static_cast<bool>(available));
     degraded(endpoint);
     available(endpoint);
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST(MCTPReactor, specificEidRetryingPathWithMctpdDevice)
@@ -1399,7 +1403,7 @@ TEST(MCTPReactor, specificEidRetryingPathWithMctpdDevice)
         reactor->manageMCTPDevice("/test", dev);
         EXPECT_TRUE(reactor->isRetrying(42));
         EXPECT_FALSE(reactor->isRetrying(43));
-        reactor->unmanageMCTPDevice("/test");
+        reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
         // Unassigned -> terminate; remove() is only for Assigned unmanage.
         EXPECT_EQ(dev->removeCalls, 0);
         EXPECT_FALSE(reactor->isRetrying(42));
@@ -1447,8 +1451,8 @@ TEST(MCTPReactor, specificEidRetryingMatchesLaterFailedMctpdDevice)
         EXPECT_TRUE(reactor->isRetrying(42));
         EXPECT_FALSE(reactor->isRetrying(43));
 
-        reactor->unmanageMCTPDevice("/test/first");
-        reactor->unmanageMCTPDevice("/test/second");
+        reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/first"));
+        reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/second"));
         // Both devices stuck in Unassigned; terminate, not remove().
         EXPECT_EQ(first->removeCalls, 0);
         EXPECT_EQ(second->removeCalls, 0);
@@ -2106,7 +2110,7 @@ TEST_F(MCTPReactorFixture, manageMCTPDeviceNullThenRealDeviceAtSamePath)
     EXPECT_CALL(*device, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", device);
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, tickWithNoDeferredDevicesIsNoop)
@@ -2126,7 +2130,7 @@ TEST_F(MCTPReactorFixture, manageMCTPDeviceSetupErrorDoesNotAssociate)
     EXPECT_CALL(*device, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test", device);
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST(MCTPReactor, isRetryingWithEmptyFailureCountsReturnsFalse)
@@ -2168,7 +2172,7 @@ TEST_F(MCTPReactorFixture, multipleSetupFailuresThenSuccess)
     EXPECT_TRUE(reactor->isRetrying(0));
     reactor->tick();
     EXPECT_FALSE(reactor->isRetrying(0));
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST(MCTPReactor, manageMCTPDeviceSkipsNonMctpdDevices)
@@ -2184,7 +2188,7 @@ TEST(MCTPReactor, manageMCTPDeviceSkipsNonMctpdDevices)
     EXPECT_CALL(*dev, remove()).Times(0);
 
     reactor->manageMCTPDevice("/test/mock", dev);
-    reactor->unmanageMCTPDevice("/test/mock");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/mock"));
 }
 
 TEST(MCTPReactor, isRetryingSkipsNonMctpdDevices)
@@ -2204,7 +2208,7 @@ TEST(MCTPReactor, isRetryingSkipsNonMctpdDevices)
     EXPECT_TRUE(reactor->isRetrying(0)); // Broadcast retry is true
     EXPECT_FALSE(
         reactor->isRetrying(10)); // Specific EID check skips non-MCTPDDevice
-    reactor->unmanageMCTPDevice("/test/fail");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/fail"));
 }
 
 TEST(MCTPReactor, deferredRetryClearsOnSuccessWithoutEndpointObject)
@@ -2236,7 +2240,7 @@ TEST(MCTPReactor, deferredRetryClearsOnSuccessWithoutEndpointObject)
         EXPECT_TRUE(reactor->isRetrying(55));
         reactor->tick();
         EXPECT_FALSE(reactor->isRetrying(55));
-        reactor->unmanageMCTPDevice("/test");
+        reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
         // Second setup succeeds with null ep; state stays Assigning. Unmanage
         // quarantines; remove() is only for Assigned.
         EXPECT_EQ(dev->removeCalls, 0);
@@ -2288,7 +2292,7 @@ TEST_F(MCTPReactorFixture, manageSameDeviceTwiceAtSamePathIsIdempotent)
     // Quarantine without calling device->remove().
     reactor->manageMCTPDevice("/test/idem", device);
     reactor->manageMCTPDevice("/test/idem", device);
-    reactor->unmanageMCTPDevice("/test/idem");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/idem"));
 }
 
 // Test: manageMCTPDevice replacement path (was "EBUSY" in pre-sync code).
@@ -2351,7 +2355,7 @@ TEST(MCTPReactor, replaceConfigurationUnmanagedBeforeTick)
     reactor->manageMCTPDevice("/test/replace-early", initial);
     reactor->manageMCTPDevice("/test/replace-early", replacement);
     reactor->tick();
-    reactor->unmanageMCTPDevice("/test/replace-early");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/replace-early"));
 
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(replacement.get()));
@@ -2381,7 +2385,7 @@ TEST(MCTPReactor, replaceConfigurationWaitsForRemoveCompletionBeforeRetry)
     reactor->tick();
     EXPECT_EQ(replacement->setupCalls, 1);
 
-    reactor->unmanageMCTPDevice("/test/dr05");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/dr05"));
     EXPECT_EQ(replacement->removeCalls, 1);
 }
 
@@ -2477,7 +2481,7 @@ TEST(MCTPReactor, replaceConfigurationRemovedBeforeCompletionIsNotRetried)
     reactor->manageMCTPDevice("/test/dr05-cancel", replacement);
     EXPECT_EQ(initial->removeCalls, 1);
 
-    reactor->unmanageMCTPDevice("/test/dr05-cancel");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/dr05-cancel"));
     EXPECT_EQ(replacement->removeCalls, 1);
 
     initial->completeRemove();
@@ -2517,7 +2521,7 @@ TEST_F(MCTPReactorFixture, deferSetupMultipleTimesForSameDeviceCallsSetupOnce)
     reactor->tick();
     EXPECT_EQ(setupCallCount, 3);
 
-    reactor->unmanageMCTPDevice("/test/defer-multi");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/defer-multi"));
     EXPECT_FALSE(reactor->isRetrying(0));
 }
 
@@ -2526,7 +2530,7 @@ TEST_F(MCTPReactorFixture, deferSetupMultipleTimesForSameDeviceCallsSetupOnce)
 TEST_F(MCTPReactorFixture, unmanageNeverManagedPathIsNoop)
 {
     // Should not crash; debug log path in unmanageMCTPDevice fires.
-    reactor->unmanageMCTPDevice("/never/managed/path");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/never/managed/path"));
     EXPECT_FALSE(reactor->isRetrying(0));
     EXPECT_FALSE(reactor->getDeviceName(1).has_value());
 }
@@ -2564,7 +2568,7 @@ TEST(MCTPReactor, getStaticEidFromInterfaceWithMatchingAndNonMatchingDevice)
         EXPECT_FALSE(
             reactor->getStaticEidFromInterface("nonexistent0").has_value());
 
-        reactor->unmanageMCTPDevice("/test/static-eid");
+        reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/static-eid"));
     }
     catch (const std::exception& ex)
     {
@@ -2608,7 +2612,8 @@ TEST(MCTPReactor, getDeviceNameReturnedForManagedMctpdDevice)
         // Unknown EID → nullopt.
         EXPECT_FALSE(reactor->getDeviceName(99).has_value());
 
-        reactor->unmanageMCTPDevice("/test/name-lookup");
+        reactor->unmanageMCTPDevice(
+            sdbusplus::object_path("/test/name-lookup"));
 
         // After unmanage (Unassigned → terminate), the device is gone so
         // lookup returns nullopt.
@@ -2647,10 +2652,10 @@ TEST(MCTPReactor, isRetryingFalseAfterAllDevicesUnmanaged)
     reactor->manageMCTPDevice("/dev2", dev2);
     EXPECT_TRUE(reactor->isRetrying(0));
 
-    reactor->unmanageMCTPDevice("/dev1");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/dev1"));
     EXPECT_TRUE(reactor->isRetrying(0)); // dev2 still pending
 
-    reactor->unmanageMCTPDevice("/dev2");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/dev2"));
     EXPECT_FALSE(reactor->isRetrying(0)); // all cleared
 }
 
@@ -2685,7 +2690,7 @@ TEST_F(MCTPReactorFixture, tickAfterSetupErrorThenSuccessIsRetryingFalse)
     EXPECT_TRUE(reactor->isRetrying(0));
     reactor->tick();
     EXPECT_FALSE(reactor->isRetrying(0)); // success cleared failureCounts
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 // Test: manageMCTPDevice replacement path with MockMCTPDevices (no DBus).
@@ -2747,7 +2752,7 @@ TEST(MCTPReactor, ebusyPathWithMockDevicesLogs)
     reactor->manageMCTPDevice("/test/ebusy-log", initial);
     reactor->manageMCTPDevice("/test/ebusy-log", replacement);
     reactor->tick();
-    reactor->unmanageMCTPDevice("/test/ebusy-log");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/ebusy-log"));
 
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(replacement.get()));
@@ -2781,7 +2786,7 @@ TEST(MCTPReactor, isRetryingWithNonMCTPDDeviceReturnsFalseForSpecificEid)
     EXPECT_FALSE(reactor->isRetrying(9));
     EXPECT_FALSE(reactor->isRetrying(42));
 
-    reactor->unmanageMCTPDevice("/test/non-mctpd");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/non-mctpd"));
 }
 
 // Test: trackEndpoint() when endpoint->device() is NOT registered in the
@@ -2828,7 +2833,7 @@ TEST(MCTPReactor, trackEndpointWithMissingInventoryLogsErrorNoAssociate)
     // returns unregisteredDevice (not registered at /test/registered).
     // Unmanage first to reset, then re-manage with a setup that succeeds
     // but returns endpoint linked to a different device.
-    reactor->unmanageMCTPDevice("/test/registered");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/registered"));
 
     auto registeredDevice2 = std::make_shared<MockMCTPDevice>();
     EXPECT_CALL(*registeredDevice2, describe())
@@ -2842,7 +2847,7 @@ TEST(MCTPReactor, trackEndpointWithMissingInventoryLogsErrorNoAssociate)
     // (not in repo) → devices.inventoryFor(unregisteredDevice) returns nullopt
     // → error logged, no associate
     reactor->manageMCTPDevice("/test/reg2", registeredDevice2);
-    reactor->unmanageMCTPDevice("/test/reg2");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/reg2"));
 }
 
 // Test: isRetrying(eid) returns true when the failing device is an MCTPDDevice
@@ -2884,7 +2889,8 @@ TEST(MCTPReactor, isRetryingWithBridgePoolEidReturnsTrue)
         // managesEid(13) returns false → isRetrying(13) must return false.
         EXPECT_FALSE(reactor->isRetrying(13));
 
-        reactor->unmanageMCTPDevice("/test/bridge-pool");
+        reactor->unmanageMCTPDevice(
+            sdbusplus::object_path("/test/bridge-pool"));
     }
     catch (const std::exception& ex)
     {
@@ -2932,8 +2938,8 @@ TEST(MCTPReactor, tickProcessesBothDeferredDevices)
     EXPECT_FALSE(reactor->isRetrying(0));
 
     // unmanage from Assigning → Quarantine (no device->remove).
-    reactor->unmanageMCTPDevice("/tick/dev1");
-    reactor->unmanageMCTPDevice("/tick/dev2");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/tick/dev1"));
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/tick/dev2"));
 }
 
 // Test: getDeviceName for a bridge-pool EID whose computed index falls outside
@@ -2972,7 +2978,8 @@ TEST(MCTPReactor, getDeviceNameForBridgePoolEidBeyondDeviceNamesBoundsIsNullopt)
         // EID outside both ranges → nullopt.
         EXPECT_FALSE(reactor->getDeviceName(24).has_value());
 
-        reactor->unmanageMCTPDevice("/test/bridge-names");
+        reactor->unmanageMCTPDevice(
+            sdbusplus::object_path("/test/bridge-names"));
     }
     catch (const std::exception& ex)
     {
@@ -3024,8 +3031,9 @@ TEST(MCTPReactor, getStaticEidFromInterfaceSkipsNonMctpdDevices)
         EXPECT_FALSE(
             reactor->getStaticEidFromInterface("nonexistent").has_value());
 
-        reactor->unmanageMCTPDevice("/test/non-mctpd");
-        reactor->unmanageMCTPDevice("/test/mctpd-iface");
+        reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/non-mctpd"));
+        reactor->unmanageMCTPDevice(
+            sdbusplus::object_path("/test/mctpd-iface"));
     }
     catch (const std::exception& ex)
     {
@@ -3081,7 +3089,8 @@ TEST(MCTPReactor, isRetryingBridgePoolBoundaryValues)
         // Broadcast EID 0 → failureCounts non-empty → true
         EXPECT_TRUE(reactor->isRetrying(0));
 
-        reactor->unmanageMCTPDevice("/test/bridge-boundary");
+        reactor->unmanageMCTPDevice(
+            sdbusplus::object_path("/test/bridge-boundary"));
         EXPECT_FALSE(reactor->isRetrying(0));
     }
     catch (const std::exception& ex)
@@ -3115,7 +3124,7 @@ TEST_F(MCTPReactorFixture, subscribeThrowsMCTPExceptionDeviceIsQuarantined)
     reactor->tick();
 
     // unmanage from Quarantine must not invoke device->remove().
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 // ---- R5: tick() with three deferred devices ----
@@ -3164,9 +3173,9 @@ TEST(MCTPReactor, tickProcessesThreeDeferredDevices)
     EXPECT_FALSE(reactor->isRetrying(0));
 
     // unmanage from Assigning → Quarantine (no device->remove).
-    reactor->unmanageMCTPDevice("/tick3/dev1");
-    reactor->unmanageMCTPDevice("/tick3/dev2");
-    reactor->unmanageMCTPDevice("/tick3/dev3");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/tick3/dev1"));
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/tick3/dev2"));
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/tick3/dev3"));
 }
 
 // ---- R1: manageMCTPDevice null-device returns early (explicit isRetrying
@@ -3185,7 +3194,7 @@ TEST_F(MCTPReactorFixture, manageNullDeviceDoesNotAffectRetryState)
     EXPECT_FALSE(reactor->isRetrying(0));
     EXPECT_FALSE(reactor->getDeviceName(42).has_value());
     // unmanage on a path that was never actually registered is a noop
-    reactor->unmanageMCTPDevice("/test/null-dev");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/null-dev"));
     EXPECT_FALSE(reactor->isRetrying(0));
 }
 
@@ -3255,7 +3264,7 @@ TEST(MCTPReactor, ebusyReplacementSetupRunsAfterTick)
     reactor->tick();
     EXPECT_FALSE(reactor->isRetrying(0));
 
-    reactor->unmanageMCTPDevice("/test/ebusy-tick");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/ebusy-tick"));
 
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(replacement.get()));
@@ -3298,7 +3307,7 @@ TEST_F(MCTPReactorFixture, G211trackEndpointInventoryMissingSkipsAssociate)
     EXPECT_CALL(*device, remove()).Times(1);
 
     reactor->manageMCTPDevice("/test/g211", device);
-    reactor->unmanageMCTPDevice("/test/g211");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g211"));
 }
 
 // G212: Removed callback fires AFTER the reactor has been destroyed.
@@ -3404,7 +3413,7 @@ TEST_F(MCTPReactorFixture, G213trackEndpointRemovedDeviceNotInRepoNoDeferSetup)
     reactor->tick();
     EXPECT_FALSE(reactor->isRetrying(0));
 
-    reactor->unmanageMCTPDevice("/test/g213");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g213"));
 }
 
 // G214: Removed callback fires while the reactor is alive AND the device is
@@ -3449,7 +3458,7 @@ TEST_F(MCTPReactorFixture, G214trackEndpointRemovedDeviceInRepoCausesDeferSetup)
     EXPECT_FALSE(reactor->isRetrying(0));
 
     // unmanage from Recovered is a no-op (no device->remove, no disassociate).
-    reactor->unmanageMCTPDevice("/test/g214");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g214"));
 }
 
 // G215: setupEndpoint — weak_ptr to reactor has expired before the setup
@@ -3504,7 +3513,7 @@ TEST_F(MCTPReactorFixture, G216setupEndpointNullEndpointAfterSuccessNoAssociate)
 
     // Success with null ep → no failureCounts entry, not retrying.
     EXPECT_FALSE(reactor->isRetrying(0));
-    reactor->unmanageMCTPDevice("/test/g216");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g216"));
 }
 
 // G217: setupEndpoint — trackEndpoint throws MCTPException (from subscribe()).
@@ -3530,7 +3539,7 @@ TEST_F(MCTPReactorFixture, G217setupEndpointMCTPExceptionCaughtDeferSetup)
     EXPECT_FALSE(reactor->isRetrying(0));
 
     // unmanage from Quarantine is a no-op (no device->remove).
-    reactor->unmanageMCTPDevice("/test/g217");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g217"));
 }
 
 // G218: untrackEndpoint explicitly calls server.disassociate() with the
@@ -3565,7 +3574,7 @@ TEST_F(MCTPReactorFixture,
     removeHandler(endpoint);
 
     // unmanage from Lost terminates without calling device->remove.
-    reactor->unmanageMCTPDevice("/test/g218");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g218"));
 }
 
 // G219: isRetrying(0) with empty failureCounts returns false.
@@ -3599,7 +3608,7 @@ TEST(MCTPReactor, G220isRetryingEidZeroNonEmptyFailureCountsTrue)
     EXPECT_TRUE(reactor->isRetrying(0));
 
     // After unmanage (Unassigned → terminate), failureCounts is cleared.
-    reactor->unmanageMCTPDevice("/test/g220");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g220"));
     EXPECT_FALSE(reactor->isRetrying(0));
 }
 
@@ -3626,7 +3635,7 @@ TEST_F(MCTPReactorFixture,
     //   isRetrying(1) → same → false.
     EXPECT_FALSE(reactor->isRetrying(1));
 
-    reactor->unmanageMCTPDevice("/test/g221");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g221"));
     EXPECT_FALSE(reactor->isRetrying(0));
 }
 
@@ -3660,7 +3669,7 @@ TEST(MCTPReactor, G222isRetryingMCTPDDeviceUnmanagedEidReturnsFalse)
         // EID 49 is not managed → isRetrying(49) false.
         EXPECT_FALSE(reactor->isRetrying(49));
 
-        reactor->unmanageMCTPDevice("/test/g222");
+        reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g222"));
         EXPECT_FALSE(reactor->isRetrying(50));
     }
     catch (const std::exception& ex)
@@ -3731,7 +3740,7 @@ TEST(MCTPReactor, G223manageMCTPDeviceEBUSYCurrentNonNullExecutesFullPath)
     reactor->manageMCTPDevice("/test/g223", initial);
     reactor->manageMCTPDevice("/test/g223", replacement);
     reactor->tick();
-    reactor->unmanageMCTPDevice("/test/g223");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g223"));
 
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(replacement.get()));
@@ -3770,7 +3779,7 @@ TEST(MCTPReactor, G224manageMCTPDeviceRequestSetupCallbackFires)
         dev->triggerRequestSetup();
         EXPECT_GE(setupCalls, 2);
 
-        reactor->unmanageMCTPDevice("/test/g224");
+        reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g224"));
     }
     catch (const std::exception& ex)
     {
@@ -3799,7 +3808,7 @@ TEST_F(MCTPReactorFixture, G225deferSetupIncrementsFailureCountEachTime)
     EXPECT_TRUE(reactor->isRetrying(0));
 
     // After unmanage, failureCounts for this device is cleared.
-    reactor->unmanageMCTPDevice("/test/g225");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g225"));
     EXPECT_FALSE(reactor->isRetrying(0));
 }
 
@@ -3833,7 +3842,7 @@ TEST_F(MCTPReactorFixture, G226unmanageMCTPDeviceCallsDeviceRemove)
     EXPECT_CALL(*device, remove()).WillOnce([&]() { endpoint->remove(); });
 
     reactor->manageMCTPDevice("/test/g226", device);
-    reactor->unmanageMCTPDevice("/test/g226");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g226"));
 }
 
 // G227: tick() clears failureCounts on devices whose retry succeeds. State
@@ -3868,8 +3877,8 @@ TEST(MCTPReactor, G227tickClearsAllDeferredDevices)
     reactor->tick();
     EXPECT_FALSE(reactor->isRetrying(0));
 
-    reactor->unmanageMCTPDevice("/g227/dev1");
-    reactor->unmanageMCTPDevice("/g227/dev2");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/g227/dev1"));
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/g227/dev2"));
 }
 
 // G228: tick() calls setup on deferred devices; some fail again and are
@@ -3910,8 +3919,8 @@ TEST(MCTPReactor, G228tickSomeDeferredRedeferred)
 
     // unmanage: devSuccess is Assigning → Quarantine; devFail is Unassigned
     // → terminate. Neither calls device->remove.
-    reactor->unmanageMCTPDevice("/g228/success");
-    reactor->unmanageMCTPDevice("/g228/fail");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/g228/success"));
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/g228/fail"));
     EXPECT_FALSE(reactor->isRetrying(0));
 }
 
@@ -3978,7 +3987,7 @@ TEST(MCTPReactor, G229manageMCTPDeviceEBUSYNormalReplacementSetupViaTickOnly)
     reactor->tick();
     EXPECT_FALSE(reactor->isRetrying(0));
 
-    reactor->unmanageMCTPDevice("/g229/dev");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/g229/dev"));
 
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(replacement.get()));
@@ -4024,7 +4033,7 @@ TEST_F(MCTPReactorFixture, G230isRetryingAfterTickSuccessClearsFailureCounts)
     // tick's setup succeeded → failureCounts cleared → not retrying.
     EXPECT_FALSE(reactor->isRetrying(0));
 
-    reactor->unmanageMCTPDevice("/test/g230");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g230"));
     EXPECT_FALSE(reactor->isRetrying(0));
 }
 
@@ -4044,7 +4053,7 @@ TEST_F(MCTPReactorFixture, G231isRetryingBroadcastEidZeroNonEmptyCountsTrue)
 
     // Any non-zero EID is retrying → broadcast EID=0 should also return true
     EXPECT_TRUE(reactor->isRetrying(0));
-    reactor->unmanageMCTPDevice("/test/g231");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/g231"));
 }
 
 // ===========================================================================
@@ -4157,7 +4166,7 @@ TEST(MCTPReactor,
     reactor->manageMCTPDevice("/g301/path", initial);
     reactor->manageMCTPDevice("/g301/path", replacement);
     reactor->tick();
-    reactor->unmanageMCTPDevice("/g301/path");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/g301/path"));
 
     // Note: The rethrow branch (code != device_or_resource_busy) is NOT
     // reachable through the public API of MCTPDeviceRepository::add() because
@@ -4281,7 +4290,7 @@ TEST(MCTPReactor, G303trackEndpointInventoryMissingLogsErrorNoAssociate)
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), ep));
 
     reactor->manageMCTPDevice("/g303/dev", managedDevice);
-    reactor->unmanageMCTPDevice("/g303/dev");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/g303/dev"));
 
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(managedDevice.get()));
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(ep.get()));
@@ -4312,7 +4321,7 @@ TEST_F(MCTPReactorFixture, G304setupEndpointSuccessNullEpIsIgnored)
                                              std::shared_ptr<MCTPEndpoint>{}));
 
     reactor->manageMCTPDevice("/g304/dev", device);
-    reactor->unmanageMCTPDevice("/g304/dev");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/g304/dev"));
 }
 
 // ===========================================================================
@@ -4396,7 +4405,7 @@ TEST_F(MCTPReactorFixture, G306setupEndpointCatchesMCTPExceptionFromSubscribe)
 
     reactor->manageMCTPDevice("/g306/dev", device);
     reactor->tick(); // no-op on Quarantine
-    reactor->unmanageMCTPDevice("/g306/dev");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/g306/dev"));
 }
 
 // ===========================================================================
@@ -4435,7 +4444,7 @@ TEST_F(MCTPReactorFixture, removedCallbackQuarantineTerminates)
     ASSERT_TRUE(static_cast<bool>(rem));
     reactor->states[0] = MCTPDeviceState::Quarantine;
     EXPECT_NO_THROW(rem(endpoint));
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, removedCallbackRecoveredGoesLost)
@@ -4447,7 +4456,7 @@ TEST_F(MCTPReactorFixture, removedCallbackRecoveredGoesLost)
     ASSERT_TRUE(static_cast<bool>(rem));
     reactor->states[0] = MCTPDeviceState::Recovered;
     EXPECT_NO_THROW(rem(endpoint));
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, removedCallbackRemovingTerminatesIfKnown)
@@ -4459,7 +4468,7 @@ TEST_F(MCTPReactorFixture, removedCallbackRemovingTerminatesIfKnown)
     ASSERT_TRUE(static_cast<bool>(rem));
     reactor->states[0] = MCTPDeviceState::Removing;
     EXPECT_NO_THROW(rem(endpoint));
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, removedCallbackPendingGoesUnassigned)
@@ -4471,7 +4480,7 @@ TEST_F(MCTPReactorFixture, removedCallbackPendingGoesUnassigned)
     ASSERT_TRUE(static_cast<bool>(rem));
     reactor->states[0] = MCTPDeviceState::Pending;
     EXPECT_NO_THROW(rem(endpoint));
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, removedCallbackRecoveringIsNoop)
@@ -4483,7 +4492,7 @@ TEST_F(MCTPReactorFixture, removedCallbackRecoveringIsNoop)
     ASSERT_TRUE(static_cast<bool>(rem));
     reactor->states[0] = MCTPDeviceState::Recovering;
     EXPECT_NO_THROW(rem(endpoint));
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, degradedAndAvailableCallbacksAreInvokable)
@@ -4496,7 +4505,7 @@ TEST_F(MCTPReactorFixture, degradedAndAvailableCallbacksAreInvokable)
     ASSERT_TRUE(static_cast<bool>(avail));
     EXPECT_NO_THROW(deg(endpoint));
     EXPECT_NO_THROW(avail(endpoint));
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 // ===========================================================================
@@ -4519,7 +4528,7 @@ TEST(MCTPReactor, usbRecoveryBackendFailureAtThresholdWarns)
         .WillOnce(testing::DoAll(testing::SetArgReferee<1>("clear-halt failed"),
                                  testing::Return(false)));
     reactor->manageMCTPDevice("/test/recfail", device);
-    reactor->unmanageMCTPDevice("/test/recfail");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/recfail"));
 }
 
 TEST(MCTPReactor, usbRecoveryDisabledAtRuntimeSkipsClearHalt)
@@ -4538,7 +4547,7 @@ TEST(MCTPReactor, usbRecoveryDisabledAtRuntimeSkipsClearHalt)
     EXPECT_CALL(*recoveryPtr, clearBulkOutHalt(testing::_, testing::_))
         .Times(0);
     reactor->manageMCTPDevice("/test/disabled", device);
-    reactor->unmanageMCTPDevice("/test/disabled");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/disabled"));
 }
 
 TEST(MCTPReactor, usbSetupFailureEmptyInterfaceSkipsTracking)
@@ -4558,7 +4567,7 @@ TEST(MCTPReactor, usbSetupFailureEmptyInterfaceSkipsTracking)
     EXPECT_CALL(*recoveryPtr, clearBulkOutHalt(testing::_, testing::_))
         .Times(0);
     reactor->manageMCTPDevice("/test/empty-iface", device);
-    reactor->unmanageMCTPDevice("/test/empty-iface");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/empty-iface"));
 }
 
 TEST(MCTPReactor, usbRecoveryThresholdZeroDisablesTracking)
@@ -4577,7 +4586,7 @@ TEST(MCTPReactor, usbRecoveryThresholdZeroDisablesTracking)
         .Times(0);
     reactor->manageMCTPDevice("/test/thr0", device);
     reactor->tick();
-    reactor->unmanageMCTPDevice("/test/thr0");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/thr0"));
 }
 
 // ===========================================================================
@@ -4810,7 +4819,8 @@ TEST(MCTPReactorBranchCoverage, usbFailureWithoutRecoveryBackend)
 
     reactor->manageMCTPDevice("/branch/usb-no-backend", device);
     EXPECT_TRUE(reactor->isRetrying(0));
-    reactor->unmanageMCTPDevice("/branch/usb-no-backend");
+    reactor->unmanageMCTPDevice(
+        sdbusplus::object_path("/branch/usb-no-backend"));
 }
 
 TEST(MCTPReactorBranchCoverage, usbRecoveryBackendExceptionPropagates)
@@ -4881,7 +4891,8 @@ TEST(MCTPReactorBranchCoverage, assignedUnmanageRemoveExceptionPropagates)
 
     reactor->devices.add("/branch/assigned-remove", device);
     reactor->states[device->id()] = MCTPDeviceState::Assigned;
-    EXPECT_THROW(reactor->unmanageMCTPDevice("/branch/assigned-remove"),
+    EXPECT_THROW(reactor->unmanageMCTPDevice(
+                     sdbusplus::object_path("/branch/assigned-remove")),
                  std::runtime_error);
 }
 
@@ -4898,7 +4909,8 @@ TEST(MCTPReactorBranchCoverage, pendingUnmanageRemoveExceptionPropagates)
 
     reactor->devices.add("/branch/pending-remove", device);
     reactor->states[device->id()] = MCTPDeviceState::Pending;
-    EXPECT_THROW(reactor->unmanageMCTPDevice("/branch/pending-remove"),
+    EXPECT_THROW(reactor->unmanageMCTPDevice(
+                     sdbusplus::object_path("/branch/pending-remove")),
                  std::runtime_error);
 }
 
@@ -5064,7 +5076,8 @@ TEST(MCTPReactorBranchCoverage, unmanageStateLookupExceptionPropagates)
 
     reactor->devices.add("/branch/unmanage-state", device);
     reactor->states[device->id()] = MCTPDeviceState::Assigned;
-    EXPECT_THROW(reactor->unmanageMCTPDevice("/branch/unmanage-state"),
+    EXPECT_THROW(reactor->unmanageMCTPDevice(
+                     sdbusplus::object_path("/branch/unmanage-state")),
                  std::runtime_error);
 }
 
@@ -5080,7 +5093,8 @@ TEST(MCTPReactorBranchCoverage, pendingUnmanageDescriptionExceptionPropagates)
 
     reactor->devices.add("/branch/pending-describe", device);
     reactor->states[device->id()] = MCTPDeviceState::Pending;
-    EXPECT_THROW(reactor->unmanageMCTPDevice("/branch/pending-describe"),
+    EXPECT_THROW(reactor->unmanageMCTPDevice(
+                     sdbusplus::object_path("/branch/pending-describe")),
                  std::runtime_error);
 }
 
@@ -5450,7 +5464,7 @@ TEST_F(MCTPReactorFixture, unmanageRecoveringDeviceQuarantinesIt)
     reactor->states[device->id()] = MCTPDeviceState::Recovering;
     EXPECT_CALL(*device, remove()).Times(0);
 
-    reactor->unmanageMCTPDevice("/recovering-device");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/recovering-device"));
 
     EXPECT_EQ(reactor->states.at(device->id()), MCTPDeviceState::Quarantine);
     EXPECT_TRUE(reactor->devices.contains(device));

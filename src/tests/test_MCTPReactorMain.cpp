@@ -1787,8 +1787,8 @@ TEST(MCTPReactor, unmanageUnrecognizedPathDoesNotThrow)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
-    EXPECT_NO_THROW(
-        reactor->unmanageMCTPDevice("/xyz/openbmc_project/inventory/unknown"));
+    EXPECT_NO_THROW(reactor->unmanageMCTPDevice(
+        sdbusplus::object_path("/xyz/openbmc_project/inventory/unknown")));
 }
 
 // ---------------------------------------------------------------------------
