@@ -5,7 +5,6 @@
 
 #include "NvidiaPcieDevice.hpp"
 
-#include "NvidiaDeviceDiscovery.hpp"
 #include "NvidiaDriverInformation.hpp"
 #include "NvidiaEthPort.hpp"
 #include "NvidiaGpuMctpVdm.hpp"
@@ -13,6 +12,7 @@
 #include "NvidiaPcieInterface.hpp"
 #include "NvidiaPciePort.hpp"
 #include "NvidiaPciePortMetrics.hpp"
+#include "NvidiaSensorConfig.hpp"
 #include "NvidiaUtils.hpp"
 #include "Utils.hpp"
 
@@ -35,7 +35,7 @@
 #include <vector>
 
 PcieDevice::PcieDevice(const SensorConfigs& configs, const std::string& name,
-                       const std::string& path,
+                       const sdbusplus::object_path& path,
                        const std::shared_ptr<sdbusplus::asio::connection>& conn,
                        uint8_t eid, boost::asio::io_context& io,
                        mctp::MctpRequester& mctpRequester,
@@ -45,6 +45,14 @@ PcieDevice::PcieDevice(const SensorConfigs& configs, const std::string& name,
     mctpRequester(mctpRequester), conn(conn), objectServer(objectServer),
     configs(configs), name(escapeName(name)), path(path)
 {}
+
+PcieDevice::~PcieDevice()
+{
+    objectServer.remove_interface(networkAdapterInterface);
+    objectServer.remove_interface(networkAdapterAssociationInterface);
+    objectServer.remove_interface(locationCodeInterface);
+    objectServer.remove_interface(embeddedConnectorInterface);
+}
 
 void PcieDevice::init()
 {
@@ -56,8 +64,7 @@ void PcieDevice::init()
         "xyz.openbmc_project.Inventory.Item.NetworkAdapter");
 
     std::vector<Association> associations;
-    associations.emplace_back("contained_by", "containing",
-                              sdbusplus::object_path(path).parent_path());
+    associations.emplace_back("contained_by", "containing", path.parent_path());
 
     networkAdapterAssociationInterface =
         objectServer.add_interface(networkAdapterPath, association::interface);

@@ -7,6 +7,7 @@
 
 #include <OcpMctpVdm.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -33,6 +34,8 @@ enum class MessageType : uint8_t
 
 enum class DeviceCapabilityDiscoveryCommands : uint8_t
 {
+    GET_SUPPORTED_MESSAGE_TYPES = 0x01,
+    GET_SUPPORTED_COMMAND_CODES = 0x02,
     SET_CURRENT_EVENT_SOURCES = 0x5,
     SET_EVENT_SUBSCRIPTION = 0x6,
     QUERY_DEVICE_IDENTIFICATION = 0x09,
@@ -56,14 +59,19 @@ enum class PlatformEnvironmentalCommands : uint8_t
     GET_INVENTORY_INFORMATION = 0x0C,
     GET_DRIVER_INFORMATION = 0x0E,
     GET_VOLTAGE = 0x0F,
+    SET_CLOCK_LIMIT = 0x10,
     GET_CLOCK_LIMIT = 0x11,
+    GET_LEAK_DETECTION_INFO = 0x17,
     GET_VIOLATION_DURATION = 0x45,
     GET_CURRENT_UTILIZATION = 0x47,
+    GET_ECC_MODE = 0x4F,
     GET_ECC_ERROR_COUNTS = 0x7D,
+    GET_MEMORY_CAPACITY_UTILIZATION = 0xAD,
 };
 
 enum class PlatformEnvironmentalEvent : uint8_t
 {
+    RESET_REQUIRED = 0x00,
     XID = 0x01,
 };
 
@@ -181,9 +189,28 @@ enum class ClockType : uint8_t
     MEMORY_CLOCK = 1,
 };
 
+enum class ClockLimitFlag : uint8_t
+{
+    PERSISTENCE = 1,
+    CLEAR = 3,
+};
+
 constexpr size_t maxInventoryDataSize = 256;
 
 constexpr size_t queryDeviceIdentificationRequestSize =
+    ocp::accelerator_management::commonRequestSize;
+
+// Type 0 supported-message-types / supported-command-codes responses carry a
+// bitfield8[32]: 256 bits, bit N set means item N is supported.
+constexpr size_t supportedListBitfieldSize = 32;
+
+constexpr size_t getSupportedMessageTypesRequestSize =
+    ocp::accelerator_management::commonRequestSize;
+
+constexpr size_t getSupportedCommandCodesRequestSize =
+    ocp::accelerator_management::commonRequestSize + 1;
+
+constexpr size_t getLeakDetectionInfoRequestSize =
     ocp::accelerator_management::commonRequestSize;
 
 constexpr size_t getNumericSensorReadingRequestSize =
@@ -215,6 +242,9 @@ constexpr size_t getCurrentUtilizationRequestSize =
 constexpr size_t getViolationDurationRequestSize =
     ocp::accelerator_management::commonRequestSize;
 
+constexpr size_t getMemoryCapacityUtilizationRequestSize =
+    ocp::accelerator_management::commonRequestSize;
+
 constexpr size_t queryScalarGroupTelemetryV1RequestSize =
     ocp::accelerator_management::commonRequestSize + 2;
 
@@ -239,6 +269,9 @@ constexpr size_t getCurrentClockFrequencyRequestSize =
 constexpr size_t getEccErrorCountsRequestSize =
     ocp::accelerator_management::commonRequestSize;
 
+constexpr size_t getEccModeRequestSize =
+    ocp::accelerator_management::commonRequestSize;
+
 constexpr size_t setEventSubscriptionRequestSize =
     ocp::accelerator_management::commonRequestSize + 2;
 
@@ -251,6 +284,10 @@ constexpr size_t xidEventMinDataSize = 20;
 
 constexpr size_t getClockLimitRequestSize =
     ocp::accelerator_management::commonRequestSize + sizeof(uint8_t);
+
+constexpr size_t setClockLimitRequestSize =
+    ocp::accelerator_management::commonRequestSize + sizeof(uint8_t) +
+    sizeof(uint8_t) + sizeof(uint32_t) + sizeof(uint32_t);
 
 int encodeRequestCommonHeader(PackBuffer& buffer, gpu::MessageType msgType,
                               uint8_t command, uint8_t instanceId);
@@ -284,6 +321,22 @@ int decodeQueryDeviceIdentificationResponse(
     std::span<const uint8_t> buf,
     ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
     uint8_t& deviceIdentification, uint8_t& deviceInstance);
+
+int encodeGetSupportedMessageTypesRequest(uint8_t instanceId,
+                                          std::span<uint8_t> buf);
+
+int decodeGetSupportedMessageTypesResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    std::array<uint8_t, supportedListBitfieldSize>& supportedTypes);
+
+int encodeGetSupportedCommandCodesRequest(
+    uint8_t instanceId, uint8_t nvidiaMessageType, std::span<uint8_t> buf);
+
+int decodeGetSupportedCommandCodesResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    std::array<uint8_t, supportedListBitfieldSize>& supportedCommands);
 
 int encodeGetTemperatureReadingRequest(uint8_t instanceId, uint8_t sensorId,
                                        std::span<uint8_t> buf);
@@ -367,6 +420,14 @@ int decodeGetClockLimitResponse(
     uint32_t& requestedLimitMin, uint32_t& requestedLimitMax,
     uint32_t& presentLimitMin, uint32_t& presentLimitMax);
 
+int encodeSetClockLimitRequest(uint8_t instanceId, ClockType clockType,
+                               ClockLimitFlag flag, uint32_t limitMinMHz,
+                               uint32_t limitMaxMHz, std::span<uint8_t> buf);
+
+int decodeSetClockLimitResponse(std::span<const uint8_t> buf,
+                                ocp::accelerator_management::CompletionCode& cc,
+                                uint16_t& reasonCode);
+
 int encodeQueryScalarGroupTelemetryV1Request(
     uint8_t instanceId, uint8_t deviceIndex, PcieScalarGroupId groupId,
     std::span<uint8_t> buf);
@@ -400,6 +461,20 @@ int decodeGetCurrentUtilizationModeResponse(
 int decodeGetCurrentUtilizationModeResponse(std::span<const uint8_t> buf,
                                             uint32_t& gpuUtilization,
                                             uint32_t& memoryUtilization);
+
+int encodeGetMemoryCapacityUtilizationRequest(uint8_t instanceId,
+                                              std::span<uint8_t> buf);
+
+int decodeGetMemoryCapacityUtilizationResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    uint32_t& reservedMemory, uint32_t& usedMemory);
+
+// Overload for the long-running response event payload, which contains
+// only the reserved and used memory values (no OCP/common response header).
+int decodeGetMemoryCapacityUtilizationResponse(std::span<const uint8_t> buf,
+                                               uint32_t& reservedMemory,
+                                               uint32_t& usedMemory);
 
 int decodeLongRunningResponseEvent(
     std::span<const uint8_t> buf,
@@ -460,5 +535,34 @@ int decodeGetEccErrorCountsResponse(
     uint16_t& flags, uint32_t& sramCorrected, uint32_t& sramUncorrectedSecded,
     uint32_t& sramUncorrectedParity, uint32_t& dramCorrected,
     uint32_t& dramUncorrected);
+
+int encodeGetEccModeRequest(uint8_t instanceId, std::span<uint8_t> buf);
+
+int decodeGetEccModeResponse(std::span<const uint8_t> buf,
+                             ocp::accelerator_management::CompletionCode& cc,
+                             uint16_t& reasonCode, bool& currentEccModeEnabled,
+                             bool& pendingEccModeEnabled);
+
+// Overload for the long-running response event payload, which contains only
+// the ECC mode flag byte (no OCP/common response header).
+int decodeGetEccModeResponse(std::span<const uint8_t> buf,
+                             bool& currentEccModeEnabled,
+                             bool& pendingEccModeEnabled);
+
+int encodeGetLeakDetectionInfoRequest(uint8_t instanceId,
+                                      std::span<uint8_t> buf);
+
+struct LeakSensorData
+{
+    uint8_t sensorId{};
+    uint8_t leakState{};
+    std::vector<uint16_t> thresholds;
+    uint16_t adcReadingMv{};
+};
+
+int decodeGetLeakDetectionInfoResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    std::vector<LeakSensorData>& parsedSensors);
 
 } // namespace gpu

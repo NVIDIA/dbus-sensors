@@ -10,18 +10,20 @@
 
 #include <Inventory.hpp>
 #include <MctpRequester.hpp>
-#include <NvidiaDeviceDiscovery.hpp>
 #include <NvidiaDriverInformation.hpp>
 #include <NvidiaEventReporting.hpp>
 #include <NvidiaGpuClockFrequencyMetric.hpp>
 #include <NvidiaGpuClockSpeedControl.hpp>
+#include <NvidiaGpuEccMode.hpp>
 #include <NvidiaGpuEnergySensor.hpp>
 #include <NvidiaGpuMctpVdm.hpp>
+#include <NvidiaGpuMemoryCapacityUtilization.hpp>
 #include <NvidiaGpuMemoryClockFrequency.hpp>
 #include <NvidiaGpuMemoryDevice.hpp>
 #include <NvidiaGpuPowerControl.hpp>
 #include <NvidiaGpuPowerPeakReading.hpp>
 #include <NvidiaGpuPowerSensor.hpp>
+#include <NvidiaGpuResetRequired.hpp>
 #include <NvidiaGpuTempSensor.hpp>
 #include <NvidiaGpuUtilizationMetrics.hpp>
 #include <NvidiaGpuViolationDuration.hpp>
@@ -32,6 +34,7 @@
 #include <NvidiaPcieInterface.hpp>
 #include <NvidiaPciePort.hpp>
 #include <NvidiaPciePortMetrics.hpp>
+#include <NvidiaSensorConfig.hpp>
 #include <NvidiaUtils.hpp>
 #include <OcpMctpVdm.hpp>
 #include <SerialQueue.hpp>
@@ -60,10 +63,6 @@
 // capacity is ~15 commands/device.
 static constexpr auto longRunningSensorPollRate = std::chrono::seconds{30};
 
-static constexpr const char* controlClockSpeedIfaceName =
-    "xyz.openbmc_project.Control.OperatingClockSpeed";
-static constexpr const char* controlClockSpeedPrefix =
-    "/xyz/openbmc_project/control/operatingclockspeed/";
 static constexpr const char* controlPowerPrefix =
     "/xyz/openbmc_project/control/power/";
 
@@ -80,7 +79,7 @@ static constexpr const char* dramIfaceName =
     "xyz.openbmc_project.Inventory.Item.Dimm";
 
 GpuDevice::GpuDevice(const SensorConfigs& configs, const std::string& name,
-                     const std::string& path,
+                     const sdbusplus::object_path& path,
                      const std::shared_ptr<sdbusplus::asio::connection>& conn,
                      uint8_t eid, boost::asio::io_context& io,
                      mctp::MctpRequester& mctpRequester,
@@ -140,28 +139,6 @@ GpuDevice::GpuDevice(const SensorConfigs& configs, const std::string& name,
             "Error initializing DRAM Item.Dimm interface for {NAME}, eid={EID}",
             "NAME", this->name, "EID", eid);
     }
-
-    const std::string gpuClockSpeedControlPath =
-        controlClockSpeedPrefix + this->name;
-    controlClockSpeedInterface = objectServer.add_interface(
-        gpuClockSpeedControlPath, controlClockSpeedIfaceName);
-    controlClockSpeedInterface->register_property(
-        "PresentSpeedLimitMaxHz", std::numeric_limits<uint64_t>::max(),
-        sdbusplus::asio::PropertyPermission::readOnly);
-    controlClockSpeedInterface->register_property(
-        "PresentSpeedLimitMinHz", uint64_t{0},
-        sdbusplus::asio::PropertyPermission::readOnly);
-    controlClockSpeedInterface->register_property(
-        "RequestedSpeedLimitMaxHz", std::numeric_limits<uint64_t>::max());
-    controlClockSpeedInterface->register_property(
-        "RequestedSpeedLimitMinHz", std::numeric_limits<uint64_t>::max());
-
-    if (!controlClockSpeedInterface->initialize())
-    {
-        lg2::error(
-            "Error initializing OperatingClockSpeed interface for {NAME}, eid={EID}",
-            "NAME", this->name, "EID", eid);
-    }
 }
 
 GpuDevice::~GpuDevice()
@@ -169,7 +146,6 @@ GpuDevice::~GpuDevice()
     objectServer.remove_interface(powerCapInterface);
     objectServer.remove_interface(dramAssociationInterface);
     objectServer.remove_interface(dramItemInterface);
-    objectServer.remove_interface(controlClockSpeedInterface);
 }
 
 void GpuDevice::init()
@@ -225,6 +201,9 @@ void GpuDevice::makeSensors()
 
     xidEventHandler = std::make_shared<NvidiaXidEventHandler>(name, conn);
 
+    resetRequiredEventHandler =
+        std::make_shared<NvidiaResetRequiredEventHandler>(name, conn);
+
     eventReporting = std::make_shared<NvidiaEventReportingConfig>(
         eid, mctpRequester,
         std::initializer_list<EventDescriptor>{
@@ -236,7 +215,13 @@ void GpuDevice::makeSensors()
             {gpu::MessageType::PLATFORM_ENVIRONMENTAL,
              static_cast<uint8_t>(gpu::PlatformEnvironmentalEvent::XID),
              std::bind_front(&NvidiaXidEventHandler::handleXidEvent,
-                             xidEventHandler)}});
+                             xidEventHandler)},
+            {gpu::MessageType::PLATFORM_ENVIRONMENTAL,
+             static_cast<uint8_t>(
+                 gpu::PlatformEnvironmentalEvent::RESET_REQUIRED),
+             std::bind_front(
+                 &NvidiaResetRequiredEventHandler::handleResetRequiredEvent,
+                 resetRequiredEventHandler)}});
 
     utilizationMetrics = std::make_shared<NvidiaGpuUtilizationMetrics>(
         mctpRequester, objectServer, name, eid, longRunningQueue,
@@ -246,16 +231,24 @@ void GpuDevice::makeSensors()
         mctpRequester, objectServer, name, eid, longRunningQueue,
         longRunningHandler);
 
+    eccMode = std::make_shared<NvidiaGpuEccMode>(
+        mctpRequester, objectServer, name, eid, longRunningQueue,
+        longRunningHandler);
+
+    memoryCapacityUtilization =
+        std::make_shared<NvidiaGpuMemoryCapacityUtilization>(
+            mctpRequester, objectServer, name, eid, longRunningQueue,
+            longRunningHandler, inventory);
+
     driverInfo = std::make_shared<NvidiaDriverInformation>(
-        conn, mctpRequester, name, eid, objectServer,
-        sdbusplus::object_path(path).parent_path());
+        conn, mctpRequester, name, eid, objectServer, path.parent_path());
 
     gpuPowerControl = std::make_shared<NvidiaGpuPowerControl>(
         objectServer, name, mctpRequester, eid, io, powerCapInterface,
         inventory);
 
     gpuClockSpeedControl = std::make_shared<NvidiaGpuClockSpeedControl>(
-        objectServer, name, mctpRequester, eid, controlClockSpeedInterface);
+        objectServer, name, mctpRequester, eid, io, inventory);
 
     pcieInterface = std::make_shared<NvidiaPcieInterface>(
         conn, mctpRequester, name, path, eid, objectServer,
@@ -449,6 +442,8 @@ void GpuDevice::readLongRunning()
 {
     utilizationMetrics->update();
     violationDuration->update();
+    eccMode->update();
+    memoryCapacityUtilization->update();
 
     waitTimerLongRunning.expires_after(longRunningSensorPollRate);
     waitTimerLongRunning.async_wait(

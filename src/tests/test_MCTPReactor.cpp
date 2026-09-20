@@ -9,6 +9,7 @@
 #include <boost/asio/io_context.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/message.hpp>
+#include <sdbusplus/message/native_types.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -506,7 +507,7 @@ TEST_F(MCTPReactorFixture, manageMockDeviceSetupFailure)
             std::make_error_code(std::errc::permission_denied), endpoint));
 
     reactor->manageMCTPDevice("/test", device);
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, manageMockDevice)
@@ -534,7 +535,7 @@ TEST_F(MCTPReactorFixture, manageMockDevice)
         .WillOnce(testing::InvokeArgument<0>(std::error_code(), endpoint));
 
     reactor->manageMCTPDevice("/test", device);
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, manageMockDeviceDeferredSetup)
@@ -565,7 +566,7 @@ TEST_F(MCTPReactorFixture, manageMockDeviceDeferredSetup)
 
     reactor->manageMCTPDevice("/test", device);
     reactor->tick();
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 }
 
 TEST_F(MCTPReactorFixture, manageMockDeviceRemoved)
@@ -815,7 +816,7 @@ TEST(MCTPReactor, replaceConfiguration)
     reactor->manageMCTPDevice("/test", initial);
     reactor->manageMCTPDevice("/test", replacement);
     reactor->tick();
-    reactor->unmanageMCTPDevice("/test");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test"));
 
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(initial.get()));
     EXPECT_TRUE(testing::Mock::VerifyAndClearExpectations(replacement.get()));

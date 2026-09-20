@@ -41,6 +41,21 @@ class Inventory : public std::enable_shared_from_this<Inventory>
         return maxPowerCapWatts;
     }
 
+    std::optional<uint32_t> getMaxMemoryMiB() const
+    {
+        return memorySizeInMiB;
+    }
+
+    std::optional<uint64_t> getMinSpeedInHz() const
+    {
+        return minGraphicsClockHz;
+    }
+
+    std::optional<uint64_t> getMaxSpeedInHz() const
+    {
+        return maxGraphicsClockHz;
+    }
+
   private:
     struct PropertyInfo
     {
@@ -80,10 +95,13 @@ class Inventory : public std::enable_shared_from_this<Inventory>
     uint8_t eid;
     boost::asio::steady_timer retryTimer;
     std::unordered_map<gpu::InventoryPropertyId, PropertyInfo> properties;
+    std::optional<uint32_t> memorySizeInMiB;
     std::array<uint8_t, gpu::getInventoryInformationRequestSize>
         requestBuffer{};
     std::optional<uint32_t> minPowerCapWatts;
     std::optional<uint32_t> maxPowerCapWatts;
+    std::optional<uint64_t> minGraphicsClockHz;
+    std::optional<uint64_t> maxGraphicsClockHz;
 
     static constexpr std::chrono::seconds retryDelay{5};
     static constexpr int maxRetryAttempts = 3;

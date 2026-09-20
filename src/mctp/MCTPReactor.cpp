@@ -501,7 +501,7 @@ void MCTPReactor::manageMCTPDevice(const std::string& path,
     }
 }
 
-void MCTPReactor::unmanageMCTPDevice(const std::string& path)
+void MCTPReactor::unmanageMCTPDevice(const sdbusplus::object_path& path)
 {
     unmanageMCTPDevice(path, {});
 }

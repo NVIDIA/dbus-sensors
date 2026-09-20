@@ -336,6 +336,16 @@ void Inventory::handleInventoryPropertyResponse(
                         const uint32_t mhz = std::get<uint32_t>(info);
                         const uint64_t hz =
                             static_cast<uint64_t>(mhz) * mhzToHzFactor;
+                        if (propertyId ==
+                            gpu::InventoryPropertyId::MIN_GRAPHICS_CLOCK)
+                        {
+                            minGraphicsClockHz = hz;
+                        }
+                        else if (propertyId ==
+                                 gpu::InventoryPropertyId::MAX_GRAPHICS_CLOCK)
+                        {
+                            maxGraphicsClockHz = hz;
+                        }
                         it->second.interface->set_property(
                             it->second.propertyName, hz);
                         lg2::info(
@@ -391,11 +401,10 @@ void Inventory::handleInventoryPropertyResponse(
                 case gpu::InventoryPropertyId::MAX_MEMORY_CAPACITY:
                     if (std::holds_alternative<uint32_t>(info))
                     {
-                        const size_t memorySizeInKB =
-                            static_cast<size_t>(std::get<uint32_t>(info)) *
-                            1024;
+                        memorySizeInMiB = std::get<uint32_t>(info);
                         it->second.interface->set_property(
-                            it->second.propertyName, memorySizeInKB);
+                            it->second.propertyName,
+                            static_cast<size_t>(*memorySizeInMiB) * 1024);
                         success = true;
                     }
                     else

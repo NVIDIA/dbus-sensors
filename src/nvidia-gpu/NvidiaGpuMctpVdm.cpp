@@ -8,6 +8,7 @@
 #include "MessagePackUnpackUtils.hpp"
 #include "OcpMctpVdm.hpp"
 
+#include <array>
 #include <bit>
 #include <cerrno>
 #include <cstddef>
@@ -328,6 +329,129 @@ int decodeQueryDeviceIdentificationResponse(
 
     buffer.unpack(deviceIdentification);
     buffer.unpack(deviceInstance);
+
+    return buffer.getError();
+}
+
+int encodeGetSupportedMessageTypesRequest(uint8_t instanceId,
+                                          const std::span<uint8_t> buf)
+{
+    PackBuffer buffer(buf);
+
+    int rc = encodeRequestCommonHeader(
+        buffer, MessageType::DEVICE_CAPABILITY_DISCOVERY,
+        static_cast<uint8_t>(
+            DeviceCapabilityDiscoveryCommands::GET_SUPPORTED_MESSAGE_TYPES),
+        instanceId);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    const uint8_t dataSize = 0;
+    buffer.pack(dataSize);
+
+    return buffer.getError();
+}
+
+int decodeGetSupportedMessageTypesResponse(
+    const std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    std::array<uint8_t, supportedListBitfieldSize>& supportedTypes)
+{
+    UnpackBuffer buffer(buf);
+
+    int rc = decodeResponseCommonHeader(
+        buffer, MessageType::DEVICE_CAPABILITY_DISCOVERY,
+        static_cast<uint8_t>(
+            DeviceCapabilityDiscoveryCommands::GET_SUPPORTED_MESSAGE_TYPES),
+        cc, reasonCode);
+
+    if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
+    {
+        return rc;
+    }
+
+    uint16_t dataSize = 0;
+    rc = buffer.unpack(dataSize);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    if (dataSize != supportedTypes.size())
+    {
+        return EINVAL;
+    }
+
+    for (auto& byte : supportedTypes)
+    {
+        buffer.unpack(byte);
+    }
+
+    return buffer.getError();
+}
+
+int encodeGetSupportedCommandCodesRequest(
+    uint8_t instanceId, uint8_t nvidiaMessageType, const std::span<uint8_t> buf)
+{
+    PackBuffer buffer(buf);
+
+    int rc = encodeRequestCommonHeader(
+        buffer, MessageType::DEVICE_CAPABILITY_DISCOVERY,
+        static_cast<uint8_t>(
+            DeviceCapabilityDiscoveryCommands::GET_SUPPORTED_COMMAND_CODES),
+        instanceId);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    const uint8_t dataSize = 1;
+    buffer.pack(dataSize);
+    buffer.pack(nvidiaMessageType);
+
+    return buffer.getError();
+}
+
+int decodeGetSupportedCommandCodesResponse(
+    const std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    std::array<uint8_t, supportedListBitfieldSize>& supportedCommands)
+{
+    UnpackBuffer buffer(buf);
+
+    int rc = decodeResponseCommonHeader(
+        buffer, MessageType::DEVICE_CAPABILITY_DISCOVERY,
+        static_cast<uint8_t>(
+            DeviceCapabilityDiscoveryCommands::GET_SUPPORTED_COMMAND_CODES),
+        cc, reasonCode);
+
+    if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
+    {
+        return rc;
+    }
+
+    uint16_t dataSize = 0;
+    rc = buffer.unpack(dataSize);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    if (dataSize != supportedCommands.size())
+    {
+        return EINVAL;
+    }
+
+    for (auto& byte : supportedCommands)
+    {
+        buffer.unpack(byte);
+    }
 
     return buffer.getError();
 }
@@ -1160,6 +1284,121 @@ int decodeGetViolationDurationResponse(
     return buffer.getError();
 }
 
+int encodeGetMemoryCapacityUtilizationRequest(uint8_t instanceId,
+                                              std::span<uint8_t> buf)
+{
+    PackBuffer buffer(buf);
+
+    int rc = encodeRequestCommonHeader(
+        buffer, MessageType::PLATFORM_ENVIRONMENTAL,
+        static_cast<uint8_t>(
+            PlatformEnvironmentalCommands::GET_MEMORY_CAPACITY_UTILIZATION),
+        instanceId);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    const uint8_t dataSize = 0;
+    buffer.pack(dataSize);
+
+    return buffer.getError();
+}
+
+int decodeGetMemoryCapacityUtilizationResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    uint32_t& reservedMemory, uint32_t& usedMemory)
+{
+    UnpackBuffer buffer(buf);
+
+    int rc = decodeResponseCommonHeader(
+        buffer, MessageType::PLATFORM_ENVIRONMENTAL,
+        static_cast<uint8_t>(
+            PlatformEnvironmentalCommands::GET_MEMORY_CAPACITY_UTILIZATION),
+        cc, reasonCode);
+
+    if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
+    {
+        return rc;
+    }
+
+    uint16_t dataSize = 0;
+    rc = buffer.unpack(dataSize);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    if (dataSize != sizeof(uint32_t) * 2)
+    {
+        return EINVAL;
+    }
+
+    buffer.unpack(reservedMemory);
+    buffer.unpack(usedMemory);
+
+    return buffer.getError();
+}
+
+int decodeGetMemoryCapacityUtilizationResponse(std::span<const uint8_t> buf,
+                                               uint32_t& reservedMemory,
+                                               uint32_t& usedMemory)
+{
+    UnpackBuffer buffer(buf);
+    buffer.unpack(reservedMemory);
+    buffer.unpack(usedMemory);
+    return buffer.getError();
+}
+
+int encodeSetClockLimitRequest(uint8_t instanceId, ClockType clockType,
+                               ClockLimitFlag flag, uint32_t limitMinMHz,
+                               uint32_t limitMaxMHz, std::span<uint8_t> buf)
+{
+    PackBuffer buffer(buf);
+
+    int rc = encodeRequestCommonHeader(
+        buffer, MessageType::PLATFORM_ENVIRONMENTAL,
+        static_cast<uint8_t>(PlatformEnvironmentalCommands::SET_CLOCK_LIMIT),
+        instanceId);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    const uint8_t dataSize = sizeof(uint8_t) + sizeof(uint8_t) +
+                             sizeof(limitMinMHz) + sizeof(limitMaxMHz);
+    buffer.pack(dataSize);
+    buffer.pack(static_cast<uint8_t>(clockType));
+    buffer.pack(static_cast<uint8_t>(flag));
+    buffer.pack(limitMinMHz);
+    buffer.pack(limitMaxMHz);
+
+    return buffer.getError();
+}
+
+int decodeSetClockLimitResponse(std::span<const uint8_t> buf,
+                                ocp::accelerator_management::CompletionCode& cc,
+                                uint16_t& reasonCode)
+{
+    UnpackBuffer buffer(buf);
+
+    int rc = decodeResponseCommonHeader(
+        buffer, MessageType::PLATFORM_ENVIRONMENTAL,
+        static_cast<uint8_t>(PlatformEnvironmentalCommands::SET_CLOCK_LIMIT),
+        cc, reasonCode);
+
+    if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
+    {
+        return rc;
+    }
+
+    return 0;
+}
+
 int encodeQueryScalarGroupTelemetryV1Request(
     uint8_t instanceId, uint8_t deviceIndex, PcieScalarGroupId groupId,
     std::span<uint8_t> buf)
@@ -1653,6 +1892,209 @@ int decodeGetEccErrorCountsResponse(
     buffer.unpack(dramUncorrected);
 
     return buffer.getError();
+}
+
+// GET_ECC_MODE returns a single flags byte: bit 0 is the ECC mode currently in
+// effect, bit 1 is the mode that will apply after the next reset.
+constexpr uint8_t eccModeCurrentEnabledMask = 0x01U;
+constexpr uint8_t eccModePendingEnabledMask = 0x02U;
+
+int encodeGetEccModeRequest(uint8_t instanceId, std::span<uint8_t> buf)
+{
+    PackBuffer buffer(buf);
+
+    int rc = encodeRequestCommonHeader(
+        buffer, MessageType::PLATFORM_ENVIRONMENTAL,
+        static_cast<uint8_t>(PlatformEnvironmentalCommands::GET_ECC_MODE),
+        instanceId);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    const uint8_t dataSize = 0;
+    buffer.pack(dataSize);
+
+    return buffer.getError();
+}
+
+int decodeGetEccModeResponse(std::span<const uint8_t> buf,
+                             ocp::accelerator_management::CompletionCode& cc,
+                             uint16_t& reasonCode, bool& currentEccModeEnabled,
+                             bool& pendingEccModeEnabled)
+{
+    UnpackBuffer buffer(buf);
+
+    int rc = decodeResponseCommonHeader(
+        buffer, MessageType::PLATFORM_ENVIRONMENTAL,
+        static_cast<uint8_t>(PlatformEnvironmentalCommands::GET_ECC_MODE), cc,
+        reasonCode);
+
+    if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
+    {
+        return rc;
+    }
+
+    uint16_t dataSize = 0;
+    rc = buffer.unpack(dataSize);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    if (dataSize != sizeof(uint8_t))
+    {
+        return EINVAL;
+    }
+
+    uint8_t flags = 0;
+    rc = buffer.unpack(flags);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    currentEccModeEnabled = (flags & eccModeCurrentEnabledMask) != 0U;
+    pendingEccModeEnabled = (flags & eccModePendingEnabledMask) != 0U;
+
+    return buffer.getError();
+}
+
+int decodeGetEccModeResponse(std::span<const uint8_t> buf,
+                             bool& currentEccModeEnabled,
+                             bool& pendingEccModeEnabled)
+{
+    UnpackBuffer buffer(buf);
+
+    uint8_t flags = 0;
+    const int rc = buffer.unpack(flags);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    currentEccModeEnabled = (flags & eccModeCurrentEnabledMask) != 0U;
+    pendingEccModeEnabled = (flags & eccModePendingEnabledMask) != 0U;
+
+    return buffer.getError();
+}
+
+int encodeGetLeakDetectionInfoRequest(uint8_t instanceId,
+                                      const std::span<uint8_t> buf)
+{
+    PackBuffer buffer(buf);
+
+    int rc = encodeRequestCommonHeader(
+        buffer, MessageType::PLATFORM_ENVIRONMENTAL,
+        static_cast<uint8_t>(
+            PlatformEnvironmentalCommands::GET_LEAK_DETECTION_INFO),
+        instanceId);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    const uint8_t dataSize = 0;
+    buffer.pack(dataSize);
+
+    return buffer.getError();
+}
+
+int decodeGetLeakDetectionInfoResponse(
+    std::span<const uint8_t> buf,
+    ocp::accelerator_management::CompletionCode& cc, uint16_t& reasonCode,
+    std::vector<LeakSensorData>& parsedSensors)
+{
+    UnpackBuffer buffer(buf);
+
+    int rc = decodeResponseCommonHeader(
+        buffer, MessageType::PLATFORM_ENVIRONMENTAL,
+        static_cast<uint8_t>(
+            PlatformEnvironmentalCommands::GET_LEAK_DETECTION_INFO),
+        cc, reasonCode);
+
+    if (rc != 0 || cc != ocp::accelerator_management::CompletionCode::SUCCESS)
+    {
+        return rc;
+    }
+
+    uint16_t dataSize = 0;
+    rc = buffer.unpack(dataSize);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    parsedSensors.clear();
+
+    uint8_t numSensors = 0;
+    rc = buffer.unpack(numSensors);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    uint8_t numThresholdLevels = 0;
+    rc = buffer.unpack(numThresholdLevels);
+
+    if (rc != 0)
+    {
+        return rc;
+    }
+
+    for (uint8_t i = 0; i < numSensors; ++i)
+    {
+        LeakSensorData sensor;
+
+        rc = buffer.unpack(sensor.sensorId);
+
+        if (rc != 0)
+        {
+            return rc;
+        }
+
+        rc = buffer.unpack(sensor.leakState);
+
+        if (rc != 0)
+        {
+            return rc;
+        }
+
+        for (uint8_t t = 0; t < numThresholdLevels; ++t)
+        {
+            uint16_t thresholdValue = 0;
+            rc = buffer.unpack(thresholdValue);
+
+            if (rc != 0)
+            {
+                return rc;
+            }
+
+            sensor.thresholds.push_back(thresholdValue);
+        }
+
+        uint16_t adcReadingValue = 0;
+
+        rc = buffer.unpack(adcReadingValue);
+
+        if (rc != 0)
+        {
+            return rc;
+        }
+
+        sensor.adcReadingMv = adcReadingValue;
+
+        parsedSensors.push_back(std::move(sensor));
+    }
+
+    return 0;
 }
 
 } // namespace gpu

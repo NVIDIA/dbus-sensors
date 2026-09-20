@@ -7,7 +7,6 @@
 
 #include "Inventory.hpp"
 #include "MctpRequester.hpp"
-#include "NvidiaDeviceDiscovery.hpp"
 #include "NvidiaEventReporting.hpp"
 #include "NvidiaGpuClockFrequencyMetric.hpp"
 #include "NvidiaGpuClockSpeedControl.hpp"
@@ -15,11 +14,15 @@
 #include "NvidiaGpuMemoryDevice.hpp"
 #include "NvidiaGpuPowerControl.hpp"
 #include "NvidiaGpuPowerSensor.hpp"
+#include "NvidiaGpuResetRequired.hpp"
 #include "NvidiaGpuTempSensor.hpp"
 #include "NvidiaGpuXid.hpp"
+#include "NvidiaSensorConfig.hpp"
 
 #include <NvidiaDriverInformation.hpp>
+#include <NvidiaGpuEccMode.hpp>
 #include <NvidiaGpuEnergySensor.hpp>
+#include <NvidiaGpuMemoryCapacityUtilization.hpp>
 #include <NvidiaGpuPowerPeakReading.hpp>
 #include <NvidiaGpuUtilizationMetrics.hpp>
 #include <NvidiaGpuViolationDuration.hpp>
@@ -34,6 +37,7 @@
 #include <boost/asio/steady_timer.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
+#include <sdbusplus/message/native_types.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -45,7 +49,7 @@ class GpuDevice : public std::enable_shared_from_this<GpuDevice>
 {
   public:
     GpuDevice(const SensorConfigs& configs, const std::string& name,
-              const std::string& path,
+              const sdbusplus::object_path& path,
               const std::shared_ptr<sdbusplus::asio::connection>& conn,
               uint8_t eid, boost::asio::io_context& io,
               mctp::MctpRequester& mctpRequester,
@@ -53,7 +57,7 @@ class GpuDevice : public std::enable_shared_from_this<GpuDevice>
 
     ~GpuDevice();
 
-    const std::string& getPath() const
+    const sdbusplus::object_path& getPath() const
     {
         return path;
     }
@@ -116,8 +120,13 @@ class GpuDevice : public std::enable_shared_from_this<GpuDevice>
     std::shared_ptr<NvidiaLongRunningResponseHandler> longRunningHandler;
     std::shared_ptr<NvidiaGpuUtilizationMetrics> utilizationMetrics;
     std::shared_ptr<NvidiaGpuViolationDuration> violationDuration;
+    std::shared_ptr<NvidiaGpuEccMode> eccMode;
+    std::shared_ptr<NvidiaGpuMemoryCapacityUtilization>
+        memoryCapacityUtilization;
 
     std::shared_ptr<NvidiaXidEventHandler> xidEventHandler;
+
+    std::shared_ptr<NvidiaResetRequiredEventHandler> resetRequiredEventHandler;
 
     std::array<uint8_t, gpu::readThermalParametersRequestSize>
         thermalParamReqMsg{};
@@ -128,11 +137,10 @@ class GpuDevice : public std::enable_shared_from_this<GpuDevice>
 
     std::string name;
 
-    std::string path;
+    sdbusplus::object_path path;
 
     std::shared_ptr<Inventory> inventory;
 
-    std::shared_ptr<sdbusplus::asio::dbus_interface> controlClockSpeedInterface;
     std::shared_ptr<NvidiaGpuClockFrequencyMetric> clockFrequencyMetric;
     std::shared_ptr<NvidiaGpuClockSpeedControl> gpuClockSpeedControl;
 };

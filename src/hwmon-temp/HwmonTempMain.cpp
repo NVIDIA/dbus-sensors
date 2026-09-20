@@ -493,11 +493,7 @@ void createSensors(
                 PowerState readState = getPowerState(baseConfigMap);
 
                 auto permitSet = getPermitSet(baseConfigMap);
-                auto& sensor = sensors[sensorName];
-                if (!activateOnly)
-                {
-                    sensor = nullptr;
-                }
+
                 auto hwmonFile = getFullHwmonFilePath(directory.string(),
                                                       "temp1", permitSet);
                 if (pathStr.starts_with("/sys/bus/iio/devices"))
@@ -506,6 +502,12 @@ void createSensors(
                 }
                 if (hwmonFile)
                 {
+                    auto& sensor = sensors[sensorName];
+                    if (!activateOnly)
+                    {
+                        sensor = nullptr;
+                    }
+
                     if (sensor != nullptr)
                     {
                         sensor->activate(*hwmonFile, i2cDev);
