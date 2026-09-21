@@ -44,8 +44,8 @@ class SoftwareComponent : public SoftwareSettingsIntf
     // NOLINTNEXTLINE(readability-identifier-naming)
     bool set_property(write_protected_t /*tag*/, bool newValue)
     {
-        bool changed = (newValue != write_protected_);
-        write_protected_ = newValue;
+        bool changed = (newValue != properties.write_protected);
+        properties.write_protected = newValue;
         return changed;
     }
 
@@ -59,8 +59,8 @@ class SoftwareComponent : public SoftwareSettingsIntf
     // NOLINTNEXTLINE(readability-identifier-naming)
     bool set_property(write_protected_control_t /*tag*/, bool newValue)
     {
-        bool changed = (newValue != write_protected_control_);
-        write_protected_control_ = newValue;
+        bool changed = (newValue != properties.write_protected_control);
+        properties.write_protected_control = newValue;
         return changed;
     }
 };
