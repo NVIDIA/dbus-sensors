@@ -643,7 +643,7 @@ void MCTPDDevice::performHealthCheck()
                                     self->name, self->endpoint->eid(),
                                     nv::lg2::ErrorCode::MCTP::
                                         MCTP_TRANSPORT_FAIL_PING_TIMEOUT,
-                                    "MCTP ping failed due to timeout for the device");
+                                    mctpPingTimedOutMessage);
                             }
                             self->recover();
                         }
@@ -759,7 +759,7 @@ void MCTPDDevice::performHealthCheck()
                                         deviceName, eid,
                                         nv::lg2::ErrorCode::MCTP::
                                             MCTP_TRANSPORT_FAIL_PING_TIMEOUT,
-                                        "MCTP ping failed due to timeout for the device");
+                                        mctpPingTimedOutMessage);
                                 }
                                 self->unresponsiveBridgePoolEids.insert(eid);
                                 self->recover(eid);

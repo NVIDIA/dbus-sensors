@@ -240,8 +240,6 @@ TEST(MctpCommandTable, knownCommandHasNonEmptyFields)
 {
     for (const auto& [code, entry] : mctpCommandTable)
     {
-        EXPECT_FALSE(entry.timeoutErrorMessage.empty())
-            << "Empty timeoutErrorMessage for code " << static_cast<int>(code);
         EXPECT_FALSE(entry.driverOperation.empty())
             << "Empty driverOperation for code " << static_cast<int>(code);
     }
@@ -1080,10 +1078,11 @@ static sdbusplus::message_t makeTransportErrorMsg(
 }
 
 // handleTransportErrorSignal: destEid != 0, not suppressed, not retrying,
-// ETIMEDOUT + RX + CTRL → dispatches to handleApplicationTimeout (known cmd)
-// → logMCTPError → CommitDeviceError throws.
-TEST(HandleTransportErrorSignal,
-     timeoutRxCtrlKnownCmdDispatchesToApplicationTimeout)
+// ETIMEDOUT + RX + CTRL for Set Endpoint ID → dispatched to
+// handleApplicationTimeout, which only leaves a journal trace. mctpd emits
+// TransportError for this command only outside discovery (Recover), where
+// it is a transport failure of a known endpoint, not a discovery failure.
+TEST(HandleTransportErrorSignal, timeoutRxCtrlSetEidOutsideDiscoveryDispatches)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
@@ -1103,13 +1102,7 @@ TEST(HandleTransportErrorSignal,
     {
         GTEST_SKIP() << "Failed to create test message";
     }
-    // logMCTPError → CommitDeviceError tries to create a thread → ENOTSUP
-    try
-    {
-        handleTransportErrorSignal(reactor, msg);
-    }
-    catch (...)
-    {}
+    EXPECT_NO_THROW(handleTransportErrorSignal(reactor, msg));
 }
 
 // handleTransportErrorSignal: destEid != 0, not suppressed, not retrying,
@@ -3880,6 +3873,237 @@ TEST_F(FakeConnReactorFixture,
     // calls conn->async_method_call(lambda, ...).  The lambda fires with the
     // null-bus error (synchronous dispatch or TearDown io.poll()).
     EXPECT_NO_THROW(handleGeneralErrorSignal(conn, reactor, msg));
+}
+
+// ===========================================================================
+// DiscoveryCommandFailed: mctpd reports failed endpoint discovery commands
+// (Set Endpoint ID, Allocate Endpoint IDs, Get Endpoint UUID) through this
+// signal; the reactor renders them as MCTPDiscoveryCommandFailed events.
+// ===========================================================================
+
+// Builds a DiscoveryCommandFailed signal ("ysyyuss") the way mctpd emits it.
+static sdbusplus::message_t makeDiscoveryCommandFailedMsg(
+    uint8_t commandCode, const std::string& command, uint8_t eid, uint8_t kind,
+    uint32_t code, const std::string& reason, const std::string& interface)
+{
+    sd_bus* rawBus = makeRawBus();
+    if (rawBus == nullptr)
+    {
+        return sdbusplus::message_t(nullptr);
+    }
+    sd_bus_message* rawMsg = nullptr;
+    if (sd_bus_message_new_signal(
+            rawBus, &rawMsg, "/au/com/codeconstruct/mctp1/interfaces",
+            "au.com.codeconstruct.MCTP.BusOwner1",
+            "DiscoveryCommandFailed") < 0 ||
+        rawMsg == nullptr)
+    {
+        sd_bus_unref(rawBus);
+        return sdbusplus::message_t(nullptr);
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    int r = sd_bus_message_append(rawMsg, "ysyyuss", commandCode,
+                                  command.c_str(), eid, kind, code,
+                                  reason.c_str(), interface.c_str());
+    sd_bus_unref(rawBus);
+    if (r < 0)
+    {
+        sd_bus_message_unref(rawMsg);
+        return sdbusplus::message_t(nullptr);
+    }
+    (void)sd_bus_message_seal(rawMsg, 1, 0);
+    (void)sd_bus_message_rewind(rawMsg, 1);
+    return sdbusplus::message_t(rawMsg, std::false_type{});
+}
+
+static DiscoveryCommandFailedInfo makeDiscoveryFailure(uint8_t eid)
+{
+    DiscoveryCommandFailedInfo failure{};
+    failure.commandCode = MCTP_CTRL_CMD_SET_ENDPOINT_ID;
+    failure.command = "SetEndpointID";
+    failure.eid = eid;
+    failure.kind = MCTP_DISCOVERY_FAIL_RESPONSE_TIMEOUT;
+    failure.code = ETIMEDOUT;
+    failure.reason = "no response received before timeout";
+    failure.interface = "mctpi2c0";
+    return failure;
+}
+
+// resolveDiscoveryFailureDevice: known EID, null EID and unknown EID paths.
+// addDeviceWithStaticEid registers the device on interface "mctpi2c0".
+TEST(HandleDiscoveryCommandFailed, resolvesDeviceFromEidOrInterface)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    addDeviceWithStaticEid(reactor, "/test/mctp/disc_dev", "DiscoveryDevice",
+                           66);
+
+    // Known EID → device name, EID untouched
+    auto failure = makeDiscoveryFailure(66);
+    EXPECT_EQ(resolveDiscoveryFailureDevice(reactor, failure),
+              "DiscoveryDevice");
+    EXPECT_EQ(failure.eid, 66);
+
+    // Null EID → the interface's configured EID and its name
+    failure = makeDiscoveryFailure(0);
+    EXPECT_EQ(resolveDiscoveryFailureDevice(reactor, failure),
+              "DiscoveryDevice");
+    EXPECT_EQ(failure.eid, 66);
+
+    // Unknown (dynamically assigned) EID → EID kept, name from the interface
+    failure = makeDiscoveryFailure(77);
+    EXPECT_EQ(resolveDiscoveryFailureDevice(reactor, failure),
+              "DiscoveryDevice");
+    EXPECT_EQ(failure.eid, 77);
+
+    // Nothing known → EID-based fallback name
+    failure = makeDiscoveryFailure(78);
+    failure.interface = "mctpi2c9";
+    EXPECT_EQ(resolveDiscoveryFailureDevice(reactor, failure), "EID_78");
+    EXPECT_EQ(failure.eid, 78);
+}
+
+// Null EID on an interface with no configured device: nothing to adopt, the
+// report keeps EID 0 and the fallback name.
+TEST(HandleDiscoveryCommandFailed, nullEidWithUnknownInterfaceKeepsNullEid)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto failure = makeDiscoveryFailure(0);
+    failure.interface = "mctpi2c9";
+    EXPECT_EQ(resolveDiscoveryFailureDevice(reactor, failure), "EID_0");
+    EXPECT_EQ(failure.eid, 0);
+}
+
+// While the reactor is retrying a device's setup (failureCounts non-empty,
+// see retryingEidCausesEarlyReturn) the report is suppressed.
+TEST(HandleDiscoveryCommandFailed, retryingDeviceIsNotRendered)
+{
+    gMockSystem = true;
+    gSystemRetval = 1; // modprobe fails → deferSetup → failureCounts non-empty
+    gSystemCallCount = 0;
+
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    ManagedObjectType entities{
+        {sdbusplus::object_path("/test/usb_retry_discovery"),
+         {{"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget",
+           {{"Type", std::string("MCTPUSBGadgetTarget")},
+            {"Name", std::string("usb0")},
+            {"Interface", std::string("mctpusb0")},
+            {"LocalEID", std::string("10")}}}}}};
+    manageMCTPEntity(nullptr, reactor, entities);
+    gMockSystem = false;
+    ASSERT_TRUE(reactor->isRetrying(0));
+
+    // EID 0 on an unknown interface stays 0 → isRetrying(0) → suppressed
+    auto failure = makeDiscoveryFailure(0);
+    failure.interface = "mctpusb9";
+    EXPECT_FALSE(handleDiscoveryCommandFailed(reactor, failure));
+}
+
+TEST(HandleDiscoveryCommandFailed, suppressedEidIsNotRendered)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    suppressedHealthCheckEids.insert(91);
+    EXPECT_FALSE(
+        handleDiscoveryCommandFailed(reactor, makeDiscoveryFailure(91)));
+    suppressedHealthCheckEids.erase(91);
+}
+
+TEST(HandleDiscoveryCommandFailed, nullEidResolvedToSuppressedDeviceIsDropped)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    addDeviceWithStaticEid(reactor, "/test/mctp/disc_sup", "SuppressedDevice",
+                           67);
+
+    suppressedHealthCheckEids.insert(67);
+    // EID 0 + interface "mctpi2c0" → EID 67 → suppressed
+    EXPECT_FALSE(
+        handleDiscoveryCommandFailed(reactor, makeDiscoveryFailure(0)));
+    suppressedHealthCheckEids.erase(67);
+}
+
+TEST(HandleDiscoveryCommandFailed, unsuppressedFailureReachesLogger)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto failure = makeDiscoveryFailure(92);
+    failure.kind = MCTP_DISCOVERY_FAIL_COMPLETION_CODE;
+    failure.code = 0x04;
+    failure.reason =
+        "device is not ready (MCTP_CONTROL_MSG_STATUS_ERROR_NOT_READY (0x04))";
+
+    // createMctpDiscoveryFailureRedfishEvent → CommitDeviceError, which may
+    // throw in this test environment (see the TransportError tests)
+    bool reported = false;
+    try
+    {
+        reported = handleDiscoveryCommandFailed(reactor, failure);
+    }
+    catch (...)
+    {
+        reported = true; // the logger was reached
+    }
+    EXPECT_TRUE(reported);
+}
+
+TEST(HandleDiscoveryCommandFailedSignal, malformedMessageHandled)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW(
+        static_cast<void>(handleDiscoveryCommandFailedSignal(reactor, msg)));
+}
+
+TEST(HandleDiscoveryCommandFailedSignal, suppressedEidMessageIsDropped)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto msg = makeDiscoveryCommandFailedMsg(
+        MCTP_CTRL_CMD_GET_ENDPOINT_UUID, "GetEndpointUUID", 93,
+        MCTP_DISCOVERY_FAIL_RESPONSE_TIMEOUT, static_cast<uint32_t>(ETIMEDOUT),
+        "no response received before timeout", "mctpi2c0");
+    if (!msg)
+    {
+        GTEST_SKIP() << "Failed to create test message";
+    }
+
+    suppressedHealthCheckEids.insert(93);
+    // Parsed, then dropped without reaching the logger
+    EXPECT_NO_THROW(handleDiscoveryCommandFailedSignal(reactor, msg));
+    suppressedHealthCheckEids.erase(93);
+}
+
+TEST(HandleDiscoveryCommandFailedSignal, validMessageIsDispatched)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto msg = makeDiscoveryCommandFailedMsg(
+        MCTP_CTRL_CMD_SET_ENDPOINT_ID, "SetEndpointID", 94,
+        MCTP_DISCOVERY_FAIL_REQUEST_NOT_SENT,
+        static_cast<uint32_t>(EHOSTUNREACH), "request could not be sent",
+        "mctpi2c1");
+    if (!msg)
+    {
+        GTEST_SKIP() << "Failed to create test message";
+    }
+
+    // Dispatched to the logger; CommitDeviceError may throw in this environment
+    try
+    {
+        handleDiscoveryCommandFailedSignal(reactor, msg);
+    }
+    catch (...)
+    {}
 }
 
 // NOLINTEND
