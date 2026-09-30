@@ -21,6 +21,7 @@
 #include <phosphor-logging/lg2.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -74,24 +75,34 @@ static std::string_view locationTypeFor(FormFactor f)
     return locationTypeUnknown;
 }
 
+template <typename T>
+static std::optional<T> getOptional(const Json& j, const char* key)
+{
+    if (auto it = j.find(key); it != j.end())
+    {
+        return it->get<T>();
+    }
+    return std::nullopt;
+}
+
 void from_json(const Json& j, NvidiaDimm& d)
 {
-    d.sizeKB = j.value("MemorySizeKB", 0U);
-    d.dataWidth = j.value("MemoryDataWidth", static_cast<uint16_t>(0));
-    d.totalWidth = j.value("MemoryTotalWidth", static_cast<uint16_t>(0));
+    j.at("Present").get_to(d.present);
     j.at("MemoryDeviceLocator").get_to(d.locator);
-    d.maxSpeed = j.value("MaxMemorySpeedInMHz", static_cast<uint16_t>(0));
-    d.configSpeed =
-        j.value("MemoryConfiguredSpeedInMhz", static_cast<uint16_t>(0));
-    j.at("MemoryType").get_to(d.memoryType);
-    j.at("FormFactor").get_to(d.formFactor);
-    d.ecc = j.value("ECC", false);
-    j.at("Manufacturer").get_to(d.manufacturer);
-    d.model = j.value("Model", std::string());
-    d.partNumber = j.value("PartNumber", std::string());
-    d.serialNumber = j.value("SerialNumber", std::string());
-    d.sku = j.value("SKU", std::string());
-    j.at("MemoryMedia").get_to(d.memoryMedia);
+    d.sizeKB = getOptional<uint32_t>(j, "MemorySizeKB");
+    d.dataWidth = getOptional<uint16_t>(j, "MemoryDataWidth");
+    d.totalWidth = getOptional<uint16_t>(j, "MemoryTotalWidth");
+    d.maxSpeed = getOptional<uint16_t>(j, "MaxMemorySpeedInMHz");
+    d.configSpeed = getOptional<uint16_t>(j, "MemoryConfiguredSpeedInMhz");
+    d.memoryType = getOptional<MemoryType>(j, "MemoryType");
+    d.formFactor = getOptional<FormFactor>(j, "FormFactor");
+    d.ecc = getOptional<bool>(j, "ECC");
+    d.manufacturer = getOptional<std::string>(j, "Manufacturer");
+    d.model = getOptional<std::string>(j, "Model");
+    d.partNumber = getOptional<std::string>(j, "PartNumber");
+    d.serialNumber = getOptional<std::string>(j, "SerialNumber");
+    d.sku = getOptional<std::string>(j, "SKU");
+    d.memoryMedia = getOptional<MemoryMedia>(j, "MemoryMedia");
 }
 
 void NvidiaDimm::validate()
@@ -103,41 +114,53 @@ void NvidiaDimm::validate()
 void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
                          const std::string& dimmPath)
 {
-    const std::string memTypeStr =
-        std::string(dimmDeviceTypePrefix) + memoryTypeName(memoryType);
-    const std::string formFactorStr =
-        std::string(dimmFormFactorPrefix) + formFactorName(formFactor);
-    const std::string eccStr =
-        std::string(dimmEccPrefix) + (ecc ? "MultiBitECC" : "NoECC");
-    const std::string memoryMediaStr =
-        std::string(dimmMemoryTechPrefix) + memoryMediaTechName(memoryMedia);
+    const auto registerIfPresent =
+        [](auto& iface, const char* property, const auto& value) {
+            if (value.has_value())
+            {
+                iface.register_property(property, *value);
+            }
+        };
+
+    const auto memTypeStr = memoryType.transform([](MemoryType value) {
+        return std::string(dimmDeviceTypePrefix) + memoryTypeName(value);
+    });
+    const auto formFactorStr = formFactor.transform([](FormFactor value) {
+        return std::string(dimmFormFactorPrefix) + formFactorName(value);
+    });
+    const auto eccStr = ecc.transform([](bool value) {
+        return std::string(dimmEccPrefix) + (value ? "MultiBitECC" : "NoECC");
+    });
+    const auto memoryMediaStr = memoryMedia.transform([](MemoryMedia value) {
+        return std::string(dimmMemoryTechPrefix) + memoryMediaTechName(value);
+    });
 
     auto& dimm =
         add(dimmPath, "xyz.openbmc_project.Inventory.Item.Dimm", objServer);
-    dimm.register_property("MemorySizeInKB", sizeKB);
-    dimm.register_property("MemoryDataWidth", dataWidth);
-    dimm.register_property("MemoryTotalWidth", totalWidth);
+    registerIfPresent(dimm, "MemorySizeInKB", sizeKB);
+    registerIfPresent(dimm, "MemoryDataWidth", dataWidth);
+    registerIfPresent(dimm, "MemoryTotalWidth", totalWidth);
     dimm.register_property("MemoryDeviceLocator", locator);
-    dimm.register_property("MemoryType", memTypeStr);
-    dimm.register_property("MaxMemorySpeedInMhz", maxSpeed);
-    dimm.register_property("MemoryConfiguredSpeedInMhz", configSpeed);
-    dimm.register_property("FormFactor", formFactorStr);
-    dimm.register_property("ECC", eccStr);
-    dimm.register_property("MemoryMedia", memoryMediaStr);
+    registerIfPresent(dimm, "MemoryType", memTypeStr);
+    registerIfPresent(dimm, "MaxMemorySpeedInMhz", maxSpeed);
+    registerIfPresent(dimm, "MemoryConfiguredSpeedInMhz", configSpeed);
+    registerIfPresent(dimm, "FormFactor", formFactorStr);
+    registerIfPresent(dimm, "ECC", eccStr);
+    registerIfPresent(dimm, "MemoryMedia", memoryMediaStr);
 
     add(dimmPath, "xyz.openbmc_project.Inventory.Connector.Slot", objServer);
 
     auto& item = add(dimmPath, "xyz.openbmc_project.Inventory.Item", objServer);
     item.register_property("PrettyName", std::string(""));
-    item.register_property("Present", true);
+    item.register_property("Present", present);
 
     auto& asset = add(dimmPath, "xyz.openbmc_project.Inventory.Decorator.Asset",
                       objServer);
-    asset.register_property("Manufacturer", manufacturer);
-    asset.register_property("Model", model);
-    asset.register_property("PartNumber", partNumber);
-    asset.register_property("SerialNumber", serialNumber);
-    asset.register_property("SKU", sku);
+    registerIfPresent(asset, "Manufacturer", manufacturer);
+    registerIfPresent(asset, "Model", model);
+    registerIfPresent(asset, "PartNumber", partNumber);
+    registerIfPresent(asset, "SerialNumber", serialNumber);
+    registerIfPresent(asset, "SKU", sku);
 
     auto& location =
         add(dimmPath, "xyz.openbmc_project.Inventory.Decorator.LocationCode",
@@ -147,8 +170,16 @@ void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
     auto& locationType =
         add(dimmPath, "xyz.openbmc_project.Inventory.Decorator.Location",
             objServer);
-    locationType.register_property("LocationType",
-                                   std::string(locationTypeFor(formFactor)));
+    registerIfPresent(locationType, "LocationType",
+                      formFactor.transform([](FormFactor value) {
+                          return std::string(locationTypeFor(value));
+                      }));
+
+    auto& context =
+        add(dimmPath, "xyz.openbmc_project.Inventory.Decorator.LocationContext",
+            objServer);
+    context.register_property("LocationContext", std::string());
+    locationContextIface = lastIface();
 
     auto& assoc =
         add(dimmPath, "xyz.openbmc_project.Association.Definitions", objServer);
@@ -167,6 +198,14 @@ void NvidiaDimm::publish(sdbusplus::asio::object_server& objServer,
     initializeAll();
 
     lg2::info("Published DIMM at {P}", "P", dimmPath);
+}
+
+void NvidiaDimm::setLocationContext(const std::string& locationContext)
+{
+    if (locationContextIface)
+    {
+        locationContextIface->set_property("LocationContext", locationContext);
+    }
 }
 
 void NvidiaDimm::attach(const std::string& motherboardPath)

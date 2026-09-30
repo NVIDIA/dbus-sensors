@@ -126,9 +126,7 @@ const char* memoryTypeName(MemoryType t)
 }
 
 // Identity mapping: each schema-allowed MemoryMedia value publishes as the
-// same string on D-Bus. Unknown is the NLOHMANN_JSON_SERIALIZE_ENUM
-// fallback for inputs the schema rejects, so it should never be reached
-// on the publish path; keep it returning "Unknown" defensively.
+// same string on D-Bus.
 const char* memoryMediaTechName(MemoryMedia m)
 {
     switch (m)
