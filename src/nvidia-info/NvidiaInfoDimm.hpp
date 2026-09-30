@@ -23,6 +23,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace nvidia
@@ -49,29 +50,34 @@ class NvidiaDimm : public Publisher
     void publish(sdbusplus::asio::object_server& objServer,
                  const std::string& dimmPath);
 
+    // Updates the location after the platform topology paths are discovered.
+    void setLocationContext(const std::string& locationContext);
+
     // Associate this DIMM with the given motherboard path. Idempotent;
     // must be called after publish().
     void attach(const std::string& motherboardPath);
 
-    uint32_t sizeKB{0};      // "MemorySizeKB" (optional)
-    uint16_t dataWidth{0};   // "MemoryDataWidth" (optional)
-    uint16_t totalWidth{0};  // "MemoryTotalWidth" (optional)
-    std::string locator;     // "MemoryDeviceLocator", non-empty
-    uint16_t maxSpeed{0};    // "MaxMemorySpeedInMHz" (optional)
-    uint16_t configSpeed{0}; // "MemoryConfiguredSpeedInMhz" (optional)
-    MemoryType memoryType{MemoryType::Unknown}; // "MemoryType"
-    FormFactor formFactor{FormFactor::Unknown}; // "FormFactor"
-    bool ecc{false};                            // "ECC" (optional)
-    std::string manufacturer;                   // "Manufacturer", non-empty
-    std::string model;                          // "Model" (may be empty)
-    std::string partNumber;                     // "PartNumber" (may be empty)
-    std::string serialNumber;                   // "SerialNumber" (may be empty)
-    std::string sku;                            // "SKU" (may be empty)
-    MemoryMedia memoryMedia{MemoryMedia::Unknown}; // "MemoryMedia"
+    bool present{false};                     // "Present", required
+    std::string locator;                     // "MemoryDeviceLocator", non-empty
+    std::optional<uint32_t> sizeKB;          // "MemorySizeKB"
+    std::optional<uint16_t> dataWidth;       // "MemoryDataWidth"
+    std::optional<uint16_t> totalWidth;      // "MemoryTotalWidth"
+    std::optional<uint16_t> maxSpeed;        // "MaxMemorySpeedInMHz"
+    std::optional<uint16_t> configSpeed;     // "MemoryConfiguredSpeedInMhz"
+    std::optional<MemoryType> memoryType;    // "MemoryType"
+    std::optional<FormFactor> formFactor;    // "FormFactor"
+    std::optional<bool> ecc;                 // "ECC"
+    std::optional<std::string> manufacturer; // "Manufacturer"
+    std::optional<std::string> model;        // "Model"
+    std::optional<std::string> partNumber;   // "PartNumber"
+    std::optional<std::string> serialNumber; // "SerialNumber"
+    std::optional<std::string> sku;          // "SKU"
+    std::optional<MemoryMedia> memoryMedia;  // "MemoryMedia"
 
   private:
     // Cached Association.Definitions handle, mutated by attach().
     std::shared_ptr<sdbusplus::asio::dbus_interface> assocIface;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> locationContextIface;
 };
 
 void from_json(const Json& j, NvidiaDimm& d);
