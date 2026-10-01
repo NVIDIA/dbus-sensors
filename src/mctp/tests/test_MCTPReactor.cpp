@@ -1,3 +1,4 @@
+#include "IstRecovery.hpp"
 #include "MCTPEndpoint.hpp"
 #include "MCTPReactor.hpp"
 #include "USBRecovery.hpp"
@@ -84,6 +85,16 @@ class MockUSBRecovery : public USBRecovery
                 (const std::string& interface, std::string& status),
                 (override));
 };
+
+class MockIstRecovery : public IstRecovery
+{
+  public:
+    ~MockIstRecovery() override = default;
+
+    MOCK_METHOD(bool, isIstInProgress, (), (const, override));
+    MOCK_METHOD(void, refreshState, (), (override));
+};
+
 class TestReactorMCTPDDevice : public MCTPDDevice
 {
   public:
@@ -734,6 +745,74 @@ TEST(MCTPReactor, usbRecoveryTriggeredAtFifthConsecutiveFailure)
     reactor->tick(); // failure 5 -> recovery
 
     reactor->unmanageMCTPDevice("/test/usb-fail5");
+}
+
+TEST(MCTPReactor, usbRecoverySuppressedWhileIstIsInProgress)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto ist = std::make_unique<MockIstRecovery>();
+    auto* istPtr = ist.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery),
+                                                 std::move(ist));
+    reactor->setAutoUSBRecoveryEnabled(true);
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-ist");
+
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+
+    EXPECT_CALL(*istPtr, isIstInProgress())
+        .WillRepeatedly(testing::Return(true));
+    EXPECT_CALL(*istPtr, refreshState()).Times(testing::AtLeast(1));
+
+    // A clear-halt would make the CPU reset XUSB without RAS reinitializing
+    // it, so during IST the reset hook owns recovery instead.
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt(testing::_, testing::_))
+        .Times(0);
+
+    reactor->manageMCTPDevice("/test/usb-ist", device); // failure 1
+    reactor->tick();                                    // failure 2
+    reactor->tick();                                    // failure 3
+    reactor->tick();                                    // failure 4
+    reactor->tick();                                    // failure 5
+    reactor->tick();                                    // failure 6
+
+    reactor->unmanageMCTPDevice("/test/usb-ist");
+}
+
+TEST(MCTPReactor, usbRecoveryStillRunsWhenIstIsNotInProgress)
+{
+    MockAssociationServer assoc{};
+    auto recovery = std::make_unique<MockUSBRecovery>();
+    auto* recoveryPtr = recovery.get();
+    auto ist = std::make_unique<MockIstRecovery>();
+    auto* istPtr = ist.get();
+    auto reactor = std::make_shared<MCTPReactor>(assoc, std::move(recovery),
+                                                 std::move(ist));
+    reactor->setAutoUSBRecoveryEnabled(true);
+    auto device = std::make_shared<TestUSBMCTPDDevice>("usb-no-ist");
+
+    device->setupHandler = [](auto&& added) {
+        std::forward<decltype(added)>(
+            added)(std::make_error_code(std::errc::timed_out), nullptr);
+    };
+
+    EXPECT_CALL(*istPtr, isIstInProgress())
+        .WillRepeatedly(testing::Return(false));
+    EXPECT_CALL(*recoveryPtr, clearBulkOutHalt("usb-no-ist", testing::_))
+        .WillOnce(testing::DoAll(testing::SetArgReferee<1>("cleared"),
+                                 testing::Return(true)));
+
+    reactor->manageMCTPDevice("/test/usb-no-ist", device); // failure 1
+    reactor->tick();                                       // failure 2
+    reactor->tick();                                       // failure 3
+    reactor->tick();                                       // failure 4
+    reactor->tick(); // failure 5 -> recovery
+
+    reactor->unmanageMCTPDevice("/test/usb-no-ist");
 }
 
 TEST(MCTPReactor, usbFailureStreakResetsAfterSuccessfulSetup)

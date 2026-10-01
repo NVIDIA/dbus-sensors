@@ -1,7 +1,9 @@
+#include "IstRecovery.hpp"
 #include "MCTPCustomDevices.hpp"
 #include "MCTPEndpoint.hpp"
 #include "MCTPEndpointUtils.hpp"
 #include "MCTPReactor.hpp"
+#include "USBRecovery.hpp"
 #include "Utils.hpp"
 
 #include <sys/utsname.h>
@@ -481,7 +483,9 @@ int main()
     boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     DBusAssociationServer associationServer(systemBus);
-    auto reactor = std::make_shared<MCTPReactor>(associationServer);
+    auto reactor = std::make_shared<MCTPReactor>(
+        associationServer, std::make_unique<LibusbUSBRecovery>(),
+        std::make_unique<DBusIstRecovery>(systemBus));
     sdbusplus::asio::object_server debugObjectServer(systemBus);
     debugObjectServer.add_manager(mctpReactorDebugPath);
     auto debugInterface = debugObjectServer.add_interface(

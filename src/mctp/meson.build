@@ -9,6 +9,7 @@ executable(
     'MCTPEndpoint.cpp',
     'MCTPEndpointUtils.cpp',
     'USBRecovery.cpp',
+    'IstRecovery.cpp',
     'MCTPCustomDevices.cpp',
     dependencies: [default_deps, utils_dep, libusb_dep],
     install: true,
