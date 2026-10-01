@@ -10,6 +10,7 @@ executable(
     'MCTPEndpoint.cpp',
     'MCTPEndpointUtils.cpp',
     'USBRecovery.cpp',
+    'IstRecovery.cpp',
     'MCTPCustomDevices.cpp',
     'MCTPBridgePoolDevice.cpp',
     dependencies: [default_deps, utils_dep, libusb_dep],
