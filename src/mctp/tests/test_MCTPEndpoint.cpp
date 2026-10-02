@@ -13898,3 +13898,259 @@ TEST_F(AsyncFixture, bridgeResetScenarioOnlyNewEidsArePingedAfterReconnect)
         driveAsyncCallSuccess();
     }
 }
+
+// ===========================================================================
+// Stale-endpoint recovery (NVBug 6833403)
+//
+// mctpd can emit InterfacesRemoved for an endpoint before the reactor has
+// subscribed to it (the removal match is only installed once setup completes,
+// and the setup reply can be handled late), in which case the signal is never
+// delivered and the reactor was left holding a stale endpoint.
+// MCTPDEndpoint::subscribe() now treats a failed connectivity query on a
+// vanished endpoint as the removal (MCTPDDevice::onEndpointMissing()).
+// ===========================================================================
+
+static constexpr const char* staleTestEndpointBase =
+    "/au/com/codeconstruct/mctp1/networks/1/endpoints/";
+
+static std::string staleTestEndpointPath(uint8_t eid)
+{
+    return std::string(staleTestEndpointBase) + std::to_string(eid);
+}
+
+static std::shared_ptr<MCTPDEndpoint> makeStaleTestEndpoint(
+    const std::shared_ptr<TestUSBMCTPDDevice>& dev,
+    const std::shared_ptr<sdbusplus::asio::connection>& conn, uint8_t eid)
+{
+    return std::make_shared<MCTPDEndpoint>(
+        dev, conn, sdbusplus::message::object_path(staleTestEndpointPath(eid)),
+        1, eid);
+}
+
+// --- MCTPDEndpoint::subscribe(): connectivity query on a vanished endpoint --
+
+// mctpd no longer publishes the object (UnknownObject): the endpoint is
+// treated as removed, exactly as if its InterfacesRemoved had been seen.
+TEST_F(AsyncFixture,
+       StaleEndpoint_SubscribeConnectivityUnknownObject_TreatsEndpointAsRemoved)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-stale-subscribe", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto ep = makeStaleTestEndpoint(dev, conn, 9);
+    dev->setEndpointForTest(ep);
+
+    std::size_t removalCount = 0;
+    std::shared_ptr<MCTPEndpoint> removedEp;
+    ep->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                  [](const std::shared_ptr<MCTPEndpoint>&) {},
+                  [&](const std::shared_ptr<MCTPEndpoint>& removed) {
+                      ++removalCount;
+                      removedEp = removed;
+                  });
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U); // Properties.Get(Connectivity)
+
+    driveAsyncCallUnknownObject();
+
+    EXPECT_EQ(removalCount, 1U);
+    EXPECT_EQ(removedEp, ep);
+    EXPECT_FALSE(dev->hasEndpointForTest());
+}
+
+// UnknownInterface is also reported by sd-bus as EBADR. The Endpoint1
+// interface is what the InterfacesRemoved match keys on, so its absence is
+// also a removal. This also pins the sd-bus error -> EBADR mapping that
+// isEndpointObjectGone() relies on.
+TEST_F(
+    AsyncFixture,
+    StaleEndpoint_SubscribeConnectivityUnknownInterface_TreatsEndpointAsRemoved)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-stale-subscribe-iface", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto ep = makeStaleTestEndpoint(dev, conn, 9);
+    dev->setEndpointForTest(ep);
+
+    std::size_t removalCount = 0;
+    ep->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                  [](const std::shared_ptr<MCTPEndpoint>&) {},
+                  [&removalCount](const std::shared_ptr<MCTPEndpoint>&) {
+                      ++removalCount;
+                  });
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallUnknownInterface();
+
+    EXPECT_EQ(removalCount, 1U);
+    EXPECT_FALSE(dev->hasEndpointForTest());
+}
+
+// Any other failure (here org.freedesktop.DBus.Error.Failed) must not be
+// mistaken for removal: the endpoint is kept and no callback fires.
+TEST_F(AsyncFixture,
+       StaleEndpoint_SubscribeConnectivityOtherError_KeepsEndpoint)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-stale-subscribe-other", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto ep = makeStaleTestEndpoint(dev, conn, 9);
+    dev->setEndpointForTest(ep);
+
+    std::size_t removalCount = 0;
+    ep->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                  [](const std::shared_ptr<MCTPEndpoint>&) {},
+                  [&removalCount](const std::shared_ptr<MCTPEndpoint>&) {
+                      ++removalCount;
+                  });
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallError();
+
+    EXPECT_EQ(removalCount, 0U);
+    EXPECT_TRUE(dev->hasEndpointForTest());
+}
+
+// A healthy endpoint is unaffected: the connectivity reply is applied and the
+// endpoint stays tracked.
+TEST_F(AsyncFixture, StaleEndpoint_SubscribeConnectivitySuccess_KeepsEndpoint)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-stale-subscribe-ok", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto ep = makeStaleTestEndpoint(dev, conn, 9);
+    dev->setEndpointForTest(ep);
+
+    std::size_t removalCount = 0;
+    std::size_t availableCount = 0;
+    ep->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                  [&availableCount](const std::shared_ptr<MCTPEndpoint>&) {
+                      ++availableCount;
+                  },
+                  [&removalCount](const std::shared_ptr<MCTPEndpoint>&) {
+                      ++removalCount;
+                  });
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    driveAsyncCallStringVariant("Available");
+
+    EXPECT_EQ(availableCount, 1U);
+    EXPECT_EQ(removalCount, 0U);
+    EXPECT_TRUE(dev->hasEndpointForTest());
+}
+
+// If the device has since been given a different endpoint, a vanished
+// result for the old one must not tear down the new one.
+TEST_F(AsyncFixture,
+       StaleEndpoint_SubscribeConnectivityUnknownObject_ReplacedEndpointIsKept)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-stale-subscribe-replaced", "usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(9));
+    auto oldEp = makeStaleTestEndpoint(dev, conn, 9);
+    auto newEp = makeStaleTestEndpoint(dev, conn, 9);
+    // Same EID, different object: a re-setup of a static-EID device.
+    std::size_t newRemovalCount = 0;
+    newEp->notifyRemoved =
+        [&newRemovalCount](const std::shared_ptr<MCTPEndpoint>&) {
+            ++newRemovalCount;
+        };
+    dev->setEndpointForTest(oldEp);
+
+    std::size_t oldRemovalCount = 0;
+    oldEp->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                     [](const std::shared_ptr<MCTPEndpoint>&) {},
+                     [&oldRemovalCount](const std::shared_ptr<MCTPEndpoint>&) {
+                         ++oldRemovalCount;
+                     });
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U);
+
+    dev->setEndpointForTest(newEp);
+
+    driveAsyncCallUnknownObject();
+
+    EXPECT_TRUE(dev->endpoint == newEp);
+    EXPECT_EQ(oldRemovalCount, 0U);
+    EXPECT_EQ(newRemovalCount, 0U);
+}
+
+// --- onEndpointMissing() guard
+// ------------------------------------------------
+
+// onEndpointMissing() on a device that holds no endpoint (or a different
+// one) is a no-op.
+TEST_F(AsyncFixture, StaleEndpoint_OnEndpointMissingIgnoresNonCurrentEndpoint)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-stale-missing", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9));
+    auto current = makeStaleTestEndpoint(dev, conn, 9);
+    auto other = makeStaleTestEndpoint(dev, conn, 10);
+    std::size_t removalCount = 0;
+    current->notifyRemoved =
+        [&removalCount](const std::shared_ptr<MCTPEndpoint>&) {
+            ++removalCount;
+        };
+
+    // No endpoint held.
+    EXPECT_NO_THROW(dev->onEndpointMissing(current.get()));
+    EXPECT_EQ(removalCount, 0U);
+
+    // A different endpoint is held.
+    dev->setEndpointForTest(current);
+    EXPECT_NO_THROW(dev->onEndpointMissing(other.get()));
+    EXPECT_TRUE(dev->hasEndpointForTest());
+    EXPECT_EQ(removalCount, 0U);
+
+    // The held endpoint vanishes.
+    dev->onEndpointMissing(current.get());
+    EXPECT_FALSE(dev->hasEndpointForTest());
+    EXPECT_EQ(removalCount, 1U);
+}
+
+// --- The incident ordering --------------------------------------------------
+
+// mctpd sets the endpoint up and then removes it (the CPU USB device
+// re-enumerated) before the reactor handles the setup reply. The removal
+// signal is therefore never delivered; the connectivity query issued when the
+// reactor starts tracking the endpoint (as MCTPReactor::trackEndpoint() does)
+// is what reveals that the endpoint is gone, and the device is notified so a
+// fresh setup can be requested.
+TEST_F(AsyncFixture,
+       StaleEndpoint_SetupReplyThenEndpointGone_ClearsEndpointAndNotifies)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, "usb-stale-incident", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(14));
+    const std::string path = staleTestEndpointPath(14);
+
+    std::size_t removalCount = 0;
+    std::shared_ptr<MCTPEndpoint> gotEp;
+    dev->setup([&](const std::error_code& ec,
+                   const std::shared_ptr<MCTPEndpoint>& ep) {
+        EXPECT_FALSE(ec);
+        gotEp = ep;
+        if (!ep)
+        {
+            return;
+        }
+        // What the reactor does once setup completes.
+        ep->subscribe([](const std::shared_ptr<MCTPEndpoint>&) {},
+                      [](const std::shared_ptr<MCTPEndpoint>&) {},
+                      [&removalCount](const std::shared_ptr<MCTPEndpoint>&) {
+                          ++removalCount;
+                      });
+    });
+    ASSERT_EQ(gPendingAsyncCalls.size(), 1U); // AssignEndpointStatic
+
+    driveAsyncCallAssignEndpoint(14, 1, path.c_str(), true);
+    ASSERT_TRUE(gotEp != nullptr);
+    ASSERT_TRUE(dev->hasEndpointForTest());
+    ASSERT_EQ(gPendingAsyncCalls.size(),
+              1U); // connectivity Get from subscribe()
+
+    // mctpd no longer has the endpoint.
+    driveAsyncCallUnknownObject();
+
+    EXPECT_FALSE(dev->hasEndpointForTest());
+    EXPECT_EQ(removalCount, 1U);
+}

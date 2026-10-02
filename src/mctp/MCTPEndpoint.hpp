@@ -18,6 +18,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <variant>
 #include <vector>
 
 /**
@@ -272,6 +273,18 @@ class MCTPDEndpoint :
 
     void onMctpEndpointChange(sdbusplus::message_t& msg);
     void updateEndpointConnectivity(const std::string& connectivity);
+
+    /**
+     * @brief Completion of the Properties.Get(Connectivity) issued by
+     *        subscribe()
+     *
+     * Applies the reported connectivity, or, if mctpd reports the endpoint
+     * object is gone, tells the device so it can treat the endpoint as removed.
+     */
+    static void onConnectivityReply(const std::weak_ptr<MCTPDEndpoint>& weak,
+                                    const std::string& path,
+                                    const boost::system::error_code& ec,
+                                    const std::variant<std::string>& value);
 };
 
 /**
@@ -406,6 +419,24 @@ class MCTPDDevice :
      *        Derived classes can override to add transport-specific behavior.
      */
     virtual void onEndpointEstablished();
+
+    /**
+     * @brief Handle discovering that an endpoint we hold no longer exists in
+     *        mctpd
+     *
+     * mctpd's InterfacesRemoved for an endpoint can be emitted before we have
+     * subscribed to it (the match is only installed once setup completes), in
+     * which case the signal is never delivered. Callers that find the endpoint
+     * object missing (e.g. the connectivity query made at subscription time)
+     * use this to run the same cleanup as the signal would have: drop the
+     * endpoint and notify the reactor so the device is set up again.
+     *
+     * Does nothing if @p ep is no longer the device's current endpoint, as the
+     * endpoint may have been replaced while the query was in flight.
+     *
+     * @param ep The endpoint found to be missing
+     */
+    void onEndpointMissing(const MCTPEndpoint* ep);
 
   protected:
     std::shared_ptr<sdbusplus::asio::connection> connection;

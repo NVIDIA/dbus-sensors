@@ -634,6 +634,29 @@ void driveAsyncCallUnknownInterface()
     sd_bus_message_unref(p.request);
 }
 
+// driveAsyncCallUnknownObject: fire with an UnknownObject D-Bus method error
+// reply. Models a call on an mctpd endpoint object that mctpd has already
+// removed (sd-bus reports this as EBADR, "Invalid request descriptor").
+void driveAsyncCallUnknownObject()
+{
+    assert(!gPendingAsyncCalls.empty());
+    PendingAsync p = gPendingAsyncCalls.front();
+    gPendingAsyncCalls.erase(gPendingAsyncCalls.begin());
+    sd_bus_message* reply = nullptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    const int makeRc = sd_bus_message_new_method_errorf(
+        p.request, &reply, SD_BUS_ERROR_UNKNOWN_OBJECT, "Mock missing object");
+    assert(makeRc >= 0);
+    assert(reply != nullptr);
+    const int sealRc = sd_bus_message_seal(
+        reply, static_cast<uint64_t>(++gAsyncReplySerial), 0);
+    assert(sealRc >= 0);
+
+    (void)p.callback(reply, p.userdata, nullptr);
+    sd_bus_message_unref(reply);
+    sd_bus_message_unref(p.request);
+}
+
 // driveAsyncCallErrorTimedOut: fire the oldest pending async call with an
 // ETIMEDOUT error reply. Exercises the `ec == boost::system::errc::timed_out`
 // branch in performHealthCheck (MCTPEndpoint.cpp ~line 462 and ~line 552).
