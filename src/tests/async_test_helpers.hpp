@@ -281,6 +281,10 @@ void drainPendingAsyncCalls();
 // absent interface.
 void driveAsyncCallUnknownInterface();
 
+// driveAsyncCallUnknownObject: fire with an UnknownObject D-Bus method error
+// reply. Use to model a call on an mctpd endpoint object that no longer exists.
+void driveAsyncCallUnknownObject();
+
 // driveAsyncCallErrorTimedOut: fire the oldest pending async call with an
 // ETIMEDOUT error reply. Exercises the timed_out branch in performHealthCheck
 // (MCTPEndpoint.cpp ~line 462 and ~line 552).

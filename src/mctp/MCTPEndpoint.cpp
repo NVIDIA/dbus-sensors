@@ -5,6 +5,7 @@
 #include "Utils.hpp"
 #include "VariantVisitors.hpp"
 
+#include <asm-generic/errno.h>
 #include <systemd/sd-bus-protocol.h>
 
 #include <boost/asio/error.hpp>
@@ -228,6 +229,20 @@ static bool isBridgeInterfaceAbsent(sdbusplus::message_t& msg)
     std::string_view errorName = dbusError->name;
     return errorName == SD_BUS_ERROR_UNKNOWN_INTERFACE ||
            errorName == SD_BUS_ERROR_INVALID_ARGS;
+}
+
+/**
+ * @brief True if a failed call on an mctpd endpoint object means mctpd no
+ *        longer publishes that endpoint.
+ *
+ * sd-bus maps UnknownObject/UnknownInterface/UnknownProperty/UnknownMethod to
+ * EBADR ("Invalid request descriptor"). For the calls we make on an endpoint
+ * path this means the endpoint (or its Endpoint1 interface, which is what the
+ * InterfacesRemoved match also keys on) has gone away.
+ */
+static bool isEndpointObjectGone(const boost::system::error_code& ec)
+{
+    return ec.value() == EBADR;
 }
 
 static void hasBridgeInterface(
@@ -500,6 +515,19 @@ void MCTPDDevice::onEndpointInterfacesRemoved(
             "Device for inventory at '{INVENTORY_PATH}' was destroyed concurrent to endpoint removal",
             "INVENTORY_PATH", objpath);
     }
+}
+
+void MCTPDDevice::onEndpointMissing(const MCTPEndpoint* ep)
+{
+    if (!endpoint || static_cast<const MCTPEndpoint*>(endpoint.get()) != ep)
+    {
+        return;
+    }
+
+    warning(
+        "Endpoint [ {MCTP_ENDPOINT} ] no longer exists in mctpd; treating it as removed",
+        "MCTP_ENDPOINT", endpoint->describe());
+    endpointRemoved();
 }
 
 void MCTPDDevice::finaliseEndpoint(
@@ -1228,6 +1256,35 @@ uint8_t MCTPDEndpoint::eid() const
     return mctp.eid;
 }
 
+void MCTPDEndpoint::onConnectivityReply(
+    const std::weak_ptr<MCTPDEndpoint>& weak, const std::string& path,
+    const boost::system::error_code& ec, const std::variant<std::string>& value)
+{
+    auto self = weak.lock();
+    if (!self)
+    {
+        info(
+            "The endpoint for the device at inventory path '{INVENTORY_PATH}' was destroyed concurrent to the completion of its connectivity state query",
+            "INVENTORY_PATH", path);
+        return;
+    }
+
+    if (!ec)
+    {
+        self->updateEndpointConnectivity(std::get<std::string>(value));
+        return;
+    }
+
+    debug("Failed to get current connectivity state: {ERROR_MESSAGE}",
+          "ERROR_MESSAGE", ec.message(), "ERROR_CATEGORY", ec.category().name(),
+          "ERROR_CODE", ec.value());
+
+    if (isEndpointObjectGone(ec) && self->dev)
+    {
+        self->dev->onEndpointMissing(self.get());
+    }
+}
+
 void MCTPDEndpoint::subscribe(Event&& degraded, Event&& available,
                               Event&& removed)
 {
@@ -1259,27 +1316,7 @@ void MCTPDEndpoint::subscribe(Event&& degraded, Event&& available,
             [weak{weak_from_this()},
              path{objpath.str}](const boost::system::error_code& ec,
                                 const std::variant<std::string>& value) {
-                if (ec)
-                {
-                    debug(
-                        "Failed to get current connectivity state: {ERROR_MESSAGE}",
-                        "ERROR_MESSAGE", ec.message(), "ERROR_CATEGORY",
-                        ec.category().name(), "ERROR_CODE", ec.value());
-                    return;
-                }
-
-                if (auto self = weak.lock())
-                {
-                    const std::string& connectivity =
-                        std::get<std::string>(value);
-                    self->updateEndpointConnectivity(connectivity);
-                }
-                else
-                {
-                    info(
-                        "The endpoint for the device at inventory path '{INVENTORY_PATH}' was destroyed concurrent to the completion of its connectivity state query",
-                        "INVENTORY_PATH", path);
-                }
+                MCTPDEndpoint::onConnectivityReply(weak, path, ec, value);
             },
             mctpdBusName, objpath.str, "org.freedesktop.DBus.Properties", "Get",
             mctpdEndpointControlInterface, "Connectivity");
