@@ -413,7 +413,8 @@ bool checkThresholds(Sensor* sensor)
 
 // Status is true if no thresholds are crossed
 bool checkThresholdsPowerDelay(const std::weak_ptr<Sensor>& weakSensor,
-                               ThresholdTimer& thresholdTimer)
+                               ThresholdTimer& thresholdTimer,
+                               bool cancelOnRecovery)
 {
     bool status = true;
     auto sensorPtr = weakSensor.lock();
@@ -430,7 +431,9 @@ bool checkThresholdsPowerDelay(const std::weak_ptr<Sensor>& weakSensor,
         // go below low thresholds. Filter these events with thresholdTimer.
         // 1. always delay the assertion of low events to see if they are
         //   caused by power off event.
-        // 2. conditional delay the de-assertion of low events if there is
+        // 2. when cancelOnRecovery is enabled, cancel pending low assertions
+        //   on recovery and de-assert immediately. Otherwise, delay the
+        //   de-assertion of low events if there is
         //   an existing timer for assertion.
         // 3. no delays for de-assert of low events if there is an existing
         //   de-assert for low event. This means 2nd de-assert would happen
@@ -439,8 +442,14 @@ bool checkThresholdsPowerDelay(const std::weak_ptr<Sensor>& weakSensor,
         // 4. no delays for all high events.
         if (change.threshold.direction == thresholds::Direction::LOW)
         {
-            if (change.asserted || thresholdTimer.hasActiveTimer(
-                                       change.threshold, !change.asserted))
+            if (cancelOnRecovery && !change.asserted)
+            {
+                // Cancel pending low-threshold assertions from earlier samples.
+                // Clear any active alarm below.
+                thresholdTimer.stopTimer(change.threshold, true);
+            }
+            else if (change.asserted || thresholdTimer.hasActiveTimer(
+                                            change.threshold, !change.asserted))
             {
                 thresholdTimer.startTimer(weakSensor, change.threshold,
                                           change.asserted, change.assertValue);

@@ -211,8 +211,9 @@ void TachSensor::checkThresholds()
         return;
     }
 
-    bool status =
-        thresholds::checkThresholdsPowerDelay(weak_from_this(), thresholdTimer);
+    // Cancel delayed low-RPM assertions when the fan recovers.
+    bool status = thresholds::checkThresholdsPowerDelay(weak_from_this(),
+                                                        thresholdTimer, true);
 
     if ((redundancy != nullptr) && *redundancy)
     {
