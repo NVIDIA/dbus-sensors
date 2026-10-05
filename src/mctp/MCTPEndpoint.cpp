@@ -172,13 +172,13 @@ void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& /*unused*/)
     /* Discovery Notify could be broadcasted from unassigned or assigned
      * EID endpoint
      *
-     * To be consistant, we must fetch out configuration StaticEndpointID
+     * To be consistent, we must fetch out configuration StaticEndpointID
      * and PhyAddr for either of these cases rather relying on signal eid
      * data from mctpd.
      *
      * This is feasible because DiscoveryNotify signal is now
      * interface path specific.
-     * Prioritse to discover and setup undiscovered endpoint first.
+     * Prioritise to discover and setup undiscovered endpoint first.
      */
     if (!this->endpoint)
     {
@@ -681,7 +681,7 @@ void MCTPDDevice::performHealthCheck()
                                     self->name, self->endpoint->eid(),
                                     nv::lg2::ErrorCode::MCTP::
                                         MCTP_TRANSPORT_FAIL_PING_TIMEOUT,
-                                    "MCTP ping failed due to timeout for the device");
+                                    mctpPingTimedOutMessage);
                             }
                             self->recover();
                         }
@@ -797,7 +797,7 @@ void MCTPDDevice::performHealthCheck()
                                         deviceName, eid,
                                         nv::lg2::ErrorCode::MCTP::
                                             MCTP_TRANSPORT_FAIL_PING_TIMEOUT,
-                                        "MCTP ping failed due to timeout for the device");
+                                        mctpPingTimedOutMessage);
                                 }
                                 self->unresponsiveBridgePoolEids.insert(eid);
                                 self->recover(eid);

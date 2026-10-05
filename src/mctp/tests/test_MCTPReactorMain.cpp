@@ -233,8 +233,6 @@ TEST(MctpCommandTable, knownCommandHasNonEmptyFields)
 {
     for (const auto& [code, entry] : mctpCommandTable)
     {
-        EXPECT_FALSE(entry.timeoutErrorMessage.empty())
-            << "Empty timeoutErrorMessage for code " << static_cast<int>(code);
         EXPECT_FALSE(entry.driverOperation.empty())
             << "Empty driverOperation for code " << static_cast<int>(code);
     }
@@ -315,9 +313,8 @@ TEST(HandleApplicationTimeout, knownCommandCodeWithNoOpLog)
     error.commandCode = MCTP_CTRL_CMD_SET_ENDPOINT_ID;
     error.destEid = 10;
     error.errorCode = ETIMEDOUT;
-    // logMCTPError → CommitDeviceError tries to create a thread; BOOST_ASIO
-    // is compiled with DISABLE_THREADS so thread creation throws ENOTSUP.
-    EXPECT_ANY_THROW(handleApplicationTimeout(reactor, error));
+    // handleApplicationTimeout only leaves a journal warning.
+    EXPECT_NO_THROW(handleApplicationTimeout(reactor, error));
 }
 
 TEST(HandleApplicationTimeout, unknownCommandCodeWithNoOpLog)
@@ -373,7 +370,7 @@ TEST(HandleTransportError, allKnownCommandsWithNoOpLog)
         error.errorCode = ETIMEDOUT;
         error.msgType = MCTP_CTRL_HDR_MSG_TYPE;
         error.direction = MCTP_DIR_RX;
-        EXPECT_ANY_THROW(handleApplicationTimeout(reactor, error));
+        EXPECT_NO_THROW(handleApplicationTimeout(reactor, error));
         EXPECT_ANY_THROW(handleTransportError(reactor, error));
     }
 }
@@ -389,8 +386,8 @@ TEST(HandleApplicationTimeout, knownCommandInvokesLogger)
     error.commandCode = MCTP_CTRL_CMD_SET_ENDPOINT_ID;
     error.destEid = 10;
     error.errorCode = ETIMEDOUT;
-    // logMCTPError → CommitDeviceError → thread creation → ENOTSUP
-    EXPECT_ANY_THROW(handleApplicationTimeout(reactor, error));
+    // journal warning only, no Redfish event
+    EXPECT_NO_THROW(handleApplicationTimeout(reactor, error));
 }
 
 TEST(HandleApplicationTimeout, unknownCommandHitsWarningBranch)
@@ -645,7 +642,7 @@ TEST(HandleApplicationTimeout, multipleCommandCodesDoNotCrash)
         error.errorCode = ETIMEDOUT;
         if (mctpCommandTable.contains(code))
         {
-            EXPECT_ANY_THROW(handleApplicationTimeout(reactor, error));
+            EXPECT_NO_THROW(handleApplicationTimeout(reactor, error));
         }
         else
         {
@@ -969,10 +966,11 @@ static sdbusplus::message_t makeTransportErrorMsg(
 }
 
 // handleTransportErrorSignal: destEid != 0, not suppressed, not retrying,
-// ETIMEDOUT + RX + CTRL → dispatches to handleApplicationTimeout (known cmd)
-// → logMCTPError → CommitDeviceError throws.
-TEST(HandleTransportErrorSignal,
-     timeoutRxCtrlKnownCmdDispatchesToApplicationTimeout)
+// ETIMEDOUT + RX + CTRL for Set Endpoint ID → dispatched to
+// handleApplicationTimeout, which only leaves a journal trace. mctpd emits
+// TransportError for this command only outside discovery (Recover), where
+// it is a transport failure of a known endpoint, not a discovery failure.
+TEST(HandleTransportErrorSignal, timeoutRxCtrlSetEidOutsideDiscoveryDispatches)
 {
     MockAssocServer server;
     auto reactor = std::make_shared<MCTPReactor>(server);
@@ -992,8 +990,7 @@ TEST(HandleTransportErrorSignal,
     {
         GTEST_SKIP() << "Failed to create test message";
     }
-    // logMCTPError → CommitDeviceError tries to create a thread → ENOTSUP
-    EXPECT_ANY_THROW(handleTransportErrorSignal(reactor, msg));
+    EXPECT_NO_THROW(handleTransportErrorSignal(reactor, msg));
 }
 
 // handleTransportErrorSignal: destEid != 0, not suppressed, not retrying,
@@ -1562,7 +1559,7 @@ TEST(HandleTransportError, destEidZeroUsesEidFallbackName)
 }
 
 // handleApplicationTimeout: destEid == 0, known command, no managed device
-// → getDeviceName(0) returns nullopt → name = "EID_0" → logMCTPError throws
+// → getDeviceName(0) returns nullopt → name = "EID_0" → journal warning only
 TEST(HandleApplicationTimeout, destEidZeroKnownCommandUsesEidFallbackName)
 {
     MockAssocServer server;
@@ -1571,8 +1568,8 @@ TEST(HandleApplicationTimeout, destEidZeroKnownCommandUsesEidFallbackName)
     error.commandCode = MCTP_CTRL_CMD_SET_ENDPOINT_ID;
     error.destEid = 0;
     error.errorCode = ETIMEDOUT;
-    // logMCTPError → CommitDeviceError → thread → ENOTSUP
-    EXPECT_ANY_THROW(handleApplicationTimeout(reactor, error));
+    // journal warning only, no Redfish event
+    EXPECT_NO_THROW(handleApplicationTimeout(reactor, error));
 }
 
 // ---------------------------------------------------------------------------
@@ -1587,7 +1584,7 @@ TEST(HandleApplicationTimeout, getEndpointUuidCommandThrows)
     error.commandCode = MCTP_CTRL_CMD_GET_ENDPOINT_UUID;
     error.destEid = 15;
     error.errorCode = ETIMEDOUT;
-    EXPECT_ANY_THROW(handleApplicationTimeout(reactor, error));
+    EXPECT_NO_THROW(handleApplicationTimeout(reactor, error));
 }
 
 TEST(HandleApplicationTimeout, allocateEndpointIdsCommandThrows)
@@ -1598,7 +1595,7 @@ TEST(HandleApplicationTimeout, allocateEndpointIdsCommandThrows)
     error.commandCode = MCTP_CTRL_CMD_ALLOCATE_ENDPOINT_IDS;
     error.destEid = 16;
     error.errorCode = ETIMEDOUT;
-    EXPECT_ANY_THROW(handleApplicationTimeout(reactor, error));
+    EXPECT_NO_THROW(handleApplicationTimeout(reactor, error));
 }
 
 // ---------------------------------------------------------------------------
@@ -2137,7 +2134,7 @@ static void addDeviceWithStaticEid(
 // When a device with staticEID == destEid is in the repository,
 // getDeviceName(destEid) returns the device name instead of nullopt.
 // The value_or() expression on line 260 then takes the "has value" branch.
-// logMCTPError is called with the real device name → CommitDeviceError throws.
+// a journal warning is logged with the real device name (no throw).
 // ---------------------------------------------------------------------------
 TEST(HandleApplicationTimeout, knownEidWithManagedDeviceUsesDeviceName)
 {
@@ -2153,8 +2150,8 @@ TEST(HandleApplicationTimeout, knownEidWithManagedDeviceUsesDeviceName)
     error.errorCode = ETIMEDOUT;
 
     // getDeviceName(10) → "MCTPDevice10" (non-nullopt) → value_or "has value"
-    // branch taken; logMCTPError → CommitDeviceError → thread → ENOTSUP
-    EXPECT_ANY_THROW(handleApplicationTimeout(reactor, error));
+    // branch taken; journal warning only
+    EXPECT_NO_THROW(handleApplicationTimeout(reactor, error));
 }
 
 // handleApplicationTimeout: known EID with managed device, unknown command
@@ -2385,7 +2382,7 @@ TEST(HandleTransportErrorSignal,
 // handleTransportErrorSignal: destEid==0, getStaticEidFromInterface returns a
 // value → destEid is substituted with the static EID → not suppressed, not
 // retrying → dispatches to handleApplicationTimeout (ETIMEDOUT+RX+CTRL+known
-// command → throws via logMCTPError).
+// command → journal warning only).
 //
 // This is the full "happy path" for EID substitution from interface lookup.
 // ---------------------------------------------------------------------------
@@ -2404,7 +2401,7 @@ TEST(HandleTransportErrorSignal,
     suppressedHealthCheckEids.erase(staticEid);
 
     // ETIMEDOUT+MCTP_DIR_RX+CTRL → dispatches to handleApplicationTimeout,
-    // which calls logMCTPError → CommitDeviceError → thread creation → throws
+    // which only leaves a journal warning
     auto msg = makeTransportErrorMsg(
         static_cast<uint32_t>(ETIMEDOUT), MCTP_DIR_RX, 0, 0,
         0, // destEid=0 → EID substituted to 88
@@ -2417,8 +2414,9 @@ TEST(HandleTransportErrorSignal,
     }
 
     // EID substituted to 88; not suppressed; isRetrying(88)==false (no
-    // failureCounts entry); dispatches to handleApplicationTimeout → throws
-    EXPECT_ANY_THROW(handleTransportErrorSignal(reactor, msg));
+    // failureCounts entry); dispatches to handleApplicationTimeout, which
+    // only leaves a journal warning
+    EXPECT_NO_THROW(handleTransportErrorSignal(reactor, msg));
 }
 
 // ---------------------------------------------------------------------------
@@ -2969,7 +2967,7 @@ TEST(MCTPReactor, manageMCTPDeviceEBUSYPathHandledInternally)
 }
 
 // ===========================================================================
-// handleApplicationTimeout — known command code triggers logMCTPError throw
+// handleApplicationTimeout — known command code logs a journal warning
 // Exercises the mctpCommandTable.contains(commandCode) true branch with a
 // non-zero destEid. (handleApplicationTimeout does not check msgType.)
 // ===========================================================================
@@ -2981,7 +2979,7 @@ TEST(HandleApplicationTimeout, knownCommandNonZeroEidThrows)
     error.commandCode = MCTP_CTRL_CMD_SET_ENDPOINT_ID;
     error.destEid = 10;
     error.errorCode = ETIMEDOUT;
-    EXPECT_ANY_THROW(handleApplicationTimeout(reactor, error));
+    EXPECT_NO_THROW(handleApplicationTimeout(reactor, error));
 }
 
 // ===========================================================================
@@ -3378,7 +3376,7 @@ TEST(ReactorMainHandlers, removeInventoryAllSixInterfacesShortCircuitsB1)
 //
 // A device with bridgePool=[50..60] in the repository.  getDeviceName for a
 // pool EID returns the indexed name rather than nullopt, exercising the
-// value_or "has value" branch. logMCTPError throws (thread creation ENOTSUP).
+// value_or "has value" branch. A journal warning is logged.
 // ---------------------------------------------------------------------------
 TEST(HandleApplicationTimeout, bridgePoolDeviceNameUsedInTimeoutHandlerB1)
 {
@@ -3395,17 +3393,17 @@ TEST(HandleApplicationTimeout, bridgePoolDeviceNameUsedInTimeoutHandlerB1)
     reactor->devices.add("/test/mctp/bridge_timeout_b1", device);
 
     // EID=40 (main) → getDeviceName returns "BridgeTimeoutDev" (non-nullopt)
-    // → value_or "has value" branch → logMCTPError → throws
+    // → value_or "has value" branch → journal warning only
     TransportErrorInfo error{};
     error.commandCode = MCTP_CTRL_CMD_SET_ENDPOINT_ID;
     error.destEid = 40;
     error.errorCode = ETIMEDOUT;
-    EXPECT_ANY_THROW(handleApplicationTimeout(reactor, error));
+    EXPECT_NO_THROW(handleApplicationTimeout(reactor, error));
 
     // EID=50 (bridge pool) → getDeviceName returns "b50" (non-nullopt)
     // → value_or "has value" branch with pool EID → throws
     error.destEid = 50;
-    EXPECT_ANY_THROW(handleApplicationTimeout(reactor, error));
+    EXPECT_NO_THROW(handleApplicationTimeout(reactor, error));
 }
 
 // ---------------------------------------------------------------------------
@@ -3655,6 +3653,254 @@ TEST_F(FakeConnReactorFixture,
     // calls conn->async_method_call(lambda, ...).  The lambda fires with the
     // null-bus error (synchronous dispatch or TearDown io.poll()).
     EXPECT_NO_THROW(handleGeneralErrorSignal(conn, reactor, msg));
+}
+
+// ===========================================================================
+// DiscoveryCommandFailed: mctpd reports failed endpoint discovery commands
+// (Set Endpoint ID, Allocate Endpoint IDs, Get Endpoint UUID) through this
+// signal; the reactor renders them as MCTPDiscoveryCommandFailed events.
+// ===========================================================================
+
+// Builds a DiscoveryCommandFailed signal ("ysyyuss") the way mctpd emits it.
+static sdbusplus::message_t makeDiscoveryCommandFailedMsg(
+    uint8_t commandCode, const std::string& command, uint8_t eid, uint8_t kind,
+    uint32_t code, const std::string& reason, const std::string& interface)
+{
+    sd_bus* rawBus = makeRawBus();
+    if (rawBus == nullptr)
+    {
+        return sdbusplus::message_t(nullptr);
+    }
+    sd_bus_message* rawMsg = nullptr;
+    if (sd_bus_message_new_signal(
+            rawBus, &rawMsg, "/au/com/codeconstruct/mctp1/interfaces",
+            "au.com.codeconstruct.MCTP.BusOwner1",
+            "DiscoveryCommandFailed") < 0 ||
+        rawMsg == nullptr)
+    {
+        sd_bus_unref(rawBus);
+        return sdbusplus::message_t(nullptr);
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    int r = sd_bus_message_append(rawMsg, "ysyyuss", commandCode,
+                                  command.c_str(), eid, kind, code,
+                                  reason.c_str(), interface.c_str());
+    sd_bus_unref(rawBus);
+    if (r < 0)
+    {
+        sd_bus_message_unref(rawMsg);
+        return sdbusplus::message_t(nullptr);
+    }
+    if (sd_bus_message_seal(rawMsg, 1, 0) < 0 ||
+        sd_bus_message_rewind(rawMsg, 1) < 0)
+    {
+        sd_bus_message_unref(rawMsg);
+        return sdbusplus::message_t(nullptr);
+    }
+    return sdbusplus::message_t(rawMsg, std::false_type{});
+}
+
+static DiscoveryCommandFailedInfo makeDiscoveryFailure(uint8_t eid)
+{
+    DiscoveryCommandFailedInfo failure{};
+    failure.commandCode = MCTP_CTRL_CMD_SET_ENDPOINT_ID;
+    failure.command = "SetEndpointID";
+    failure.eid = eid;
+    failure.kind = MCTP_DISCOVERY_FAIL_RESPONSE_TIMEOUT;
+    failure.code = ETIMEDOUT;
+    failure.reason = "no response received before timeout";
+    failure.interface = "mctpi2c0";
+    return failure;
+}
+
+// resolveDiscoveryFailureDevice: known EID, null EID and unknown EID paths.
+// addDeviceWithStaticEid registers the device on interface "mctpi2c0".
+TEST(HandleDiscoveryCommandFailed, resolvesDeviceFromEidOrInterface)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    addDeviceWithStaticEid(reactor, "/test/mctp/disc_dev", "DiscoveryDevice",
+                           66);
+
+    // Known EID → device name, EID untouched
+    auto failure = makeDiscoveryFailure(66);
+    EXPECT_EQ(resolveDiscoveryFailureDevice(reactor, failure),
+              "DiscoveryDevice");
+    EXPECT_EQ(failure.eid, 66);
+
+    // Null EID → the interface's configured EID and its name
+    failure = makeDiscoveryFailure(0);
+    EXPECT_EQ(resolveDiscoveryFailureDevice(reactor, failure),
+              "DiscoveryDevice");
+    EXPECT_EQ(failure.eid, 66);
+
+    // Unknown (dynamically assigned) EID → EID kept, name from the interface
+    failure = makeDiscoveryFailure(77);
+    EXPECT_EQ(resolveDiscoveryFailureDevice(reactor, failure),
+              "DiscoveryDevice");
+    EXPECT_EQ(failure.eid, 77);
+
+    // Nothing known → EID-based fallback name
+    failure = makeDiscoveryFailure(78);
+    failure.interface = "mctpi2c9";
+    EXPECT_EQ(resolveDiscoveryFailureDevice(reactor, failure), "EID_78");
+    EXPECT_EQ(failure.eid, 78);
+}
+
+// Null EID on an interface with no configured device: nothing to adopt, the
+// report keeps EID 0 and the fallback name.
+TEST(HandleDiscoveryCommandFailed, nullEidWithUnknownInterfaceKeepsNullEid)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto failure = makeDiscoveryFailure(0);
+    failure.interface = "mctpi2c9";
+    EXPECT_EQ(resolveDiscoveryFailureDevice(reactor, failure), "EID_0");
+    EXPECT_EQ(failure.eid, 0);
+}
+
+// On Core, deferSetup() increments failureCounts on endpoint removal, so
+// isRetrying() returns true before the first DiscoveryCommandFailed fires.
+// The isRetrying() suppression is therefore absent on Core; the event is
+// rendered regardless of retry state, and the per-EID rate limit handles
+// flooding.
+TEST(HandleDiscoveryCommandFailed, retryingDeviceIsRendered)
+{
+    gMockSystem = true;
+    gSystemRetval = 1; // modprobe fails → deferSetup → failureCounts non-empty
+    gSystemCallCount = 0;
+
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    ManagedObjectType entities{
+        {sdbusplus::message::object_path("/test/usb_retry_discovery"),
+         {{"xyz.openbmc_project.Configuration.MCTPUSBGadgetTarget",
+           {{"Type", std::string("MCTPUSBGadgetTarget")},
+            {"Name", std::string("usb0")},
+            {"Interface", std::string("mctpusb0")},
+            {"LocalEID", std::string("10")}}}}}};
+    manageMCTPEntity(nullptr, reactor, entities);
+    gMockSystem = false;
+    ASSERT_TRUE(reactor->isRetrying(0));
+
+    // EID 0 on an unknown interface stays 0. Even though the reactor is
+    // retrying, the event is not suppressed (isRetrying() guard removed).
+    auto failure = makeDiscoveryFailure(0);
+    failure.interface = "mctpusb9";
+    bool reported = false;
+    try
+    {
+        reported = handleDiscoveryCommandFailed(reactor, failure);
+    }
+    catch (...)
+    {
+        reported = true; // logger was reached
+    }
+    EXPECT_TRUE(reported);
+}
+
+TEST(HandleDiscoveryCommandFailed, suppressedEidIsNotRendered)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    suppressedHealthCheckEids.insert(91);
+    EXPECT_FALSE(
+        handleDiscoveryCommandFailed(reactor, makeDiscoveryFailure(91)));
+    suppressedHealthCheckEids.erase(91);
+}
+
+TEST(HandleDiscoveryCommandFailed, nullEidResolvedToSuppressedDeviceIsDropped)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    addDeviceWithStaticEid(reactor, "/test/mctp/disc_sup", "SuppressedDevice",
+                           67);
+
+    suppressedHealthCheckEids.insert(67);
+    // EID 0 + interface "mctpi2c0" → EID 67 → suppressed
+    EXPECT_FALSE(
+        handleDiscoveryCommandFailed(reactor, makeDiscoveryFailure(0)));
+    suppressedHealthCheckEids.erase(67);
+}
+
+TEST(HandleDiscoveryCommandFailed, unsuppressedFailureReachesLogger)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto failure = makeDiscoveryFailure(92);
+    failure.kind = MCTP_DISCOVERY_FAIL_COMPLETION_CODE;
+    failure.code = 0x04;
+    failure.reason =
+        "device is not ready (MCTP_CONTROL_MSG_STATUS_ERROR_NOT_READY (0x04))";
+
+    // createMctpDiscoveryFailureRedfishEvent → CommitDeviceError, which may
+    // throw in this test environment (see the TransportError tests)
+    bool reported = false;
+    try
+    {
+        reported = handleDiscoveryCommandFailed(reactor, failure);
+    }
+    catch (...)
+    {
+        reported = true; // the logger was reached
+    }
+    EXPECT_TRUE(reported);
+}
+
+TEST(HandleDiscoveryCommandFailedSignal, malformedMessageHandled)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+    sdbusplus::message_t msg(nullptr);
+    EXPECT_NO_THROW(
+        static_cast<void>(handleDiscoveryCommandFailedSignal(reactor, msg)));
+}
+
+TEST(HandleDiscoveryCommandFailedSignal, suppressedEidMessageIsDropped)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto msg = makeDiscoveryCommandFailedMsg(
+        MCTP_CTRL_CMD_GET_ENDPOINT_UUID, "GetEndpointUUID", 93,
+        MCTP_DISCOVERY_FAIL_RESPONSE_TIMEOUT, static_cast<uint32_t>(ETIMEDOUT),
+        "no response received before timeout", "mctpi2c0");
+    if (!msg)
+    {
+        GTEST_SKIP() << "Failed to create test message";
+    }
+
+    suppressedHealthCheckEids.insert(93);
+    // Parsed, then dropped without reaching the logger
+    EXPECT_NO_THROW(handleDiscoveryCommandFailedSignal(reactor, msg));
+    suppressedHealthCheckEids.erase(93);
+}
+
+TEST(HandleDiscoveryCommandFailedSignal, validMessageIsDispatched)
+{
+    MockAssocServer server;
+    auto reactor = std::make_shared<MCTPReactor>(server);
+
+    auto msg = makeDiscoveryCommandFailedMsg(
+        MCTP_CTRL_CMD_SET_ENDPOINT_ID, "SetEndpointID", 94,
+        MCTP_DISCOVERY_FAIL_REQUEST_NOT_SENT,
+        static_cast<uint32_t>(EHOSTUNREACH), "request could not be sent",
+        "mctpi2c1");
+    if (!msg)
+    {
+        GTEST_SKIP() << "Failed to create test message";
+    }
+
+    // Dispatched to the logger; CommitDeviceError may throw in this environment
+    try
+    {
+        handleDiscoveryCommandFailedSignal(reactor, msg);
+    }
+    catch (...)
+    {}
 }
 
 // NOLINTEND

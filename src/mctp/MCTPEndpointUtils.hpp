@@ -13,6 +13,16 @@
 const std::string hmcBridgeError{"ResourceEvent.1.0.ResourceErrorsDetected"};
 const std::string hmcBridgeInfo{"ResourceEvent.1.1.ResourceStateChanged"};
 
+// Redfish message for MCTP endpoint discovery command failures, which mctpd
+// reports through the BusOwner1 DiscoveryCommandFailed signal
+const std::string mctpDiscoveryCommandFailedMessageId{
+    "NvidiaResourceEvent.1.0.MCTPDiscoveryCommandFailed"};
+const std::string mctpDiscoveryCommandFailedResolution{
+    "Collect the BMC logs, power-cycle the baseboard, then retry the firmware update. If the issue persists, contact support."};
+
+// Error detail logged (ResourceErrorsDetected) when an EndpointPing times out
+const std::string mctpPingTimedOutMessage{"MCTP Ping timed out"};
+
 // MCTP Control Message Type
 enum
 {
@@ -57,25 +67,43 @@ struct GeneralErrorInfo
     std::string resolution;
 };
 
+// Failure classes carried by the mctpd DiscoveryCommandFailed signal
+enum
+{
+    MCTP_DISCOVERY_FAIL_REQUEST_NOT_SENT = 0,
+    MCTP_DISCOVERY_FAIL_RESPONSE_TIMEOUT = 1,
+    MCTP_DISCOVERY_FAIL_INVALID_RESPONSE = 2,
+    MCTP_DISCOVERY_FAIL_COMPLETION_CODE = 3
+};
+
+// Structure to hold MCTP DiscoveryCommandFailed signal data ("ysyyuss")
+struct DiscoveryCommandFailedInfo
+{
+    uint8_t commandCode = 0;
+    std::string command; // "SetEndpointID", "AllocateEndpointIDs", ...
+    uint8_t eid = 0;     // EID the command was issued for; the EID being
+                         // assigned for Set Endpoint ID
+    uint8_t kind = 0;    // MCTP_DISCOVERY_FAIL_*
+    uint32_t code = 0;   // errno for kinds 0-2, completion code for kind 3
+    std::string reason;  // rendered as the message's third argument
+    std::string interface;
+};
+
 // Structure to hold MCTP command information
 struct MCTPCommandInfo
 {
-    std::string timeoutErrorMessage;
-    std::string logMessage;
+    // Operation name used for transport error events of this command
     std::string driverOperation;
 };
 
-// Lookup table for MCTP control command information
+// Lookup table for MCTP control command information. Timeouts of these
+// commands are not rendered from TransportError: mctpd reports their
+// discovery failures through DiscoveryCommandFailed, and EndpointPing
+// (Get Endpoint UUID) timeouts are logged by the device health check.
 static const std::map<uint8_t, MCTPCommandInfo> mctpCommandTable = {
-    {MCTP_CTRL_CMD_SET_ENDPOINT_ID,
-     {"MCTP device discovery failed due to device error SetEID Timeout",
-      "MCTP SetEID Timeout on EID", "SetEndpointID"}},
-    {MCTP_CTRL_CMD_GET_ENDPOINT_UUID,
-     {"MCTP device discovery failed due to device error Get UUID Timeout",
-      "MCTP Get UUID Timeout on EID", "MCTP Ping"}},
-    {MCTP_CTRL_CMD_ALLOCATE_ENDPOINT_IDS,
-     {"MCTP device discovery failed due to device error Allocate EID Timeout",
-      "MCTP Allocate EID Timeout on EID", "AllocateEndpointIDs"}}};
+    {MCTP_CTRL_CMD_SET_ENDPOINT_ID, {"SetEndpointID"}},
+    {MCTP_CTRL_CMD_GET_ENDPOINT_UUID, {"MCTP Ping"}},
+    {MCTP_CTRL_CMD_ALLOCATE_ENDPOINT_IDS, {"AllocateEndpointIDs"}}};
 
 /**
  * @brief Log MCTP error to Redfish
@@ -99,6 +127,15 @@ void logMCTPError(const std::string& deviceName, uint8_t destEid, int errorCode,
 void createMctpTransportRedfishEvent(
     uint32_t errorCode, uint8_t direction, uint8_t binding, uint8_t destEid,
     const std::string& driverOperation, const std::string& deviceName);
+
+/**
+ * @brief Create the MCTPDiscoveryCommandFailed Redfish event for a failed
+ *        endpoint discovery command
+ * @param failure Decoded DiscoveryCommandFailed signal
+ * @param deviceName Device name, or empty to fall back to EID_<eid>
+ */
+void createMctpDiscoveryFailureRedfishEvent(
+    const DiscoveryCommandFailedInfo& failure, const std::string& deviceName);
 
 /**
  * @brief Get polling interval from configuration
