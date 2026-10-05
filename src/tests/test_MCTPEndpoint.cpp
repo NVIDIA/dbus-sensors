@@ -15,6 +15,7 @@
 
 #include <array>
 #include <bit>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -15926,4 +15927,349 @@ TEST_F(AsyncFixture,
 
     EXPECT_FALSE(dev->hasEndpointForTest());
     EXPECT_EQ(removalCount, 1U);
+}
+
+// ---------------------------------------------------------------------------
+// Bridge pool ping failures during a bridge rediscovery.
+//
+// In the failing run a mass DiscoveryNotify arrived at 23.5 s, the first
+// ping of each affected pool EID failed at 23.8 s, the third failure landed
+// at 33.8 s and the EIDs answered again at 40.7 s, about 17 s after the
+// notify. The tests below replay that timeline against the grace rule.
+// ---------------------------------------------------------------------------
+
+constexpr uint8_t kGracePoolEid = 10;
+
+using PoolClock = MCTPDDevice::SteadyClock;
+using namespace std::chrono_literals;
+
+TEST(PoolPingGrace, NotifyWithinOnePollOfTheFirstMissCoincides)
+{
+    const auto firstMiss = PoolClock::now();
+
+    // The reported run: the notify came 0.3 s before the first miss.
+    EXPECT_TRUE(MCTPDDevice::notifyCoincidesWithStreak(firstMiss - 300ms,
+                                                       firstMiss, 5s));
+    // A notify exactly one polling interval away, in either order.
+    EXPECT_TRUE(
+        MCTPDDevice::notifyCoincidesWithStreak(firstMiss - 5s, firstMiss, 5s));
+    EXPECT_TRUE(
+        MCTPDDevice::notifyCoincidesWithStreak(firstMiss + 5s, firstMiss, 5s));
+}
+
+TEST(PoolPingGrace, NotifyMoreThanOnePollAwayDoesNotCoincide)
+{
+    const auto firstMiss = PoolClock::now();
+
+    EXPECT_FALSE(MCTPDDevice::notifyCoincidesWithStreak(firstMiss - 5s - 1ms,
+                                                        firstMiss, 5s));
+    EXPECT_FALSE(
+        MCTPDDevice::notifyCoincidesWithStreak(firstMiss - 60s, firstMiss, 5s));
+    // A late notify must not excuse a streak that began long before it.
+    EXPECT_FALSE(
+        MCTPDDevice::notifyCoincidesWithStreak(firstMiss + 20s, firstMiss, 5s));
+}
+
+TEST(PoolPingGrace, CoincidingStreakIsExcusedUntilGraceExpires)
+{
+    const auto firstMiss = PoolClock::now();
+
+    // Third miss 10 s into the streak, and the EIDs answering at 17 s.
+    EXPECT_TRUE(
+        MCTPDDevice::isFailureStreakExcused(true, firstMiss, firstMiss + 10s));
+    EXPECT_TRUE(
+        MCTPDDevice::isFailureStreakExcused(true, firstMiss, firstMiss + 17s));
+    EXPECT_TRUE(
+        MCTPDDevice::isFailureStreakExcused(true, firstMiss, firstMiss + 29s));
+    EXPECT_FALSE(MCTPDDevice::isFailureStreakExcused(
+        true, firstMiss, firstMiss + MCTPDDevice::rediscoveryGracePeriod));
+    EXPECT_FALSE(
+        MCTPDDevice::isFailureStreakExcused(true, firstMiss, firstMiss + 120s));
+}
+
+TEST(PoolPingGrace, StreakThatDoesNotCoincideIsNeverExcused)
+{
+    const auto firstMiss = PoolClock::now();
+
+    EXPECT_FALSE(
+        MCTPDDevice::isFailureStreakExcused(false, firstMiss, firstMiss + 10s));
+}
+
+// Pool EID 10 behind bridge EID 9, polled every second, one miss away from
+// the failure threshold.
+static std::shared_ptr<TestUSBMCTPDDevice> makePoolGraceDevice(
+    const std::shared_ptr<sdbusplus::asio::connection>& conn,
+    boost::asio::io_context& io, const std::string& name)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        conn, name, "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(9), std::optional<uint8_t>(kGracePoolEid),
+        std::optional<uint8_t>(kGracePoolEid), std::nullopt, std::nullopt,
+        std::optional<uint8_t>(1));
+    dev->healthTimer = std::make_unique<boost::asio::steady_timer>(io);
+    dev->bridgePoolPingFailures[kGracePoolEid] = dev->pingFailureThreshold - 1;
+    // The constructor seeds pool EIDs as unresponsive; clear it so the
+    // assertions below observe what the threshold path does.
+    dev->unresponsiveBridgePoolEids.erase(kGracePoolEid);
+    return dev;
+}
+
+// Runs one health check in which the device's own ping succeeds and the pool
+// EID's ping times out. Reporting a discovered EID reaches logMCTPError,
+// whose exception the driver swallows, so callers only assert state that is
+// set before that point.
+static void runPoolPingTimeout(const std::shared_ptr<TestUSBMCTPDDevice>& dev)
+{
+    dev->performHealthCheck();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 2U);
+    driveAsyncCallSuccess();
+    driveAsyncCallErrorTimedOut();
+}
+
+// Fires the oldest pending call with an ETIMEDOUT reply like
+// driveAsyncCallErrorTimedOut(), but reports whether the callback threw
+// instead of swallowing the exception. Reporting a published EID reaches
+// logMCTPError, which throws where the commit is unavailable.
+static bool driveTimedOutPingAndReportThrow()
+{
+    PendingAsync pending = gPendingAsyncCalls.front();
+    gPendingAsyncCalls.erase(gPendingAsyncCalls.begin());
+    sd_bus_message* reply = nullptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    (void)sd_bus_message_new_method_errno(pending.request, &reply, ETIMEDOUT,
+                                          nullptr);
+    (void)sd_bus_message_seal(reply, 1, 0);
+    bool threw = false;
+    try
+    {
+        (void)pending.callback(reply, pending.userdata, nullptr);
+    }
+    catch (...)
+    {
+        threw = true;
+    }
+    sd_bus_message_unref(reply);
+    sd_bus_message_unref(pending.request);
+    return threw;
+}
+
+TEST_F(AsyncFixture, poolPingFailureDeferredWhenStreakCoincidesWithRediscovery)
+{
+    auto dev = makePoolGraceDevice(conn, io, "usb-pool-grace-deferred");
+    dev->markDiscoveredMctpEid(kGracePoolEid);
+    dev->bridgePoolFirstFailure[kGracePoolEid] = PoolClock::now() - 10s;
+    dev->bridgePoolStreakNearNotify.insert(kGracePoolEid);
+    ASSERT_TRUE(dev->isPingFailureExcused(kGracePoolEid));
+
+    runPoolPingTimeout(dev);
+
+    // The failure is counted, but not reported and not escalated.
+    EXPECT_EQ(dev->bridgePoolPingFailures[kGracePoolEid],
+              dev->pingFailureThreshold);
+    EXPECT_FALSE(dev->unresponsiveBridgePoolEids.contains(kGracePoolEid));
+    EXPECT_TRUE(dev->bridgePoolFirstFailure.contains(kGracePoolEid));
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+    dev->healthTimer->cancel();
+}
+
+// Controls for the test above: the same streak is not excused when it did
+// not coincide with an announcement or when the grace period has expired, so
+// the threshold path reports it as before.
+TEST_F(AsyncFixture, poolPingFailureNotExcusedWithoutAnnouncementOrAfterGrace)
+{
+    auto dev = makePoolGraceDevice(conn, io, "usb-pool-grace-controls");
+    dev->markDiscoveredMctpEid(kGracePoolEid);
+    dev->bridgePoolFirstFailure[kGracePoolEid] = PoolClock::now() - 10s;
+
+    EXPECT_FALSE(dev->isPingFailureExcused(kGracePoolEid));
+
+    dev->bridgePoolStreakNearNotify.insert(kGracePoolEid);
+    EXPECT_TRUE(dev->isPingFailureExcused(kGracePoolEid));
+
+    dev->bridgePoolFirstFailure[kGracePoolEid] = PoolClock::now() - 40s;
+    EXPECT_FALSE(dev->isPingFailureExcused(kGracePoolEid));
+    dev->healthTimer->cancel();
+}
+
+// The excusal is bounded: a streak that outlives the grace period is no
+// longer deferred by the next health check, even though it coincided with a
+// DiscoveryNotify.
+TEST_F(AsyncFixture, poolPingFailureReportedOnceGraceExpiresAcrossHealthChecks)
+{
+    auto dev = makePoolGraceDevice(conn, io, "usb-pool-grace-expiry");
+    dev->markDiscoveredMctpEid(kGracePoolEid);
+    dev->bridgePoolFirstFailure[kGracePoolEid] = PoolClock::now() - 10s;
+    dev->bridgePoolStreakNearNotify.insert(kGracePoolEid);
+
+    // Inside the grace period the timeout is deferred.
+    dev->performHealthCheck();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 2U);
+    driveAsyncCallSuccess();
+    EXPECT_FALSE(driveTimedOutPingAndReportThrow());
+    EXPECT_FALSE(dev->unresponsiveBridgePoolEids.contains(kGracePoolEid));
+
+    // The same streak, now older than the grace period, is reported: either
+    // the EID is marked unresponsive or logMCTPError threw on the way.
+    dev->bridgePoolFirstFailure[kGracePoolEid] =
+        PoolClock::now() - MCTPDDevice::rediscoveryGracePeriod - 1s;
+    dev->performHealthCheck();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 2U);
+    driveAsyncCallSuccess();
+    const bool reportThrew = driveTimedOutPingAndReportThrow();
+    EXPECT_TRUE(reportThrew ||
+                dev->unresponsiveBridgePoolEids.contains(kGracePoolEid));
+    gPendingAsyncCalls.clear();
+    dev->healthTimer->cancel();
+}
+
+// An EID mctpd has not published is not in the routing table, so it is never
+// excused and is marked unresponsive at the threshold as before.
+TEST_F(AsyncFixture, poolPingFailureEscalatedForEidNotInRoutingTable)
+{
+    auto dev = makePoolGraceDevice(conn, io, "usb-pool-grace-undiscovered");
+    ASSERT_FALSE(dev->discoveredMctpEids.contains(kGracePoolEid));
+    dev->bridgePoolFirstFailure[kGracePoolEid] = PoolClock::now() - 10s;
+    dev->bridgePoolStreakNearNotify.insert(kGracePoolEid);
+    ASSERT_FALSE(dev->isPingFailureExcused(kGracePoolEid));
+
+    runPoolPingTimeout(dev);
+
+    EXPECT_TRUE(dev->unresponsiveBridgePoolEids.contains(kGracePoolEid));
+    gPendingAsyncCalls.clear();
+    dev->healthTimer->cancel();
+}
+
+TEST_F(AsyncFixture, firstMissOfAStreakIsRecordedAndFlaggedNearANotify)
+{
+    auto dev = makePoolGraceDevice(conn, io, "usb-pool-grace-first-miss");
+    dev->markDiscoveredMctpEid(kGracePoolEid);
+    dev->bridgePoolPingFailures[kGracePoolEid] = 0;
+    dev->lastDiscoveryNotify = PoolClock::now() - 300ms;
+
+    const auto before = PoolClock::now();
+    runPoolPingTimeout(dev);
+    const auto after = PoolClock::now();
+
+    ASSERT_TRUE(dev->bridgePoolFirstFailure.contains(kGracePoolEid));
+    EXPECT_GE(dev->bridgePoolFirstFailure[kGracePoolEid], before);
+    EXPECT_LE(dev->bridgePoolFirstFailure[kGracePoolEid], after);
+    EXPECT_TRUE(dev->bridgePoolStreakNearNotify.contains(kGracePoolEid));
+    dev->healthTimer->cancel();
+}
+
+// A ping result that arrives for an EID that is no longer published (for
+// example after endpointRemoved()) must not rebuild streak state.
+TEST_F(AsyncFixture, pingFailureForAnUnpublishedEidDoesNotStartAStreak)
+{
+    auto dev = makePoolGraceDevice(conn, io, "usb-pool-grace-stale");
+    dev->bridgePoolPingFailures[kGracePoolEid] = 0;
+    dev->lastDiscoveryNotify = PoolClock::now();
+    ASSERT_FALSE(dev->discoveredMctpEids.contains(kGracePoolEid));
+
+    runPoolPingTimeout(dev);
+
+    EXPECT_FALSE(dev->bridgePoolFirstFailure.contains(kGracePoolEid));
+    EXPECT_FALSE(dev->bridgePoolStreakNearNotify.contains(kGracePoolEid));
+    dev->healthTimer->cancel();
+}
+
+TEST_F(AsyncFixture, firstMissWithoutANearbyNotifyIsNotFlagged)
+{
+    auto dev = makePoolGraceDevice(conn, io, "usb-pool-grace-no-notify");
+    dev->markDiscoveredMctpEid(kGracePoolEid);
+    dev->bridgePoolPingFailures[kGracePoolEid] = 0;
+    dev->lastDiscoveryNotify = PoolClock::now() - 60s;
+
+    runPoolPingTimeout(dev);
+
+    EXPECT_TRUE(dev->bridgePoolFirstFailure.contains(kGracePoolEid));
+    EXPECT_FALSE(dev->bridgePoolStreakNearNotify.contains(kGracePoolEid));
+    dev->healthTimer->cancel();
+}
+
+TEST_F(AsyncFixture, successfulPoolPingEndsTheStreak)
+{
+    auto dev = makePoolGraceDevice(conn, io, "usb-pool-grace-recovered");
+    dev->bridgePoolPingFailures[kGracePoolEid] = 2;
+    dev->bridgePoolFirstFailure[kGracePoolEid] = PoolClock::now() - 10s;
+    dev->bridgePoolStreakNearNotify.insert(kGracePoolEid);
+
+    dev->performHealthCheck();
+    ASSERT_EQ(gPendingAsyncCalls.size(), 2U);
+    driveAsyncCallSuccess();
+    driveAsyncCallSuccess();
+
+    EXPECT_EQ(dev->bridgePoolPingFailures[kGracePoolEid], 0U);
+    EXPECT_FALSE(dev->bridgePoolFirstFailure.contains(kGracePoolEid));
+    EXPECT_FALSE(dev->bridgePoolStreakNearNotify.contains(kGracePoolEid));
+    EXPECT_TRUE(gPendingAsyncCalls.empty());
+    dev->healthTimer->cancel();
+}
+
+TEST(PoolPingGrace, discoveryNotifyRecordsTimeAndFlagsAYoungStreak)
+{
+    boost::asio::io_context io;
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "usb-pool-grace-notify", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(12), std::nullopt, std::nullopt, std::nullopt,
+        std::nullopt, std::optional<uint8_t>(5));
+    auto endpoint = std::make_shared<MCTPDEndpoint>(
+        dev, nullptr,
+        sdbusplus::object_path(
+            "/au/com/codeconstruct/mctp1/networks/1/endpoints/12"),
+        1, 12);
+    dev->setEndpointForTest(endpoint);
+    dev->discoveryCheckTimer = std::make_unique<boost::asio::steady_timer>(io);
+    ASSERT_FALSE(dev->lastDiscoveryNotify.has_value());
+
+    // A streak that began 2 s ago is within one polling interval (5 s) of
+    // the notify; one that began 20 s ago is not.
+    dev->bridgePoolFirstFailure[20] = PoolClock::now() - 2s;
+    dev->bridgePoolFirstFailure[21] = PoolClock::now() - 20s;
+
+    auto msg = sdbusplus::message_t(nullptr);
+    const auto before = PoolClock::now();
+    dev->onDiscoveryNotify(msg);
+
+    ASSERT_TRUE(dev->lastDiscoveryNotify.has_value());
+    EXPECT_GE(dev->lastDiscoveryNotify.value_or(PoolClock::time_point{}),
+              before);
+    EXPECT_TRUE(dev->bridgePoolStreakNearNotify.contains(20));
+    EXPECT_FALSE(dev->bridgePoolStreakNearNotify.contains(21));
+
+    // A notify that is coalesced into the pending rediscovery still counts.
+    ASSERT_TRUE(dev->discoveryNeeded);
+    const auto first =
+        dev->lastDiscoveryNotify.value_or(PoolClock::time_point{});
+    dev->onDiscoveryNotify(msg);
+    EXPECT_GE(dev->lastDiscoveryNotify.value_or(PoolClock::time_point{}),
+              first);
+}
+
+// The first DiscoveryNotify of a bridge that has no endpoint yet is plain
+// discovery, not a rediscovery, and is not recorded.
+TEST(PoolPingGrace, discoveryNotifyOfAnUndiscoveredBridgeIsNotRecorded)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "usb-pool-grace-undiscovered-bridge", "usb0",
+        std::vector<uint8_t>{0x20}, std::optional<uint8_t>(12));
+
+    auto msg = sdbusplus::message_t(nullptr);
+    dev->onDiscoveryNotify(msg);
+
+    EXPECT_FALSE(dev->lastDiscoveryNotify.has_value());
+}
+
+TEST(PoolPingGrace, endpointRemovalClearsStreakTracking)
+{
+    auto dev = std::make_shared<TestUSBMCTPDDevice>(
+        nullptr, "usb-pool-grace-removed", "usb0", std::vector<uint8_t>{0x20},
+        std::optional<uint8_t>(12));
+    dev->bridgePoolFirstFailure[kGracePoolEid] = PoolClock::now();
+    dev->bridgePoolStreakNearNotify.insert(kGracePoolEid);
+
+    dev->endpointRemoved();
+
+    EXPECT_TRUE(dev->bridgePoolFirstFailure.empty());
+    EXPECT_TRUE(dev->bridgePoolStreakNearNotify.empty());
 }
