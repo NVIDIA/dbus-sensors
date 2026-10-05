@@ -158,6 +158,7 @@ void updateThresholds(Sensor* sensor);
 // returns false if a critical threshold has been crossed, true otherwise
 bool checkThresholds(Sensor* sensor);
 bool checkThresholdsPowerDelay(const std::weak_ptr<Sensor>& weakSensor,
-                               ThresholdTimer& thresholdTimer);
+                               ThresholdTimer& thresholdTimer,
+                               bool cancelOnRecovery = false);
 
 } // namespace thresholds
