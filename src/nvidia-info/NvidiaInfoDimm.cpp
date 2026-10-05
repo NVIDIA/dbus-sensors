@@ -89,7 +89,7 @@ void from_json(const Json& j, NvidiaDimm& d)
 {
     j.at("Present").get_to(d.present);
     j.at("MemoryDeviceLocator").get_to(d.locator);
-    d.sizeKB = getOptional<uint32_t>(j, "MemorySizeKB");
+    d.sizeKB = getOptional<size_t>(j, "MemorySizeKB");
     d.dataWidth = getOptional<uint16_t>(j, "MemoryDataWidth");
     d.totalWidth = getOptional<uint16_t>(j, "MemoryTotalWidth");
     d.maxSpeed = getOptional<uint16_t>(j, "MaxMemorySpeedInMHz");

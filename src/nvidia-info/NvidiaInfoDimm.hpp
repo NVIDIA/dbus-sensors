@@ -59,7 +59,7 @@ class NvidiaDimm : public Publisher
 
     bool present{false};                     // "Present", required
     std::string locator;                     // "MemoryDeviceLocator", non-empty
-    std::optional<uint32_t> sizeKB;          // "MemorySizeKB"
+    std::optional<size_t> sizeKB;            // "MemorySizeKB"
     std::optional<uint16_t> dataWidth;       // "MemoryDataWidth"
     std::optional<uint16_t> totalWidth;      // "MemoryTotalWidth"
     std::optional<uint16_t> maxSpeed;        // "MaxMemorySpeedInMHz"
