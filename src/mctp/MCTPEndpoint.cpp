@@ -186,6 +186,20 @@ void MCTPDDevice::onDiscoveryNotify(sdbusplus::message_t& /*unused*/)
         return;
     }
 
+    // Only a rediscovery of an existing endpoint counts; the first notify
+    // of an undiscovered bridge is plain discovery.
+    const auto notifyTime = SteadyClock::now();
+    lastDiscoveryNotify = notifyTime;
+    for (const auto& [eid, streakStart] : bridgePoolFirstFailure)
+    {
+        if (notifyCoincidesWithStreak(
+                notifyTime, streakStart,
+                std::chrono::seconds{pollingInterval.value_or(0)}))
+        {
+            bridgePoolStreakNearNotify.insert(eid);
+        }
+    }
+
     if (discoveryNeeded)
     {
         info("Ignoring DiscoveryNotify for {INTERFACE}", "INTERFACE",
@@ -304,6 +318,42 @@ static void hasBridgeInterface(
               endpointPath, "ERROR", e.what());
         (*bridgeCallback)(std::nullopt);
     }
+}
+
+bool MCTPDDevice::notifyCoincidesWithStreak(SteadyClock::time_point notify,
+                                            SteadyClock::time_point streakStart,
+                                            std::chrono::seconds pollInterval)
+{
+    const auto distance =
+        notify > streakStart ? notify - streakStart : streakStart - notify;
+    return distance <= pollInterval;
+}
+
+bool MCTPDDevice::isFailureStreakExcused(bool coincidesWithNotify,
+                                         SteadyClock::time_point streakStart,
+                                         SteadyClock::time_point now)
+{
+    // Bounded: a streak is never excused for longer than the grace period.
+    return coincidesWithNotify && now - streakStart < rediscoveryGracePeriod;
+}
+
+bool MCTPDDevice::isPingFailureExcused(uint8_t eid) const
+{
+    // An EID mctpd has not published is not in the routing table; its
+    // failures are handled exactly as before.
+    if (!discoveredMctpEids.contains(eid))
+    {
+        return false;
+    }
+
+    auto streak = bridgePoolFirstFailure.find(eid);
+    if (streak == bridgePoolFirstFailure.end())
+    {
+        return false;
+    }
+
+    return isFailureStreakExcused(bridgePoolStreakNearNotify.contains(eid),
+                                  streak->second, SteadyClock::now());
 }
 
 void MCTPDDevice::performDiscovery()
@@ -777,6 +827,21 @@ void MCTPDDevice::performHealthCheck()
                                 self->pingFailureThreshold)
                         {
                             self->bridgePoolPingFailures[eid]++;
+                            if (self->bridgePoolPingFailures[eid] == 1 &&
+                                self->discoveredMctpEids.contains(eid))
+                            {
+                                const auto start = SteadyClock::now();
+                                self->bridgePoolFirstFailure[eid] = start;
+                                if (self->lastDiscoveryNotify &&
+                                    notifyCoincidesWithStreak(
+                                        *self->lastDiscoveryNotify, start,
+                                        std::chrono::seconds{
+                                            self->pollingInterval.value_or(0)}))
+                                {
+                                    self->bridgePoolStreakNearNotify.insert(
+                                        eid);
+                                }
+                            }
                             info(
                                 "Ping failed for Bridge Pool EID {EID}. Failure count: {COUNT}/{THRESHOLD}",
                                 "EID", eid, "COUNT",
@@ -786,27 +851,44 @@ void MCTPDDevice::performHealthCheck()
                             if (self->bridgePoolPingFailures[eid] >=
                                 self->pingFailureThreshold)
                             {
-                                info(
-                                    "Bridge pool EID {EID} not responsive after {COUNT} timeouts",
-                                    "EID", eid, "COUNT",
-                                    self->bridgePoolPingFailures[eid]);
                                 if (ec == boost::system::errc::timed_out &&
-                                    self->discoveredMctpEids.contains(eid))
+                                    self->isPingFailureExcused(eid))
                                 {
-                                    logMCTPError(
-                                        deviceName, eid,
-                                        nv::lg2::ErrorCode::MCTP::
-                                            MCTP_TRANSPORT_FAIL_PING_TIMEOUT,
-                                        "MCTP ping failed due to timeout for the device");
+                                    // The bridge announced a rediscovery
+                                    // when this EID went quiet. Keep
+                                    // counting and decide again on the next
+                                    // ping, up to the grace period.
+                                    debug(
+                                        "Bridge pool EID {EID} reached the failure threshold during a bridge rediscovery; deferring",
+                                        "EID", eid);
                                 }
-                                self->unresponsiveBridgePoolEids.insert(eid);
-                                self->recover(eid);
+                                else
+                                {
+                                    info(
+                                        "Bridge pool EID {EID} not responsive after {COUNT} timeouts",
+                                        "EID", eid, "COUNT",
+                                        self->bridgePoolPingFailures[eid]);
+                                    if (ec == boost::system::errc::timed_out &&
+                                        self->discoveredMctpEids.contains(eid))
+                                    {
+                                        logMCTPError(
+                                            deviceName, eid,
+                                            nv::lg2::ErrorCode::MCTP::
+                                                MCTP_TRANSPORT_FAIL_PING_TIMEOUT,
+                                            "MCTP ping failed due to timeout for the device");
+                                    }
+                                    self->unresponsiveBridgePoolEids.insert(
+                                        eid);
+                                    self->recover(eid);
+                                }
                             }
                         }
                     }
                     else
                     {
                         self->bridgePoolPingFailures[eid] = 0;
+                        self->bridgePoolFirstFailure.erase(eid);
+                        self->bridgePoolStreakNearNotify.erase(eid);
                         suppressedHealthCheckEids.erase(eid);
 
                         const bool wasUnresponsive =
@@ -1060,6 +1142,8 @@ void MCTPDDevice::endpointRemoved()
     // bridge reset.
     discoveredMctpEids.clear();
     bridgePoolPingFailures.clear();
+    bridgePoolFirstFailure.clear();
+    bridgePoolStreakNearNotify.clear();
 
     if (endpoint)
     {

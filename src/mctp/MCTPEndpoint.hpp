@@ -482,6 +482,48 @@ class MCTPDDevice :
     /** EIDs observed via mctpd endpoint object publication (InterfacesAdded).
      */
     std::set<uint8_t> discoveredMctpEids;
+
+    using SteadyClock = std::chrono::steady_clock;
+
+    /**
+     * How long a bridge pool EID's ping-failure streak is excused when the
+     * bridge announced a rediscovery (DiscoveryNotify) around its start.
+     * After a baseboard level event the endpoints behind a bridge can stay
+     * silent for longer than the three missed pings (about 10 to 15 s) that
+     * the failure threshold needs. A device that is still silent after this
+     * long is reported exactly as before.
+     */
+    static constexpr std::chrono::seconds rediscoveryGracePeriod{30};
+
+    /** When the bridge last sent a DiscoveryNotify. */
+    std::optional<SteadyClock::time_point> lastDiscoveryNotify;
+
+    /** First failed ping of each bridge pool EID's current failure streak. */
+    std::map<uint8_t, SteadyClock::time_point> bridgePoolFirstFailure;
+
+    /**
+     * Bridge pool EIDs whose current failure streak began within one polling
+     * interval of a DiscoveryNotify, in either order.
+     */
+    std::set<uint8_t> bridgePoolStreakNearNotify;
+
+    /** Whether @p notify and @p streakStart are within @p pollInterval. */
+    static bool notifyCoincidesWithStreak(SteadyClock::time_point notify,
+                                          SteadyClock::time_point streakStart,
+                                          std::chrono::seconds pollInterval);
+
+    /**
+     * Whether a failure streak that began at @p streakStart is excused at
+     * @p now: it coincided with a DiscoveryNotify and is younger than
+     * rediscoveryGracePeriod.
+     */
+    static bool isFailureStreakExcused(bool coincidesWithNotify,
+                                       SteadyClock::time_point streakStart,
+                                       SteadyClock::time_point now);
+
+    /** Applies the rule to the current streak of pool EID @p eid. */
+    bool isPingFailureExcused(uint8_t eid) const;
+
     void performHealthCheck();
     void armRecoveryTimeout();
     void cancelRecoveryTimeout();
