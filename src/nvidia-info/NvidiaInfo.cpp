@@ -27,6 +27,7 @@
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
 
+#include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <chrono>
@@ -74,6 +75,18 @@ constexpr std::string_view hgxPrefix = NVIDIA_INFO_HGX_PREFIX;
 constexpr uint32_t maxSocket = 255;
 
 } // namespace
+
+std::string dimmLocationContext(std::string_view moduleContext,
+                                std::string_view motherboardPath,
+                                uint64_t moduleIdx)
+{
+    std::string parent(moduleContext);
+    if (parent.empty())
+    {
+        parent = std::filesystem::path(motherboardPath).filename().string();
+    }
+    return std::format("{}/ProcessorModule_{}", parent, moduleIdx);
+}
 
 NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
                        std::shared_ptr<sdbusplus::asio::connection> conn,
@@ -208,11 +221,10 @@ void NvidiaInfo::attachAssociationsFor(const std::string& terminusName)
         std::string locationContext;
         if (moduleIt != processorModulePaths.end())
         {
-            const std::string chassisName =
-                std::filesystem::path(motherboardPath).filename().string();
-            const std::string moduleName =
-                std::filesystem::path(moduleIt->second).filename().string();
-            locationContext = std::format("{}/{}", chassisName, moduleName);
+            const auto ctxIt = processorModuleContexts.find(moduleIdx);
+            locationContext = dimmLocationContext(
+                ctxIt != processorModuleContexts.end() ? ctxIt->second : "",
+                motherboardPath, moduleIdx);
         }
         for (auto& dimm : terminus.dimms)
         {
@@ -368,50 +380,96 @@ void NvidiaInfo::discoverProcessorModulePaths(std::function<void()> callback)
 {
     std::vector<std::string> ifaces = {processorModuleInterface};
 
+    // sdbusplus deduces the reply types from the handler's signature, so
+    // this needs a lambda with explicit parameters, not std::bind_front.
     bus->async_method_call(
-        [this,
-         cb = std::move(callback)](const boost::system::error_code& ec,
-                                   const std::vector<std::string>& paths) {
-            if (ec)
-            {
-                lg2::error("Failed to query processor module paths: {E}", "E",
-                           ec.message());
-                if (cb)
-                {
-                    cb();
-                }
-                return;
-            }
+        [this, cb = std::move(callback)](const boost::system::error_code& ec,
+                                         const MapperSubTree& subtree) mutable {
+            onProcessorModuleSubTree(std::move(cb), ec, subtree);
+        },
+        mapperBusName, mapperPath, mapperInterface, "GetSubTree",
+        "/xyz/openbmc_project/inventory/", 0, ifaces);
+}
 
-            for (const auto& path : paths)
-            {
-                const auto pos = path.rfind('_');
-                if (pos == std::string::npos)
-                {
-                    continue;
-                }
-                const char* first = path.data() + pos + 1;
-                const char* last = path.data() + path.size();
-                uint64_t idx = 0;
-                auto [ptr, ec2] = std::from_chars(first, last, idx);
-                if (ec2 != std::errc{} || ptr != last)
-                {
-                    lg2::warning("Could not parse module index from path {P}",
-                                 "P", path);
-                    continue;
-                }
-                processorModulePaths[idx] = path;
-                lg2::info("Discovered processor module {I} at path: {P}", "I",
-                          idx, "P", path);
-            }
+void NvidiaInfo::onProcessorModuleSubTree(std::function<void()> callback,
+                                          const boost::system::error_code& ec,
+                                          const MapperSubTree& subtree)
+{
+    if (ec)
+    {
+        lg2::error("Failed to query processor module paths: {E}", "E",
+                   ec.message());
+        if (callback)
+        {
+            callback();
+        }
+        return;
+    }
 
+    // Run callback once every module's LocationContext read has finished.
+    auto done = std::shared_ptr<void>(
+        nullptr, [cb = std::move(callback)](void*) mutable {
             if (cb)
             {
                 cb();
             }
-        },
-        mapperBusName, mapperPath, mapperInterface, "GetSubTreePaths",
-        "/xyz/openbmc_project/inventory/", 0, ifaces);
+        });
+
+    for (const auto& [path, services] : subtree)
+    {
+        const auto pos = path.rfind('_');
+        if (pos == std::string::npos)
+        {
+            continue;
+        }
+        const char* first = path.data() + pos + 1;
+        const char* last = path.data() + path.size();
+        uint64_t idx = 0;
+        auto [ptr, ec2] = std::from_chars(first, last, idx);
+        if (ec2 != std::errc{} || ptr != last)
+        {
+            lg2::warning("Could not parse module index from path {P}", "P",
+                         path);
+            continue;
+        }
+        processorModulePaths[idx] = path;
+        processorModuleContexts.erase(idx);
+        lg2::info("Discovered processor module {I} at path: {P}", "I", idx, "P",
+                  path);
+
+        for (const auto& [service, interfaces] : services)
+        {
+            if (std::find(interfaces.begin(), interfaces.end(),
+                          locationContextInterface) == interfaces.end())
+            {
+                continue;
+            }
+            // done is held until the reply is handled; see above.
+            bus->async_method_call(
+                [this, idx, path,
+                 done](const boost::system::error_code& getEc,
+                       const std::variant<std::string>& value) mutable {
+                    onModuleLocationContext(idx, path, getEc, value);
+                    done.reset();
+                },
+                service, path, "org.freedesktop.DBus.Properties", "Get",
+                locationContextInterface, "LocationContext");
+            break;
+        }
+    }
+}
+
+void NvidiaInfo::onModuleLocationContext(uint64_t idx, const std::string& path,
+                                         const boost::system::error_code& ec,
+                                         const std::variant<std::string>& value)
+{
+    if (ec)
+    {
+        lg2::warning("Failed to read LocationContext of {P}: {E}", "P", path,
+                     "E", ec.message());
+        return;
+    }
+    processorModuleContexts[idx] = std::get<std::string>(value);
 }
 
 void NvidiaInfo::discoverPaths(std::function<void()> callback)
