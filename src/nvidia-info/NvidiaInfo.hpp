@@ -19,6 +19,7 @@
 #include "NvidiaInfoSchema.hpp"
 
 #include <boost/asio/io_context.hpp>
+#include <boost/system/error_code.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 #include <sdbusplus/bus/match.hpp>
@@ -30,6 +31,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -51,6 +53,16 @@ inline constexpr const char* boardInterface =
     "xyz.openbmc_project.Inventory.Item.Board";
 inline constexpr const char* processorModuleInterface =
     "xyz.openbmc_project.Inventory.Item.ProcessorModule";
+inline constexpr const char* locationContextInterface =
+    "xyz.openbmc_project.Inventory.Decorator.LocationContext";
+
+// LocationContext for a DIMM on processor module moduleIdx, matching the
+// CPUs on the same module: "<parent>/ProcessorModule_<idx>". parent is the
+// module's own LocationContext (e.g. "HGX_Chassis_0"); when the module has
+// none, the motherboard object name is used (e.g. "Chassis_0").
+std::string dimmLocationContext(std::string_view moduleContext,
+                                std::string_view motherboardPath,
+                                uint64_t moduleIdx);
 
 // D-Bus service constants for the CreateInfo method
 inline constexpr const char* nvidiaInfoService =
@@ -105,6 +117,8 @@ class NvidiaInfo
     std::string persistedDir;
     std::string motherboardPath;
     std::map<uint64_t, std::string> processorModulePaths;
+    // LocationContext of each processor module; absent if it has none.
+    std::map<uint64_t, std::string> processorModuleContexts;
     std::map<std::string, TerminusInfo> terminusInfos;
     std::unique_ptr<sdbusplus::bus::match_t> interfaceAddedMatch;
 
@@ -153,11 +167,27 @@ class NvidiaInfo
                               uint32_t, int64_t, uint64_t, double, std::string,
                               std::vector<uint8_t>>>>;
 
+    // ObjectMapper GetSubTree reply: path -> [(service, [interfaces])].
+    using MapperSubTree = std::vector<std::pair<
+        std::string,
+        std::vector<std::pair<std::string, std::vector<std::string>>>>>;
+
     void setupMotherboardMatch();
     void onInterfacesAdded(sdbusplus::message_t& msg);
     void scheduleMotherboardDiscovery();
     void discoverMotherboardPath(std::function<void()> callback);
+    // Finds the ProcessorModule inventory objects and their LocationContext;
+    // callback runs after the mapper reply and all LocationContext reads.
     void discoverProcessorModulePaths(std::function<void()> callback);
+    // Records the discovered processor modules and reads each module's
+    // LocationContext; callback runs once all of those reads finish.
+    void onProcessorModuleSubTree(std::function<void()> callback,
+                                  const boost::system::error_code& ec,
+                                  const MapperSubTree& subtree);
+    // Stores the LocationContext read for processor module idx at path.
+    void onModuleLocationContext(uint64_t idx, const std::string& path,
+                                 const boost::system::error_code& ec,
+                                 const std::variant<std::string>& value);
     void discoverPaths(std::function<void()> callback);
 };
 

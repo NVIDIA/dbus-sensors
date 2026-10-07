@@ -1221,3 +1221,23 @@ TEST_F(NvidiaInfoLiveTest, RecoveryProcessesMultipleFiles)
             << "module " << idx << " must survive recovery";
     }
 }
+
+TEST(DimmLocationContext, UsesModuleLocationContext)
+{
+    // VR-NVL72 HMC: the module sits in HGX_Chassis_0 while the system is
+    // HGX_Baseboard_0; DIMMs must match the CPUs on the module.
+    EXPECT_EQ(
+        nvi::dimmLocationContext(
+            "HGX_Chassis_0",
+            "/xyz/openbmc_project/inventory/system/system/HGX_Baseboard_0", 1),
+        "HGX_Chassis_0/ProcessorModule_1");
+}
+
+TEST(DimmLocationContext, FallsBackToMotherboardName)
+{
+    // MGX Vera C2: the module has no LocationContext.
+    EXPECT_EQ(nvi::dimmLocationContext(
+                  "", "/xyz/openbmc_project/inventory/system/board/Chassis_0",
+                  0),
+              "Chassis_0/ProcessorModule_0");
+}
