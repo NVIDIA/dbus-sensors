@@ -55,14 +55,13 @@ inline constexpr const char* processorModuleInterface =
     "xyz.openbmc_project.Inventory.Item.ProcessorModule";
 inline constexpr const char* locationContextInterface =
     "xyz.openbmc_project.Inventory.Decorator.LocationContext";
+inline constexpr const char* cpuInterface =
+    "xyz.openbmc_project.Inventory.Item.Cpu";
 
-// LocationContext for a DIMM on processor module moduleIdx, matching the
-// CPUs on the same module: "<parent>/ProcessorModule_<idx>". parent is the
-// module's own LocationContext (e.g. "HGX_Chassis_0"); when the module has
-// none, the motherboard object name is used (e.g. "Chassis_0").
-std::string dimmLocationContext(std::string_view moduleContext,
-                                std::string_view motherboardPath,
-                                uint64_t moduleIdx);
+// Inventory path of the CPU published for socket under inventoryPath. DIMMs
+// on that socket copy the LocationContext another service (Entity Manager)
+// publishes on this object.
+std::string cpuInventoryPath(std::string_view inventoryPath, uint64_t socket);
 
 // D-Bus service constants for the CreateInfo method
 inline constexpr const char* nvidiaInfoService =
@@ -117,8 +116,9 @@ class NvidiaInfo
     std::string persistedDir;
     std::string motherboardPath;
     std::map<uint64_t, std::string> processorModulePaths;
-    // LocationContext of each processor module; absent if it has none.
-    std::map<uint64_t, std::string> processorModuleContexts;
+    // LocationContext of each CPU inventory object (keyed by object path), as
+    // published by its other owner; absent if it has none.
+    std::map<std::string, std::string> cpuLocationContexts;
     std::map<std::string, TerminusInfo> terminusInfos;
     std::unique_ptr<sdbusplus::bus::match_t> interfaceAddedMatch;
 
@@ -176,18 +176,17 @@ class NvidiaInfo
     void onInterfacesAdded(sdbusplus::message_t& msg);
     void scheduleMotherboardDiscovery();
     void discoverMotherboardPath(std::function<void()> callback);
-    // Finds the ProcessorModule inventory objects and their LocationContext;
-    // callback runs after the mapper reply and all LocationContext reads.
     void discoverProcessorModulePaths(std::function<void()> callback);
-    // Records the discovered processor modules and reads each module's
-    // LocationContext; callback runs once all of those reads finish.
-    void onProcessorModuleSubTree(std::function<void()> callback,
-                                  const boost::system::error_code& ec,
-                                  const MapperSubTree& subtree);
-    // Stores the LocationContext read for processor module idx at path.
-    void onModuleLocationContext(uint64_t idx, const std::string& path,
-                                 const boost::system::error_code& ec,
-                                 const std::variant<std::string>& value);
+    // Reads the LocationContext of every CPU inventory object owned by
+    // another service; callback runs once all of those reads finish.
+    void discoverCpuLocationContexts(std::function<void()> callback);
+    void onCpuSubTree(std::function<void()> callback,
+                      const boost::system::error_code& ec,
+                      const MapperSubTree& subtree);
+    // Stores the LocationContext read for the CPU object at path.
+    void onCpuLocationContext(const std::string& path,
+                              const boost::system::error_code& ec,
+                              const std::variant<std::string>& value);
     void discoverPaths(std::function<void()> callback);
 };
 

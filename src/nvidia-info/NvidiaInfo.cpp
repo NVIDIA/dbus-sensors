@@ -76,16 +76,9 @@ constexpr uint32_t maxSocket = 255;
 
 } // namespace
 
-std::string dimmLocationContext(std::string_view moduleContext,
-                                std::string_view motherboardPath,
-                                uint64_t moduleIdx)
+std::string cpuInventoryPath(std::string_view inventoryPath, uint64_t socket)
 {
-    std::string parent(moduleContext);
-    if (parent.empty())
-    {
-        parent = std::filesystem::path(motherboardPath).filename().string();
-    }
-    return std::format("{}/ProcessorModule_{}", parent, moduleIdx);
+    return std::format("{}/cpu/CPU_{}", inventoryPath, socket);
 }
 
 NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
@@ -171,13 +164,18 @@ void NvidiaInfo::onInterfacesAdded(sdbusplus::message_t& msg)
         InterfacesAddedMap interfaces;
         msg.read(objPath, interfaces);
 
+        // A CPU's LocationContext appearing (Entity Manager) also counts.
+        const bool cpuContext =
+            interfaces.contains(locationContextInterface) &&
+            std::filesystem::path(objPath.str).parent_path().filename() ==
+                "cpu";
         if (!interfaces.contains(systemInterface) &&
-            !interfaces.contains(processorModuleInterface))
+            !interfaces.contains(processorModuleInterface) && !cpuContext)
         {
             return;
         }
 
-        lg2::info("System or processor module appeared at {P}, scheduling "
+        lg2::info("System, processor module or CPU appeared at {P}, scheduling "
                   "motherboard discovery after delay",
                   "P", std::string(objPath));
         scheduleMotherboardDiscovery();
@@ -218,18 +216,20 @@ void NvidiaInfo::attachAssociationsFor(const std::string& terminusName)
 
     if (!motherboardPath.empty())
     {
-        std::string locationContext;
-        if (moduleIt != processorModulePaths.end())
-        {
-            const auto ctxIt = processorModuleContexts.find(moduleIdx);
-            locationContext = dimmLocationContext(
-                ctxIt != processorModuleContexts.end() ? ctxIt->second : "",
-                motherboardPath, moduleIdx);
-        }
         for (auto& dimm : terminus.dimms)
         {
             dimm.attach(motherboardPath);
-            dimm.setLocationContext(locationContext);
+        }
+    }
+
+    // DIMMs share the LocationContext of the CPU on their socket.
+    const auto ctxIt = cpuLocationContexts.find(
+        cpuInventoryPath(inventoryPath, static_cast<uint64_t>(entry.socket)));
+    if (ctxIt != cpuLocationContexts.end())
+    {
+        for (auto& dimm : terminus.dimms)
+        {
+            dimm.setLocationContext(ctxIt->second);
         }
     }
 
@@ -248,7 +248,8 @@ void NvidiaInfo::attachAssociationsFor(const std::string& terminusName)
 
 void NvidiaInfo::attachAllAssociations()
 {
-    if (motherboardPath.empty() && processorModulePaths.empty())
+    if (motherboardPath.empty() && processorModulePaths.empty() &&
+        cpuLocationContexts.empty())
     {
         return;
     }
@@ -380,25 +381,74 @@ void NvidiaInfo::discoverProcessorModulePaths(std::function<void()> callback)
 {
     std::vector<std::string> ifaces = {processorModuleInterface};
 
+    bus->async_method_call(
+        [this,
+         cb = std::move(callback)](const boost::system::error_code& ec,
+                                   const std::vector<std::string>& paths) {
+            if (ec)
+            {
+                lg2::error("Failed to query processor module paths: {E}", "E",
+                           ec.message());
+                if (cb)
+                {
+                    cb();
+                }
+                return;
+            }
+
+            for (const auto& path : paths)
+            {
+                const auto pos = path.rfind('_');
+                if (pos == std::string::npos)
+                {
+                    continue;
+                }
+                const char* first = path.data() + pos + 1;
+                const char* last = path.data() + path.size();
+                uint64_t idx = 0;
+                auto [ptr, ec2] = std::from_chars(first, last, idx);
+                if (ec2 != std::errc{} || ptr != last)
+                {
+                    lg2::warning("Could not parse module index from path {P}",
+                                 "P", path);
+                    continue;
+                }
+                processorModulePaths[idx] = path;
+                lg2::info("Discovered processor module {I} at path: {P}", "I",
+                          idx, "P", path);
+            }
+
+            if (cb)
+            {
+                cb();
+            }
+        },
+        mapperBusName, mapperPath, mapperInterface, "GetSubTreePaths",
+        "/xyz/openbmc_project/inventory/", 0, ifaces);
+}
+
+void NvidiaInfo::discoverCpuLocationContexts(std::function<void()> callback)
+{
+    std::vector<std::string> ifaces = {cpuInterface};
+
     // sdbusplus deduces the reply types from the handler's signature, so
     // this needs a lambda with explicit parameters, not std::bind_front.
     bus->async_method_call(
         [this, cb = std::move(callback)](const boost::system::error_code& ec,
                                          const MapperSubTree& subtree) mutable {
-            onProcessorModuleSubTree(std::move(cb), ec, subtree);
+            onCpuSubTree(std::move(cb), ec, subtree);
         },
         mapperBusName, mapperPath, mapperInterface, "GetSubTree",
         "/xyz/openbmc_project/inventory/", 0, ifaces);
 }
 
-void NvidiaInfo::onProcessorModuleSubTree(std::function<void()> callback,
-                                          const boost::system::error_code& ec,
-                                          const MapperSubTree& subtree)
+void NvidiaInfo::onCpuSubTree(std::function<void()> callback,
+                              const boost::system::error_code& ec,
+                              const MapperSubTree& subtree)
 {
     if (ec)
     {
-        lg2::error("Failed to query processor module paths: {E}", "E",
-                   ec.message());
+        lg2::error("Failed to query CPU inventory: {E}", "E", ec.message());
         if (callback)
         {
             callback();
@@ -406,7 +456,7 @@ void NvidiaInfo::onProcessorModuleSubTree(std::function<void()> callback,
         return;
     }
 
-    // Run callback once every module's LocationContext read has finished.
+    // Run callback once every CPU's LocationContext read has finished.
     auto done = std::shared_ptr<void>(
         nullptr, [cb = std::move(callback)](void*) mutable {
             if (cb)
@@ -417,39 +467,21 @@ void NvidiaInfo::onProcessorModuleSubTree(std::function<void()> callback,
 
     for (const auto& [path, services] : subtree)
     {
-        const auto pos = path.rfind('_');
-        if (pos == std::string::npos)
-        {
-            continue;
-        }
-        const char* first = path.data() + pos + 1;
-        const char* last = path.data() + path.size();
-        uint64_t idx = 0;
-        auto [ptr, ec2] = std::from_chars(first, last, idx);
-        if (ec2 != std::errc{} || ptr != last)
-        {
-            lg2::warning("Could not parse module index from path {P}", "P",
-                         path);
-            continue;
-        }
-        processorModulePaths[idx] = path;
-        processorModuleContexts.erase(idx);
-        lg2::info("Discovered processor module {I} at path: {P}", "I", idx, "P",
-                  path);
-
         for (const auto& [service, interfaces] : services)
         {
-            if (std::find(interfaces.begin(), interfaces.end(),
+            // Our own CPU objects carry no LocationContext.
+            if (service == nvidiaInfoService ||
+                std::find(interfaces.begin(), interfaces.end(),
                           locationContextInterface) == interfaces.end())
             {
                 continue;
             }
             // done is held until the reply is handled; see above.
             bus->async_method_call(
-                [this, idx, path,
+                [this, path,
                  done](const boost::system::error_code& getEc,
                        const std::variant<std::string>& value) mutable {
-                    onModuleLocationContext(idx, path, getEc, value);
+                    onCpuLocationContext(path, getEc, value);
                     done.reset();
                 },
                 service, path, "org.freedesktop.DBus.Properties", "Get",
@@ -459,9 +491,9 @@ void NvidiaInfo::onProcessorModuleSubTree(std::function<void()> callback,
     }
 }
 
-void NvidiaInfo::onModuleLocationContext(uint64_t idx, const std::string& path,
-                                         const boost::system::error_code& ec,
-                                         const std::variant<std::string>& value)
+void NvidiaInfo::onCpuLocationContext(const std::string& path,
+                                      const boost::system::error_code& ec,
+                                      const std::variant<std::string>& value)
 {
     if (ec)
     {
@@ -469,13 +501,18 @@ void NvidiaInfo::onModuleLocationContext(uint64_t idx, const std::string& path,
                      "E", ec.message());
         return;
     }
-    processorModuleContexts[idx] = std::get<std::string>(value);
+    cpuLocationContexts[path] = std::get<std::string>(value);
+    lg2::info("CPU {P} LocationContext: {C}", "P", path, "C",
+              cpuLocationContexts[path]);
 }
 
 void NvidiaInfo::discoverPaths(std::function<void()> callback)
 {
-    auto afterMotherboard = [this, cb = std::move(callback)]() mutable {
-        discoverProcessorModulePaths(std::move(cb));
+    auto afterModules = [this, cb = std::move(callback)]() mutable {
+        discoverCpuLocationContexts(std::move(cb));
+    };
+    auto afterMotherboard = [this, next = std::move(afterModules)]() mutable {
+        discoverProcessorModulePaths(std::move(next));
     };
 
     if (motherboardPath.empty())
@@ -662,8 +699,7 @@ void NvidiaInfo::updateTerminusInfo(const std::string& terminusName,
         const uint64_t cpuIndex =
             static_cast<uint64_t>(stored.cpus[i].socketNum);
 
-        const std::string cpuPath =
-            std::format("{}/cpu/CPU_{}", inventoryPath, cpuIndex);
+        const std::string cpuPath = cpuInventoryPath(inventoryPath, cpuIndex);
         const std::string componentPath = std::format(
             "{}/component/{}CPU_{}", inventoryPath, hgxPrefix, cpuIndex);
         const std::string boardPath =
