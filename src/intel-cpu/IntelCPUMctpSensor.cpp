@@ -706,6 +706,18 @@ void IntelCPUMctpSensor::handleDiscoverResponse(
     advanceDiscovery(domainId, chanRank);
 }
 
+// Any prefix on the configured sensor name (e.g. "ProcessorModule_0_" for
+// "ProcessorModule_0_CPU_0") is carried over to the DIMM sensor names.
+std::string IntelCPUMctpSensor::dimmPrefix() const
+{
+    const std::string cpuSuffix = "CPU_" + std::to_string(cpuId);
+    if (baseName.size() > cpuSuffix.size() && baseName.ends_with(cpuSuffix))
+    {
+        return baseName.substr(0, baseName.size() - cpuSuffix.size());
+    }
+    return "";
+}
+
 void IntelCPUMctpSensor::createDimmSensors()
 {
     // An empty sweep means memory training isn't done yet, not that the board
@@ -725,7 +737,8 @@ void IntelCPUMctpSensor::createDimmSensors()
 
     for (auto& dimm : dimms)
     {
-        std::string dimmName = "CPU" + std::to_string(cpuId) + "_D" +
+        std::string dimmName = dimmPrefix() + "CPU" + std::to_string(cpuId) +
+                               "_D" +
                                std::to_string(dimm.domainId) + "_CH" +
                                std::to_string(dimm.chanRank) + "_DIMM" +
                                std::to_string(dimm.dimmOrder) + "_Temp";

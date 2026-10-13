@@ -174,6 +174,7 @@ class IntelCPUMctpSensor :
                                 const std::error_code& ec,
                                 std::span<const uint8_t> buffer);
     void advanceDiscovery(uint8_t domainId, uint8_t chanRank);
+    std::string dimmPrefix() const;
     void createDimmSensors();
     void pollDimmTemps(size_t keyIdx);
     void handleDimmTempResponse(size_t keyIdx, const std::error_code& ec,
