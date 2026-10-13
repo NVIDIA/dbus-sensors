@@ -1,5 +1,6 @@
 #pragma once
 
+#include "IstRecovery.hpp"
 #include "MCTPDeviceRepository.hpp"
 #include "MCTPEndpoint.hpp"
 #include "USBRecovery.hpp"
@@ -88,8 +89,10 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
     MCTPReactor(MCTPReactor&&) = delete;
     explicit MCTPReactor(AssociationServer& server,
                          std::unique_ptr<USBRecovery> usbRecovery =
-                             std::make_unique<LibusbUSBRecovery>()) :
-        server(server), usbRecovery(std::move(usbRecovery))
+                             std::make_unique<LibusbUSBRecovery>(),
+                         std::unique_ptr<IstRecovery> istRecovery = nullptr) :
+        server(server), usbRecovery(std::move(usbRecovery)),
+        istRecovery(std::move(istRecovery))
     {}
     ~MCTPReactor() = default;
     MCTPReactor& operator=(const MCTPReactor&) = delete;
@@ -130,6 +133,7 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
 
     void deferSetup(const std::shared_ptr<MCTPDevice>& dev);
     void trackUsbSetupFailure(const std::shared_ptr<MCTPDevice>& dev);
+    bool suppressRecoveryForIst(const std::string& interface);
     void clearUsbSetupFailureTracking(const std::shared_ptr<MCTPDevice>& dev);
     void setupEndpoint(const std::shared_ptr<MCTPDevice>& dev);
     void trackEndpoint(const std::shared_ptr<MCTPEndpoint>& ep);
@@ -141,4 +145,6 @@ class MCTPReactor : public std::enable_shared_from_this<MCTPReactor>
                             std::function<void()>&& removed);
     bool autoUSBRecoveryEnabled = true;
     std::unique_ptr<USBRecovery> usbRecovery;
+
+    std::unique_ptr<IstRecovery> istRecovery;
 };

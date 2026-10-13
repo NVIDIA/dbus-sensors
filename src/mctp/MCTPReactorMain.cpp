@@ -1,9 +1,11 @@
+#include "IstRecovery.hpp"
 #include "MCTPBridgePoolDevice.hpp"
 #include "MCTPCustomDevices.hpp"
 #include "MCTPDefinitions.hpp"
 #include "MCTPEndpoint.hpp"
 #include "MCTPEndpointUtils.hpp"
 #include "MCTPReactor.hpp"
+#include "USBRecovery.hpp"
 #include "Utils.hpp"
 
 #include <sys/utsname.h>
@@ -37,6 +39,7 @@
 #include <string>
 #include <system_error>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 extern std::set<uint8_t> suppressedHealthCheckEids;
@@ -318,27 +321,17 @@ static void handleApplicationTimeout(
     const std::shared_ptr<MCTPReactor>& reactor,
     const TransportErrorInfo& error)
 {
-    if (mctpCommandTable.contains(error.commandCode))
-    {
-        std::string errorMessage =
-            mctpCommandTable.at(error.commandCode).timeoutErrorMessage;
-        std::string logMessage =
-            mctpCommandTable.at(error.commandCode).logMessage;
+    // Timeouts of the discovery commands do not get here: mctpd reports
+    // them through DiscoveryCommandFailed, and EndpointPing timeouts are
+    // logged by the device health check. No Redfish event is defined for
+    // the remaining control commands, so only leave a trace in the journal.
+    auto deviceNameOpt = reactor->getDeviceName(error.destEid);
+    std::string deviceName =
+        deviceNameOpt.value_or("EID_" + std::to_string(error.destEid));
 
-        debug("{MSG} {EID}", "MSG", logMessage, "EID", error.destEid);
-
-        auto deviceNameOpt = reactor->getDeviceName(error.destEid);
-        std::string deviceName =
-            deviceNameOpt.value_or("EID_" + std::to_string(error.destEid));
-
-        logMCTPError(deviceName, error.destEid, error.errorCode, errorMessage);
-    }
-    else
-    {
-        warning(
-            "MCTP communication timeout on EID {EID} for unknown command code {CODE}",
-            "EID", error.destEid, "CODE", error.commandCode);
-    }
+    warning(
+        "MCTP control command {CODE} timed out on {DEVICE} (EID {EID}); no Redfish event is defined for this command",
+        "CODE", error.commandCode, "DEVICE", deviceName, "EID", error.destEid);
 }
 
 static void handleTransportError(const std::shared_ptr<MCTPReactor>& reactor,
@@ -466,6 +459,84 @@ static void handleGeneralErrorSignal(
                        generalError.errorMessage, generalError.resolution);
 }
 
+// Resolve the device a DiscoveryCommandFailed report belongs to. mctpd reports
+// the null EID (0) when the endpoint had no EID yet, so adopt the interface's
+// configured EID then; when the EID is not a known device (for example a
+// dynamically assigned EID), the interface still identifies the device.
+static std::string resolveDiscoveryFailureDevice(
+    const std::shared_ptr<MCTPReactor>& reactor,
+    DiscoveryCommandFailedInfo& failure)
+{
+    if (failure.eid == 0)
+    {
+        auto staticEid = reactor->getStaticEidFromInterface(failure.interface);
+        if (staticEid)
+        {
+            failure.eid = *staticEid;
+        }
+    }
+
+    auto deviceName = reactor->getDeviceName(failure.eid);
+    if (!deviceName)
+    {
+        auto staticEid = reactor->getStaticEidFromInterface(failure.interface);
+        if (staticEid)
+        {
+            deviceName = reactor->getDeviceName(*staticEid);
+        }
+    }
+
+    return deviceName.value_or("EID_" + std::to_string(failure.eid));
+}
+
+// Render a DiscoveryCommandFailed report as an MCTPDiscoveryCommandFailed
+// event. Returns false when the report was suppressed instead.
+static bool handleDiscoveryCommandFailed(
+    const std::shared_ptr<MCTPReactor>& reactor,
+    DiscoveryCommandFailedInfo failure)
+{
+    std::string deviceName = resolveDiscoveryFailureDevice(reactor, failure);
+
+    // Same policy as TransportError: stay quiet for an EID whose health-check
+    // pings are being suppressed ...
+    if (suppressedHealthCheckEids.contains(failure.eid))
+    {
+        return false;
+    }
+
+    // ... and while the reactor is retrying the device's setup, since the
+    // first failure has already been reported.
+    if (reactor->isRetrying(failure.eid))
+    {
+        return false;
+    }
+
+    createMctpDiscoveryFailureRedfishEvent(failure, deviceName);
+    return true;
+}
+
+static void handleDiscoveryCommandFailedSignal(
+    const std::shared_ptr<MCTPReactor>& reactor, sdbusplus::message_t& msg)
+{
+    DiscoveryCommandFailedInfo failure;
+
+    try
+    {
+        msg.read(failure.commandCode, failure.command, failure.eid,
+                 failure.kind, failure.code, failure.reason, failure.interface);
+    }
+    catch (const sdbusplus::exception_t& e)
+    {
+        // Only a malformed or unreadable D-Bus payload is tolerated here;
+        // anything else is unexpected and must propagate.
+        error("Ignoring malformed DiscoveryCommandFailed signal: {ERROR}",
+              "ERROR", e.what());
+        return;
+    }
+
+    handleDiscoveryCommandFailed(reactor, std::move(failure));
+}
+
 constexpr const char* mctpReactorDebugPath =
     "/xyz/openbmc_project/mctp_reactor/debug";
 constexpr const char* mctpReactorDebugInterface =
@@ -491,7 +562,9 @@ int main()
     boost::asio::io_context io;
     auto systemBus = std::make_shared<sdbusplus::asio::connection>(io);
     DBusAssociationServer associationServer(systemBus);
-    auto reactor = std::make_shared<MCTPReactor>(associationServer);
+    auto reactor = std::make_shared<MCTPReactor>(
+        associationServer, std::make_unique<LibusbUSBRecovery>(),
+        std::make_unique<DBusIstRecovery>(systemBus));
     sdbusplus::asio::object_server debugObjectServer(systemBus);
     debugObjectServer.add_manager(mctpReactorDebugPath);
     auto debugInterface = debugObjectServer.add_interface(
@@ -610,6 +683,16 @@ int main()
         static_cast<sdbusplus::bus_t&>(*systemBus), generalErrorMatchSpec,
         std::bind_front(handleGeneralErrorSignal, systemBus, reactor));
     info("GeneralError signal match registered");
+
+    const std::string discoveryCommandFailedMatchSpec =
+        rules::type::signal() + rules::sender(mctpdBusName) +
+        rules::interface("au.com.codeconstruct.MCTP.BusOwner1") +
+        rules::member("DiscoveryCommandFailed");
+
+    auto discoveryCommandFailedMatch = sdbusplus::bus::match_t(
+        static_cast<sdbusplus::bus_t&>(*systemBus),
+        discoveryCommandFailedMatchSpec,
+        std::bind_front(handleDiscoveryCommandFailedSignal, reactor));
 
     const std::string mctpdEndpointIfaceAddedSpec =
         rules::sender(mctpdBusName) +

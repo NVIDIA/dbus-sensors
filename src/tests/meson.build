@@ -286,6 +286,7 @@ if get_option('mctp').allowed()
             'test_MCTPReactorMain.cpp',
             '../mctp/MCTPReactor.cpp',
             '../mctp/USBRecovery.cpp',
+            '../mctp/IstRecovery.cpp',
             '../mctp/MCTPEndpoint.cpp',
             '../mctp/MCTPEndpointUtils.cpp',
             '../mctp/MCTPCustomDevices.cpp',
@@ -298,6 +299,23 @@ if get_option('mctp').allowed()
             ],
             link_args: custom_devices_wrap_link_args,
             dependencies: [gmock_dep, ut_deps_list, utils_dep, libusb_dep],
+            implicit_include_directories: false,
+            include_directories: '../mctp',
+            override_options: coverage_test_override_options,
+        ),
+    )
+
+    test(
+        'IstRecovery',
+        executable(
+            'test_IstRecovery',
+            'test_IstRecovery.cpp',
+            '../mctp/IstRecovery.cpp',
+            'phosphor_logging_drain.cpp',
+            cpp_args: subobject_linkage_disable_args + boost_asio_test_backend_args + [
+                '-fno-access-control',
+            ],
+            dependencies: [ut_deps_list, utils_dep],
             implicit_include_directories: false,
             include_directories: '../mctp',
             override_options: coverage_test_override_options,

@@ -112,6 +112,10 @@
         "Memory": {
             "type": "object",
             "properties": {
+                "Present": {
+                    "description": "Whether the memory device is present.",
+                    "type": "boolean"
+                },
                 "MemoryTotalWidth": {
                     "description": "Total width of the memory device in bits (must be > 0)",
                     "type": "integer",
@@ -215,21 +219,8 @@
                 }
             },
             "required": [
-                "MemoryTotalWidth",
-                "MemoryDataWidth",
-                "MemorySizeKB",
-                "FormFactor",
+                "Present",
                 "MemoryDeviceLocator",
-                "MemoryType",
-                "MaxMemorySpeedInMHz",
-                "Manufacturer",
-                "SerialNumber",
-                "SKU",
-                "PartNumber",
-                "MemoryConfiguredSpeedInMhz",
-                "Model",
-                "ECC",
-                "MemoryMedia",
                 "ProcessorModuleIndex"
             ]
         },

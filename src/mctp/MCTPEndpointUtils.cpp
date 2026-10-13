@@ -86,11 +86,21 @@ std::vector<std::string> getDeviceNames(const SensorBaseConfigMap& iface)
     return names;
 }
 
+// Name to report for a device: its configured name, or EID_<eid> when the
+// device has no name (unknown or not yet discovered endpoint).
+static std::string deviceNameOrEid(const std::string& deviceName, uint8_t eid)
+{
+    if (!deviceName.empty())
+    {
+        return deviceName;
+    }
+    return "EID_" + std::to_string(eid);
+}
+
 void logMCTPError(const std::string& deviceName, uint8_t destEid, int errorCode,
                   const std::string& errorMessage)
 {
-    std::string name =
-        deviceName.empty() ? ("EID_" + std::to_string(destEid)) : deviceName;
+    std::string name = deviceNameOrEid(deviceName, destEid);
 
     std::string resolution =
         "If problem persists, perform power cycle of the system to recover the device.";
@@ -105,6 +115,32 @@ void logMCTPError(const std::string& deviceName, uint8_t destEid, int errorCode,
         {"DEVICE_NAME", name}};
 
     CommitDeviceError(destEid, errorCode, ErrorClass::MCTP, additionalData);
+}
+
+using MctpEventTimestamps =
+    std::map<uint8_t, std::vector<std::chrono::steady_clock::time_point>>;
+
+// Allow up to 3 events per 60 seconds for the same EID. Records the event
+// when it is allowed. now is injectable for tests.
+static bool mctpEventRateLimited(MctpEventTimestamps& timestampsByEid,
+                                 uint8_t eid,
+                                 std::chrono::steady_clock::time_point now =
+                                     std::chrono::steady_clock::now())
+{
+    auto& timestamps = timestampsByEid[eid];
+
+    // Remove timestamps older than 60 seconds
+    std::erase_if(timestamps, [now](const auto& t) {
+        return std::chrono::duration_cast<std::chrono::seconds>(now - t)
+                   .count() >= 60;
+    });
+
+    if (timestamps.size() >= 3)
+    {
+        return true;
+    }
+    timestamps.push_back(now);
+    return false;
 }
 
 void createMctpTransportRedfishEvent(
@@ -136,29 +172,15 @@ void createMctpTransportRedfishEvent(
         errorCode, mctpDirection, mctpBinding, destEid, driverOperation);
 
     // Rate limiting: Allow up to 3 logs per 60 seconds for the same EID
-    static std::map<uint8_t, std::vector<std::chrono::steady_clock::time_point>>
-        errorTimestamps;
-    auto now = std::chrono::steady_clock::now();
-    auto& timestamps = errorTimestamps[destEid];
-
-    // Remove timestamps older than 60 seconds
-    std::erase_if(timestamps, [now](const auto& t) {
-        return std::chrono::duration_cast<std::chrono::seconds>(now - t)
-                   .count() >= 60;
-    });
-
-    // Check if we've reached the limit
-    if (timestamps.size() >= 3)
+    static MctpEventTimestamps errorTimestamps;
+    if (mctpEventRateLimited(errorTimestamps, destEid))
     {
         return; // Suppress log (rate limit exceeded)
     }
-    timestamps.push_back(now);
 
     if (registry)
     {
-        std::string name = deviceName.empty()
-                               ? ("EID_" + std::to_string(destEid))
-                               : deviceName;
+        std::string name = deviceNameOrEid(deviceName, destEid);
 
         // Build additional data map for Redfish event
         std::map<std::string, std::string> additionalData;
@@ -208,6 +230,40 @@ void createMctpTransportRedfishEvent(
         warning("No Redfish registry mapping for MCTP error {ERROR}", "ERROR",
                 errorCode);
     }
+}
+
+void createMctpDiscoveryFailureRedfishEvent(
+    const DiscoveryCommandFailedInfo& failure, const std::string& deviceName)
+{
+    std::string name = deviceNameOrEid(deviceName, failure.eid);
+
+    // Rate limiting: Allow up to 3 logs per 60 seconds for the same EID
+    static MctpEventTimestamps failureTimestamps;
+    if (mctpEventRateLimited(failureTimestamps, failure.eid))
+    {
+        return;
+    }
+
+    // MCTPDiscoveryCommandFailed arguments: command, EID, reason
+    std::string args = failure.command;
+    args += ", ";
+    args += std::to_string(failure.eid);
+    args += ", ";
+    args += failure.reason;
+
+    std::map<std::string, std::string> additionalData;
+    additionalData["REDFISH_MESSAGE_ID"] = mctpDiscoveryCommandFailedMessageId;
+    additionalData["REDFISH_MESSAGE_ARGS"] = args;
+    additionalData["REDFISH_RESOLUTION"] = mctpDiscoveryCommandFailedResolution;
+    additionalData["REDFISH_SEVERITY"] =
+        "xyz.openbmc_project.Logging.Entry.Level.Critical";
+    additionalData["REDFISH_ORIGIN_OF_CONDITION"] = name;
+    additionalData["DEVICE_NAME"] = name;
+
+    // As for transport errors, the signal's code (errno, or the MCTP
+    // completion code) is the device error code.
+    CommitDeviceError(failure.eid, failure.code, ErrorClass::MCTP,
+                      additionalData);
 }
 
 // Helper function to write a value to a sysfs file

@@ -6,6 +6,7 @@
 #include <sdbusplus/asio/connection.hpp>
 
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -1563,4 +1564,135 @@ TEST_F(InjectedMctpRegistryTest, MissingRegistryTakesFallbackPath)
     EXPECT_EQ(phosphor::logging::mctp::test::registryCalls, 1U);
     EXPECT_EQ(nv::lg2::test::commitCalls, 0U);
     EXPECT_TRUE(nv::lg2::test::committedAdditionalData.empty());
+}
+
+// ---- MCTPDiscoveryCommandFailed events (mctpd DiscoveryCommandFailed) ----
+
+class DiscoveryFailureEventTest : public ::testing::Test
+{
+  protected:
+    void SetUp() override
+    {
+        reset();
+    }
+
+    void TearDown() override
+    {
+        reset();
+    }
+
+    static void reset()
+    {
+        nv::lg2::test::commitCalls = 0;
+        nv::lg2::test::committedEid = 0;
+        nv::lg2::test::committedErrorCode = 0;
+        nv::lg2::test::committedAdditionalData.clear();
+    }
+
+    // A Set Endpoint ID response timeout, as mctpd reports it
+    static DiscoveryCommandFailedInfo timeoutFailure(uint8_t eid)
+    {
+        DiscoveryCommandFailedInfo failure{};
+        failure.commandCode = MCTP_CTRL_CMD_SET_ENDPOINT_ID;
+        failure.command = "SetEndpointID";
+        failure.eid = eid;
+        failure.kind = MCTP_DISCOVERY_FAIL_RESPONSE_TIMEOUT;
+        failure.code = ETIMEDOUT;
+        failure.reason = "no response received before timeout";
+        failure.interface = "mctpi2c0";
+        return failure;
+    }
+};
+
+// Distinct EIDs per test: the per-EID rate limit is process-wide state.
+TEST_F(DiscoveryFailureEventTest, TimeoutRendersDocumentedMessageShape)
+{
+    createMctpDiscoveryFailureRedfishEvent(timeoutFailure(0xd0), "HGX_GPU_0");
+
+    ASSERT_EQ(nv::lg2::test::commitCalls, 1U);
+    EXPECT_EQ(nv::lg2::test::committedEid, 0xd0);
+    EXPECT_EQ(nv::lg2::test::committedErrorCode,
+              static_cast<uint32_t>(ETIMEDOUT));
+    const auto& data = nv::lg2::test::committedAdditionalData;
+    EXPECT_EQ(data.at("REDFISH_MESSAGE_ID"),
+              "NvidiaResourceEvent.1.0.MCTPDiscoveryCommandFailed");
+    EXPECT_EQ(data.at("REDFISH_MESSAGE_ARGS"),
+              "SetEndpointID, 208, no response received before timeout");
+    EXPECT_EQ(
+        data.at("REDFISH_RESOLUTION"),
+        "Collect the BMC logs, power-cycle the baseboard, then retry the firmware update. If the issue persists, contact support.");
+    EXPECT_EQ(data.at("REDFISH_SEVERITY"),
+              "xyz.openbmc_project.Logging.Entry.Level.Critical");
+    EXPECT_EQ(data.at("REDFISH_ORIGIN_OF_CONDITION"), "HGX_GPU_0");
+    EXPECT_EQ(data.at("DEVICE_NAME"), "HGX_GPU_0");
+}
+
+TEST_F(DiscoveryFailureEventTest, CompletionCodeFailureUsesCodeAndReason)
+{
+    auto failure = timeoutFailure(0xd1);
+    failure.kind = MCTP_DISCOVERY_FAIL_COMPLETION_CODE;
+    failure.code = 0x04;
+    failure.reason =
+        "device is not ready (MCTP_CONTROL_MSG_STATUS_ERROR_NOT_READY (0x04))";
+
+    createMctpDiscoveryFailureRedfishEvent(failure, "HGX_GPU_1");
+
+    ASSERT_EQ(nv::lg2::test::commitCalls, 1U);
+    EXPECT_EQ(nv::lg2::test::committedEid, 0xd1);
+    EXPECT_EQ(nv::lg2::test::committedErrorCode, 0x04U);
+    EXPECT_EQ(
+        nv::lg2::test::committedAdditionalData.at("REDFISH_MESSAGE_ARGS"),
+        "SetEndpointID, 209, device is not ready (MCTP_CONTROL_MSG_STATUS_ERROR_NOT_READY (0x04))");
+}
+
+TEST_F(DiscoveryFailureEventTest, EmptyDeviceNameFallsBackToEid)
+{
+    createMctpDiscoveryFailureRedfishEvent(timeoutFailure(0xd2), "");
+
+    ASSERT_EQ(nv::lg2::test::commitCalls, 1U);
+    const auto& data = nv::lg2::test::committedAdditionalData;
+    EXPECT_EQ(data.at("REDFISH_ORIGIN_OF_CONDITION"), "EID_210");
+    EXPECT_EQ(data.at("DEVICE_NAME"), "EID_210");
+    // The EID argument itself does not depend on the name fallback
+    EXPECT_EQ(data.at("REDFISH_MESSAGE_ARGS"),
+              "SetEndpointID, 210, no response received before timeout");
+}
+
+// The limiter window: entries older than 60 s are forgotten, the fourth
+// event inside the window is limited, and a pruned window frees budget.
+TEST(MCTPEndpointUtils, mctpEventRateLimitedPrunesExpiredTimestamps)
+{
+    using namespace std::chrono_literals;
+    MctpEventTimestamps timestamps;
+    const auto now = std::chrono::steady_clock::now();
+
+    // Two stale and one fresh entry: the stale ones are pruned, the fresh
+    // one plus this event make two, so the event is allowed.
+    timestamps[0x41] = {now - 61s, now - 120s, now - 10s};
+    EXPECT_FALSE(mctpEventRateLimited(timestamps, 0x41, now));
+    EXPECT_EQ(timestamps[0x41].size(), 2U);
+
+    // Third event in the window is allowed, the fourth is limited and not
+    // recorded.
+    EXPECT_FALSE(mctpEventRateLimited(timestamps, 0x41, now));
+    EXPECT_TRUE(mctpEventRateLimited(timestamps, 0x41, now));
+    EXPECT_EQ(timestamps[0x41].size(), 3U);
+
+    // Once the window has moved on, the budget is back.
+    EXPECT_FALSE(mctpEventRateLimited(timestamps, 0x41, now + 61s));
+    EXPECT_EQ(timestamps[0x41].size(), 1U);
+}
+
+TEST_F(DiscoveryFailureEventTest, RateLimitedPerEid)
+{
+    for (int i = 0; i < 4; i++)
+    {
+        createMctpDiscoveryFailureRedfishEvent(timeoutFailure(0xd3),
+                                               "HGX_GPU_3");
+    }
+    EXPECT_EQ(nv::lg2::test::commitCalls, 3U);
+
+    // Another EID has its own budget
+    createMctpDiscoveryFailureRedfishEvent(timeoutFailure(0xd4), "HGX_GPU_4");
+    EXPECT_EQ(nv::lg2::test::commitCalls, 4U);
 }

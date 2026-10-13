@@ -158,12 +158,13 @@ void NvidiaInfo::onInterfacesAdded(sdbusplus::message_t& msg)
         InterfacesAddedMap interfaces;
         msg.read(objPath, interfaces);
 
-        if (interfaces.find(systemInterface) == interfaces.end())
+        if (!interfaces.contains(systemInterface) &&
+            !interfaces.contains(processorModuleInterface))
         {
             return;
         }
 
-        lg2::info("System interface appeared at {P}, scheduling "
+        lg2::info("System or processor module appeared at {P}, scheduling "
                   "motherboard discovery after delay",
                   "P", std::string(objPath));
         scheduleMotherboardDiscovery();
@@ -200,17 +201,27 @@ void NvidiaInfo::attachAssociationsFor(const std::string& terminusName)
     auto& entry = it->second;
     auto& terminus = entry.terminus;
     const auto moduleIdx = static_cast<uint64_t>(entry.moduleIndex);
+    const auto moduleIt = processorModulePaths.find(moduleIdx);
 
     if (!motherboardPath.empty())
     {
+        std::string locationContext;
+        if (moduleIt != processorModulePaths.end())
+        {
+            const std::string chassisName =
+                std::filesystem::path(motherboardPath).filename().string();
+            const std::string moduleName =
+                std::filesystem::path(moduleIt->second).filename().string();
+            locationContext = std::format("{}/{}", chassisName, moduleName);
+        }
         for (auto& dimm : terminus.dimms)
         {
             dimm.attach(motherboardPath);
+            dimm.setLocationContext(locationContext);
         }
     }
 
-    if (auto modIt = processorModulePaths.find(moduleIdx);
-        modIt != processorModulePaths.end())
+    if (moduleIt != processorModulePaths.end())
     {
         for (auto& slot : terminus.pcieSlots)
         {
@@ -218,7 +229,7 @@ void NvidiaInfo::attachAssociationsFor(const std::string& terminusName)
             {
                 continue;
             }
-            slot.attach(modIt->second);
+            slot.attach(moduleIt->second);
         }
     }
 }
@@ -406,14 +417,7 @@ void NvidiaInfo::discoverProcessorModulePaths(std::function<void()> callback)
 void NvidiaInfo::discoverPaths(std::function<void()> callback)
 {
     auto afterMotherboard = [this, cb = std::move(callback)]() mutable {
-        if (processorModulePaths.empty())
-        {
-            discoverProcessorModulePaths(std::move(cb));
-        }
-        else if (cb)
-        {
-            cb();
-        }
+        discoverProcessorModulePaths(std::move(cb));
     };
 
     if (motherboardPath.empty())

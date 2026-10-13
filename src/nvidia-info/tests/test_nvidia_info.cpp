@@ -50,6 +50,7 @@
 #include <ios>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -84,6 +85,7 @@ Json validBase()
                            {"SKU", "VERA-000"}}})},
         {"Memory",
          Json::array({Json{
+             {"Present", true},
              {"MemoryTotalWidth", 144},
              {"MemoryDataWidth", 128},
              {"MemorySizeKB", 26843545},
@@ -301,22 +303,9 @@ TEST(SchemaGate, RejectsMissingPerSectionRequired)
         Case{"Processor", "Model"},
         Case{"Processor", "ModelRevision"},
         Case{"Processor", "SKU"},
-        // Memory: 16 required fields.
-        Case{"Memory", "MemoryTotalWidth"},
-        Case{"Memory", "MemoryDataWidth"},
-        Case{"Memory", "MemorySizeKB"},
-        Case{"Memory", "FormFactor"},
+        // Memory: 3 required fields.
+        Case{"Memory", "Present"},
         Case{"Memory", "MemoryDeviceLocator"},
-        Case{"Memory", "MemoryType"},
-        Case{"Memory", "MaxMemorySpeedInMHz"},
-        Case{"Memory", "Manufacturer"},
-        Case{"Memory", "SerialNumber"},
-        Case{"Memory", "SKU"},
-        Case{"Memory", "PartNumber"},
-        Case{"Memory", "MemoryConfiguredSpeedInMhz"},
-        Case{"Memory", "Model"},
-        Case{"Memory", "ECC"},
-        Case{"Memory", "MemoryMedia"},
         Case{"Memory", "ProcessorModuleIndex"},
         // PCIeSlots: 13 required fields.
         Case{"PCIeSlots", "Present"},
@@ -519,37 +508,35 @@ TEST(NvidiaCpu, FromJsonBindsAllRequiredFields)
 
 TEST(NvidiaDimm, FromJsonHonorsOptionals)
 {
-    // Strip every optional field that has a j.value(...) default and
-    // confirm it falls back without throwing.
-    Json j = validBase()["Memory"][0];
-    j.erase("MemorySizeKB");
-    j.erase("MemoryDataWidth");
-    j.erase("MemoryTotalWidth");
-    j.erase("MaxMemorySpeedInMHz");
-    j.erase("MemoryConfiguredSpeedInMhz");
-    j.erase("ECC");
-    j.erase("Model");
-    j.erase("PartNumber");
-    j.erase("SerialNumber");
-    j.erase("SKU");
-
+    // Missing optional fields clear previously supplied values.
     nvi::NvidiaDimm d;
+    nvi::from_json(validBase()["Memory"][0], d);
+    Json j{{"Present", false},
+           {"MemoryDeviceLocator", "LP5x_16"},
+           {"ProcessorModuleIndex", 1}};
     nvi::from_json(j, d);
-    EXPECT_EQ(d.sizeKB, 0U);
-    EXPECT_EQ(d.dataWidth, 0);
-    EXPECT_EQ(d.totalWidth, 0);
-    EXPECT_EQ(d.maxSpeed, 0);
-    EXPECT_EQ(d.configSpeed, 0);
-    EXPECT_FALSE(d.ecc);
-    EXPECT_TRUE(d.model.empty());
-    EXPECT_TRUE(d.partNumber.empty());
-    EXPECT_TRUE(d.serialNumber.empty());
-    EXPECT_TRUE(d.sku.empty());
-    // Required field round-trip.
+    EXPECT_EQ(d.sizeKB, std::nullopt);
+    EXPECT_EQ(d.dataWidth, std::nullopt);
+    EXPECT_EQ(d.totalWidth, std::nullopt);
+    EXPECT_EQ(d.maxSpeed, std::nullopt);
+    EXPECT_EQ(d.configSpeed, std::nullopt);
+    EXPECT_EQ(d.memoryType, std::nullopt);
+    EXPECT_EQ(d.formFactor, std::nullopt);
+    EXPECT_EQ(d.ecc, std::nullopt);
+    EXPECT_EQ(d.manufacturer, std::nullopt);
+    EXPECT_EQ(d.model, std::nullopt);
+    EXPECT_EQ(d.partNumber, std::nullopt);
+    EXPECT_EQ(d.serialNumber, std::nullopt);
+    EXPECT_EQ(d.sku, std::nullopt);
+    EXPECT_EQ(d.memoryMedia, std::nullopt);
+    EXPECT_FALSE(d.present);
     EXPECT_EQ(d.locator, "LP5x_16");
-    EXPECT_EQ(d.memoryType, nvi::MemoryType::LPDDR5_SDRAM);
-    EXPECT_EQ(d.memoryMedia, nvi::MemoryMedia::DRAM);
-    EXPECT_EQ(d.formFactor, nvi::FormFactor::SOCAMM);
+    j["ECC"] = false;
+    nvi::from_json(j, d);
+    EXPECT_EQ(d.ecc, false);
+    j.erase("ECC");
+    nvi::from_json(j, d);
+    EXPECT_EQ(d.ecc, std::nullopt);
 }
 
 TEST(NvidiaDimm, FromJsonRequiresLocator)
@@ -576,7 +563,7 @@ TEST(NvidiaDimm, FromJsonBindsAllFields)
     EXPECT_EQ(d.configSpeed, 7500);
     EXPECT_EQ(d.memoryType, nvi::MemoryType::LPDDR5_SDRAM);
     EXPECT_EQ(d.formFactor, nvi::FormFactor::SOCAMM);
-    EXPECT_TRUE(d.ecc);
+    EXPECT_EQ(d.ecc, true);
     EXPECT_EQ(d.manufacturer, "SAMSUNG");
     EXPECT_EQ(d.model, "LPDDR5-7500");
     EXPECT_EQ(d.partNumber, "PN-MEM-1");

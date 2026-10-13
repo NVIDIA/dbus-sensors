@@ -25,8 +25,7 @@ namespace info
 
 using Json = nlohmann::json;
 
-// DIMM form factors. Unknown is the NLOHMANN_JSON_SERIALIZE_ENUM fallback;
-// the schema's enum allow-list rejects it.
+// DIMM form factors.
 enum class FormFactor
 {
     Unknown,
@@ -64,7 +63,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
         {FormFactor::SOCAMM, "SOCAMM"},
     })
 
-// DIMM DeviceType values; Unknown is the schema-rejected fallback.
+// DIMM DeviceType values.
 enum class MemoryType
 {
     Unknown,

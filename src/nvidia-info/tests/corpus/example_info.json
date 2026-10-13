@@ -17,6 +17,7 @@
   ],
   "Memory": [
     {
+      "Present": true,
       "MemoryTotalWidth": 144,
       "MemoryDataWidth": 128,
       "MemorySizeKB": 26843545,
@@ -35,6 +36,7 @@
       "ProcessorModuleIndex": 1
     },
     {
+      "Present": true,
       "MemoryTotalWidth": 144,
       "MemoryDataWidth": 128,
       "MemorySizeKB": 26843545,

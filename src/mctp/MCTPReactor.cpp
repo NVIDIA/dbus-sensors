@@ -92,6 +92,11 @@ void MCTPReactor::trackUsbSetupFailure(const std::shared_ptr<MCTPDevice>& dev)
         return;
     }
 
+    if (suppressRecoveryForIst(usbDevice->getInterface()))
+    {
+        return;
+    }
+
     std::string recoveryStatus;
     if (usbRecovery && usbRecovery->clearBulkOutHalt(usbDevice->getInterface(),
                                                      recoveryStatus))
@@ -107,6 +112,24 @@ void MCTPReactor::trackUsbSetupFailure(const std::shared_ptr<MCTPDevice>& dev)
         "USB recovery failed for interface {USB_INTERFACE} after setup failures: {RECOVERY_STATUS}",
         "USB_INTERFACE", usbDevice->getInterface(), "RECOVERY_STATUS",
         recoveryStatus);
+}
+
+bool MCTPReactor::suppressRecoveryForIst(const std::string& interface)
+{
+    if (!istRecovery || !istRecovery->isIstInProgress())
+    {
+        return false;
+    }
+
+    info(
+        "IST is in progress; not issuing a clear-halt for interface {USB_INTERFACE}",
+        "USB_INTERFACE", interface);
+
+    // Asynchronous, so it lands in time for the next threshold rather than
+    // the decision just made. Without it a service that announced a run and
+    // then went silent would suppress forever.
+    istRecovery->refreshState();
+    return true;
 }
 
 void MCTPReactor::clearUsbSetupFailureTracking(
