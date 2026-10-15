@@ -1055,7 +1055,7 @@ TEST(MCTPReactor, usbRecoverySuppressedWhileIstIsInProgress)
     reactor->tick();                                    // failure 5
     reactor->tick();                                    // failure 6
 
-    reactor->unmanageMCTPDevice("/test/usb-ist");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/usb-ist"));
 }
 
 TEST(MCTPReactor, usbRecoveryStillRunsWhenIstIsNotInProgress)
@@ -1087,7 +1087,7 @@ TEST(MCTPReactor, usbRecoveryStillRunsWhenIstIsNotInProgress)
     reactor->tick();                                       // failure 4
     reactor->tick(); // failure 5 -> recovery
 
-    reactor->unmanageMCTPDevice("/test/usb-no-ist");
+    reactor->unmanageMCTPDevice(sdbusplus::object_path("/test/usb-no-ist"));
 }
 
 TEST(MCTPReactor, usbFailureStreakResetsAfterSuccessfulSetup)
