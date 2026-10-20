@@ -1235,7 +1235,8 @@ TEST(I3CMCTPDDevice, fromValidShapeWithoutNetDeviceReturnsNull)
     EXPECT_THROW(I3CMCTPDDevice::from({}, iface), std::invalid_argument);
 }
 
-TEST(I3CMCTPDDevice, fromValidUint64AddressWithStaticReturnsNullNoNetDevice)
+TEST(I3CMCTPDDevice,
+     fromValidUint64AddressWithStaticNoNetDeviceCreatesDeferredDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", "MCTPI3CTarget"},
@@ -1245,7 +1246,9 @@ TEST(I3CMCTPDDevice, fromValidUint64AddressWithStaticReturnsNullNoNetDevice)
         {"StaticEndpointID", "12"},
     };
     auto device = I3CMCTPDDevice::from({}, iface);
-    EXPECT_EQ(device, nullptr);
+    // Deferred netdev resolution: device is created even without a netdev.
+    ASSERT_NE(device, nullptr);
+    EXPECT_TRUE(device->getInterface().empty());
 }
 
 TEST(SPIMCTPDDevice, fromValidShapeWithoutNetDeviceCreatesDeferredDevice)
@@ -1589,7 +1592,7 @@ TEST(I2CMCTPDDevice, fromWithBridgePoolEndEidOnlyReturnsNull)
     EXPECT_EQ(I2CMCTPDDevice::from({}, iface), nullptr);
 }
 
-TEST(I3CMCTPDDevice, fromWithBridgePoolEndEidOnlyReturnsNull)
+TEST(I3CMCTPDDevice, fromWithBridgePoolEndEidOnlyCreatesDeferredDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", "MCTPI3CTarget"},
@@ -1598,7 +1601,8 @@ TEST(I3CMCTPDDevice, fromWithBridgePoolEndEidOnlyReturnsNull)
         {"Address", std::vector<uint64_t>{0x6a}},
         {"BridgePoolEndEID", "15"},
     };
-    EXPECT_EQ(I3CMCTPDDevice::from({}, iface), nullptr);
+    // Deferred netdev resolution: device is created even without a netdev.
+    ASSERT_NE(I3CMCTPDDevice::from({}, iface), nullptr);
 }
 
 TEST(USBMCTPDDevice, fromIgnoreEidsNegativeValueIsSkipped)
@@ -1698,7 +1702,7 @@ TEST(I2CMCTPDDevice, fromWithPollingIntervalAndBridgePoolReturnsNull)
     EXPECT_EQ(I2CMCTPDDevice::from({}, iface), nullptr);
 }
 
-TEST(I3CMCTPDDevice, fromWithPollingIntervalAndBridgePoolReturnsNull)
+TEST(I3CMCTPDDevice, fromWithPollingIntervalAndBridgePoolCreatesDeferredDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", "MCTPI3CTarget"},
@@ -1710,7 +1714,8 @@ TEST(I3CMCTPDDevice, fromWithPollingIntervalAndBridgePoolReturnsNull)
         {"BridgePoolEndEID", "9"},
         {"PollingInterval", "30"},
     };
-    EXPECT_EQ(I3CMCTPDDevice::from({}, iface), nullptr);
+    // Deferred netdev resolution: device is created even without a netdev.
+    ASSERT_NE(I3CMCTPDDevice::from({}, iface), nullptr);
 }
 
 TEST(MCTPDEndpoint, removedWithoutSubscriberIsNoop)
@@ -1916,6 +1921,44 @@ TEST(I2CMCTPDDevice, interfaceFromBusThrowsWhenNoNetDevicePresent)
 TEST(I3CMCTPDDevice, interfaceFromBusThrowsWhenNoMatchingNetDevice)
 {
     EXPECT_THROW(I3CMCTPDDevice::interfaceFromBus(99999), MCTPException);
+}
+
+TEST(I3CMCTPDDevice, idIsStableAcrossInterfaceResolution)
+{
+    const std::vector<uint8_t> pid{0x01, 0x20, 0xa2, 0xdf, 0x15, 0xb3};
+    auto unresolved =
+        std::make_shared<I3CMCTPDDevice>(nullptr, "i3c-id", 2, "", pid);
+    auto resolved =
+        std::make_shared<I3CMCTPDDevice>(nullptr, "i3c-id", 2, "mctpi3c2", pid);
+    EXPECT_EQ(unresolved->id(), resolved->id());
+}
+
+TEST(I3CMCTPDDevice, idDiffersForDevicesOnSameBus)
+{
+    auto first = std::make_shared<I3CMCTPDDevice>(
+        nullptr, "i3c-first", 2, "",
+        std::vector<uint8_t>{0x01, 0x20, 0xa2, 0xdf, 0x15, 0xb3});
+    auto second = std::make_shared<I3CMCTPDDevice>(
+        nullptr, "i3c-second", 2, "",
+        std::vector<uint8_t>{0x01, 0x20, 0x10, 0x25, 0x15, 0xb3});
+    EXPECT_NE(first->id(), second->id());
+}
+
+TEST(I3CMCTPDDevice, setupWithoutNetDeviceReportsNoSuchDevice)
+{
+    auto device = std::make_shared<I3CMCTPDDevice>(
+        nullptr, "i3c-setup", 99999, "", std::vector<uint8_t>{0x6a});
+    bool called = false;
+    std::error_code result;
+    device->setup([&called, &result](const std::error_code& ec,
+                                     const std::shared_ptr<MCTPEndpoint>& ep) {
+        called = true;
+        result = ec;
+        EXPECT_EQ(ep, nullptr);
+    });
+    EXPECT_TRUE(called);
+    EXPECT_EQ(result, std::make_error_code(std::errc::no_such_device));
+    EXPECT_TRUE(device->getInterface().empty());
 }
 
 TEST(SPIMCTPDDevice, interfaceFromBusCsThrowsWhenNoNetDevicePresent)
@@ -6179,10 +6222,10 @@ TEST(I3CMCTPDDevice, fromWithBridgeEndButNoStartParsesEndOnly)
         {"StaticEndpointID", std::string("9")},
         {"BridgePoolEndEID", std::string("15")},
     };
-    // bridgePoolEndEid parsed; no start → construction calls
-    // interfaceFromBus(9999) which throws MCTPException, caught in from() →
-    // returns nullptr.
-    EXPECT_EQ(I3CMCTPDDevice::from({}, iface), nullptr);
+    // bridgePoolEndEid parsed; no start → interfaceFromBus(9999) throws
+    // MCTPException, which from() tolerates by deferring netdev resolution to
+    // setup(): the device is created with an unresolved interface.
+    ASSERT_NE(I3CMCTPDDevice::from({}, iface), nullptr);
 }
 
 // ===========================================================================
@@ -7828,9 +7871,9 @@ TEST(I3CMCTPDDevice, fromWithNoStaticEndpointIdLogsInfoAndCreatesDevice)
         {"Address", std::vector<uint64_t>{0x6a}},
         // "StaticEndpointID" absent → info log branch
     };
-    // interfaceFromBus(9999) throws MCTPException → caught → nullptr.
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
     auto result = I3CMCTPDDevice::from({}, iface);
-    EXPECT_EQ(result, nullptr);
+    EXPECT_NE(result, nullptr);
 }
 
 // ===========================================================================
@@ -7848,9 +7891,9 @@ TEST(I3CMCTPDDevice, fromWithNoBridgePoolStartLogsBridgeAbsent)
         {"StaticEndpointID", std::string("9")},
         // "BridgePoolStartEid" absent → info log branch
     };
-    // interfaceFromBus(9999) throws MCTPException → caught → nullptr.
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
     auto result = I3CMCTPDDevice::from({}, iface);
-    EXPECT_EQ(result, nullptr);
+    EXPECT_NE(result, nullptr);
 }
 
 // ===========================================================================
@@ -8556,10 +8599,10 @@ TEST(I2CMCTPDDevice, fromWithStaticEndpointIdMaxBoundaryReturnsNull)
 // ===========================================================================
 // Group G160: I3CMCTPDDevice::from — StaticEndpointID="0" (min boundary).
 // Verifies from_chars parses "0" into staticEID=0 for I3C devices.  Bus 9999
-// → interfaceFromBus fails → nullptr returned.
+// has no netdev, but the device is still created (deferred resolution).
 // ===========================================================================
 
-TEST(I3CMCTPDDevice, fromWithStaticEndpointIdZeroMinBoundaryReturnsNull)
+TEST(I3CMCTPDDevice, fromWithStaticEndpointIdZeroMinBoundaryCreatesDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", std::string("MCTPI3CTarget")},
@@ -8568,17 +8611,18 @@ TEST(I3CMCTPDDevice, fromWithStaticEndpointIdZeroMinBoundaryReturnsNull)
         {"Address", std::vector<uint64_t>{0x6a}},
         {"StaticEndpointID", std::string("0")},
     };
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
     auto result = I3CMCTPDDevice::from({}, iface);
-    EXPECT_EQ(result, nullptr);
+    EXPECT_NE(result, nullptr);
 }
 
 // ===========================================================================
 // Group G161: I3CMCTPDDevice::from — StaticEndpointID="255" (max boundary).
 // Verifies from_chars parses "255" into staticEID=255 for I3C devices.
-// Bus 9999 → nullptr.
+// Bus 9999 has no netdev, but the device is still created.
 // ===========================================================================
 
-TEST(I3CMCTPDDevice, fromWithStaticEndpointIdMaxBoundaryReturnsNull)
+TEST(I3CMCTPDDevice, fromWithStaticEndpointIdMaxBoundaryCreatesDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", std::string("MCTPI3CTarget")},
@@ -8587,8 +8631,9 @@ TEST(I3CMCTPDDevice, fromWithStaticEndpointIdMaxBoundaryReturnsNull)
         {"Address", std::vector<uint64_t>{0x6a}},
         {"StaticEndpointID", std::string("255")},
     };
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
     auto result = I3CMCTPDDevice::from({}, iface);
-    EXPECT_EQ(result, nullptr);
+    EXPECT_NE(result, nullptr);
 }
 
 // ===========================================================================
@@ -11665,9 +11710,9 @@ TEST(I2CMCTPDDeviceFrom, G321_noStaticEidNoPoolReturnsNullptr)
 // ===========================================================================
 // Group G322: I3CMCTPDDevice::from — staticEID + bridgePool both present
 // MCTPEndpoint.cpp lines 1248-1253: first constructor branch.
-// Bus 9999 → MCTPException → nullptr.
+// Bus 9999 has no netdev; the device is still created (deferred resolution).
 // ===========================================================================
-TEST(I3CMCTPDDeviceFrom, G322_staticEidAndBridgePoolBothPresentReturnsNullptr)
+TEST(I3CMCTPDDeviceFrom, G322_staticEidAndBridgePoolBothPresentCreatesDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", std::string("MCTPI3CTarget")},
@@ -11677,16 +11722,17 @@ TEST(I3CMCTPDDeviceFrom, G322_staticEidAndBridgePoolBothPresentReturnsNullptr)
         {"StaticEndpointID", std::string("10")},
         {"BridgePoolStartEid", std::string("20")},
     };
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
     auto result = I3CMCTPDDevice::from({}, iface);
-    EXPECT_EQ(result, nullptr);
+    EXPECT_NE(result, nullptr);
 }
 
 // ===========================================================================
 // Group G323: I3CMCTPDDevice::from — staticEID only (no bridgePool)
 // MCTPEndpoint.cpp lines 1255-1259: second constructor branch.
-// Bus 9999 → MCTPException → nullptr.
+// Bus 9999 has no netdev; the device is still created (deferred resolution).
 // ===========================================================================
-TEST(I3CMCTPDDeviceFrom, G323_staticEidOnlyNoPoolReturnsNullptr)
+TEST(I3CMCTPDDeviceFrom, G323_staticEidOnlyNoPoolCreatesDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", std::string("MCTPI3CTarget")},
@@ -11695,16 +11741,17 @@ TEST(I3CMCTPDDeviceFrom, G323_staticEidOnlyNoPoolReturnsNullptr)
         {"Address", std::vector<uint64_t>{0x6a, 0x00, 0x00, 0x00, 0x00, 0x00}},
         {"StaticEndpointID", std::string("10")},
     };
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
     auto result = I3CMCTPDDevice::from({}, iface);
-    EXPECT_EQ(result, nullptr);
+    EXPECT_NE(result, nullptr);
 }
 
 // ===========================================================================
 // Group G324: I3CMCTPDDevice::from — neither staticEID nor bridgePool
 // MCTPEndpoint.cpp lines 1261-1263: third constructor (no optional args).
-// Bus 9999 → MCTPException → nullptr.
+// Bus 9999 has no netdev; the device is still created (deferred resolution).
 // ===========================================================================
-TEST(I3CMCTPDDeviceFrom, G324_noStaticEidNoPoolReturnsNullptr)
+TEST(I3CMCTPDDeviceFrom, G324_noStaticEidNoPoolCreatesDevice)
 {
     SensorBaseConfigMap iface{
         {"Type", std::string("MCTPI3CTarget")},
@@ -11712,8 +11759,9 @@ TEST(I3CMCTPDDeviceFrom, G324_noStaticEidNoPoolReturnsNullptr)
         {"Bus", std::string("9999")},
         {"Address", std::vector<uint64_t>{0x6a, 0x00, 0x00, 0x00, 0x00, 0x00}},
     };
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
     auto result = I3CMCTPDDevice::from({}, iface);
-    EXPECT_EQ(result, nullptr);
+    EXPECT_NE(result, nullptr);
 }
 
 // ===========================================================================
@@ -13385,6 +13433,31 @@ TEST_F(FakeConnFixture, spiOnEndpointEstablishedLatchesConfirmed)
     EXPECT_TRUE(invoked);
 }
 
+// I3CMCTPDDevice::onEndpointEstablished() latches interfaceConfirmed_ so a
+// subsequent setup() skips the sysfs re-walk (private members reachable via
+// -fno-access-control).
+TEST_F(FakeConnFixture, i3cOnEndpointEstablishedLatchesConfirmed)
+{
+    constexpr int busWithoutNetdev = 99999;
+    const std::vector<uint8_t> physaddr{0x6a};
+    auto dev = std::make_shared<I3CMCTPDDevice>(
+        conn, "i3c-latch", busWithoutNetdev, "mctpi3c2", physaddr);
+    EXPECT_FALSE(dev->interfaceConfirmed_);
+    dev->onEndpointEstablished();
+    EXPECT_TRUE(dev->interfaceConfirmed_);
+
+    // With interfaceConfirmed_ latched, setup() bypasses interfaceFromBus()
+    // (bus 99999 has no netdev) and forwards to MCTPDDevice::setup().
+    bool invoked = false;
+    dev->setup(
+        [&](const std::error_code& ec, const std::shared_ptr<MCTPEndpoint>&) {
+            invoked = true;
+            EXPECT_NE(ec, std::make_error_code(std::errc::no_such_device));
+        });
+    EXPECT_TRUE(invoked);
+    EXPECT_EQ(dev->getInterface(), "mctpi3c2");
+}
+
 // USBMCTPDDevice::interfaceFromRootHubPort() — walking a nonexistent controller
 // tree yields no bus number; the helper throws MCTPException. Exercises the
 // function body and its error path (reachable via -fno-access-control).
@@ -14199,7 +14272,9 @@ TEST(I3CMCTPDDevice, fromReadsIndeterministicPoolSpaceTrue)
         {"IndeterministicPoolSpace", std::string("true")},
     };
     auto device = I3CMCTPDDevice::from({}, iface);
-    EXPECT_EQ(device, nullptr);
+    // Deferred netdev resolution: device is created even without a netdev.
+    ASSERT_NE(device, nullptr);
+    EXPECT_TRUE(device->getInterface().empty());
 }
 
 TEST(SPIMCTPDDevice, fromReadsIndeterministicPoolSpaceTrue)
@@ -15359,6 +15434,81 @@ TEST_F(InterfaceResolverTempDirTest, I3cRejectsMissingNetworkDirectory)
     testDirectoryIteratorRedirects().insert_or_assign(
         "/sys/devices/virtual/net", root / "does-not-exist");
     EXPECT_THROW(I3CMCTPDDevice::interfaceFromBus(7), MCTPException);
+}
+
+// FakeConnFixture plus a temporary directory standing in for
+// /sys/devices/virtual/net that holds the netdev for I3C bus 7, so
+// I3CMCTPDDevice::setup() can resolve it.
+class I3CSetupNetdevFixture : public FakeConnFixture
+{
+  protected:
+    static constexpr int bus = 7;
+    static constexpr const char* netdev = "mctpi3c7";
+    const std::vector<uint8_t> physaddr{0x6a};
+    std::filesystem::path netdir;
+
+    void SetUp() override
+    {
+        FakeConnFixture::SetUp();
+        const auto* info =
+            ::testing::UnitTest::GetInstance()->current_test_info();
+        ASSERT_NE(info, nullptr);
+        netdir =
+            std::filesystem::temp_directory_path() /
+            ("mctp-i3c-setup-" + std::to_string(getpid()) + "-" + info->name());
+        std::filesystem::remove_all(netdir);
+        // std::filesystem::create_directories is stubbed out by
+        // filesystem_wrappers.cpp; create the tree with mkdir instead.
+        ASSERT_EQ(mkdir(netdir.c_str(), 0700), 0);
+        ASSERT_EQ(mkdir((netdir / netdev).c_str(), 0700), 0);
+        testDirectoryIteratorRedirects().insert_or_assign(
+            "/sys/devices/virtual/net", netdir);
+    }
+
+    void TearDown() override
+    {
+        testDirectoryIteratorRedirects().clear();
+        std::filesystem::remove_all(netdir);
+        FakeConnFixture::TearDown();
+    }
+};
+
+// A device created before its netdev existed adopts the resolved interface
+// in setup(). The DiscoveryNotify match registered next may throw on the fake
+// bus; the interface is assigned before that, so tolerate it.
+TEST_F(I3CSetupNetdevFixture, setupResolvesDeferredInterface)
+{
+    auto dev = std::make_shared<I3CMCTPDDevice>(conn, "i3c-resolve", bus, "",
+                                                physaddr);
+    try
+    {
+        dev->setup([](const std::error_code&,
+                      const std::shared_ptr<MCTPEndpoint>&) {});
+    }
+    catch (const std::exception& e)
+    {
+        GTEST_LOG_(INFO) << "tolerated exception in " << test_info_->name()
+                         << ": " << e.what();
+    }
+    EXPECT_EQ(dev->getInterface(), netdev);
+}
+
+// When the netdev resolves to the interface the device already has, setup()
+// skips the DiscoveryNotify registration and forwards to MCTPDDevice::setup()
+// (null bus -> error callback).
+TEST_F(I3CSetupNetdevFixture, setupKeepsUnchangedInterface)
+{
+    auto dev = std::make_shared<I3CMCTPDDevice>(conn, "i3c-unchanged", bus,
+                                                netdev, physaddr);
+    bool invoked = false;
+    dev->setup(
+        [&](const std::error_code& ec, const std::shared_ptr<MCTPEndpoint>&) {
+            invoked = true;
+            EXPECT_TRUE(ec);
+        });
+    EXPECT_TRUE(invoked);
+    EXPECT_EQ(dev->discoveryNotifyMatch, nullptr);
+    EXPECT_EQ(dev->getInterface(), netdev);
 }
 
 TEST_F(InterfaceResolverTempDirTest, I2cFactoryCreatesEveryEndpointIdLayout)

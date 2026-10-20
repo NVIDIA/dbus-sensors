@@ -1765,25 +1765,40 @@ std::shared_ptr<I3CMCTPDDevice> I3CMCTPDDevice::from(
 
     auto pollingInterval = getPollingInterval(iface);
 
+    std::string interface;
+    try
+    {
+        interface = interfaceFromBus(bus);
+        info("I3C netdev resolved for [ Bus: {I3C_BUS} ]: {INTERFACE}",
+             "I3C_BUS", bus, "INTERFACE", interface);
+    }
+    catch (const MCTPException& ex)
+    {
+        warning("I3C netdev not yet visible for [ Bus: {I3C_BUS} ],"
+                " will retry via tick: {EXCEPTION}",
+                "I3C_BUS", bus, "EXCEPTION", ex);
+    }
+
     try
     {
         if (staticEID.has_value() && bridgePoolStartEid.has_value())
         {
             return std::make_shared<I3CMCTPDDevice>(
-                connection, name, bus, address, staticEID.value(),
+                connection, name, bus, interface, address, staticEID.value(),
                 bridgePoolStartEid.value(), bridgePoolEndEid, pollingInterval,
                 names, indeterministicPoolSpace);
         }
         if (staticEID.has_value())
         {
             return std::make_shared<I3CMCTPDDevice>(
-                connection, name, bus, address, staticEID.value(), std::nullopt,
-                bridgePoolEndEid, pollingInterval, names,
+                connection, name, bus, interface, address, staticEID.value(),
+                std::nullopt, bridgePoolEndEid, pollingInterval, names,
                 indeterministicPoolSpace);
         }
         return std::make_shared<I3CMCTPDDevice>(
-            connection, name, bus, address, std::nullopt, std::nullopt,
-            bridgePoolEndEid, pollingInterval, names, indeterministicPoolSpace);
+            connection, name, bus, interface, address, std::nullopt,
+            std::nullopt, bridgePoolEndEid, pollingInterval, names,
+            indeterministicPoolSpace);
     }
     catch (const MCTPException& ex)
     {
@@ -1834,6 +1849,55 @@ std::string I3CMCTPDDevice::interfaceFromBus(int bus)
     error("No matching net device found for I3C bus {I3C_BUS} at {NET_DEVICE}",
           "I3C_BUS", bus, "NET_DEVICE", netdir);
     throw MCTPException("No matching net device found for the specified bus");
+}
+
+std::size_t I3CMCTPDDevice::id() const
+{
+    std::size_t h1 = std::hash<int>{}(bus_);
+    std::size_t h2 = fnv1aHash(physaddr);
+    return h1 ^ (h2 << 1);
+}
+
+void I3CMCTPDDevice::setup(
+    std::function<void(const std::error_code& ec,
+                       const std::shared_ptr<MCTPEndpoint>& ep)>&& added)
+{
+    if (!interfaceConfirmed_)
+    {
+        std::string resolved;
+        try
+        {
+            resolved = interfaceFromBus(bus_);
+        }
+        catch (const MCTPException& ex)
+        {
+            debug("I3C netdev not yet visible for [ Bus: {I3C_BUS} ],"
+                  " will retry on next tick: {EXCEPTION}",
+                  "I3C_BUS", bus_, "EXCEPTION", ex);
+            added(std::make_error_code(std::errc::no_such_device), {});
+            return;
+        }
+
+        if (resolved != interface)
+        {
+            info("I3C netdev resolved for [ Bus: {I3C_BUS} ]: {INTERFACE}",
+                 "I3C_BUS", bus_, "INTERFACE", resolved);
+            interface = resolved;
+            onDiscoveryMatchRule();
+        }
+    }
+
+    // Forward the caller's callback straight through; interfaceConfirmed_ is
+    // latched from onEndpointEstablished() on success.
+    MCTPDDevice::setup(std::move(added));
+}
+
+void I3CMCTPDDevice::onEndpointEstablished()
+{
+    MCTPDDevice::onEndpointEstablished();
+    // The netdev name for an I3C bus is fixed once it exists; stop re-walking
+    // sysfs on subsequent setups.
+    interfaceConfirmed_ = true;
 }
 
 /* MCTP USB (upstream MCTPUSBDevice consumer, Gerrit 80452) */

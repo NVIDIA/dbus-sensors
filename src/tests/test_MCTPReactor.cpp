@@ -1585,7 +1585,8 @@ TEST(MCTPDeviceFrom, I3CMinimalNoOptionalFields)
         {"Bus", "0"},
         {"Address", std::vector<uint64_t>{0x6a}},
     };
-    EXPECT_EQ(I3CMCTPDDevice::from({}, iface), nullptr);
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
+    ASSERT_NE(I3CMCTPDDevice::from({}, iface), nullptr);
 }
 
 TEST(MCTPDeviceFrom, I3CWithStaticOnly)
@@ -1597,7 +1598,8 @@ TEST(MCTPDeviceFrom, I3CWithStaticOnly)
         {"Address", std::vector<uint64_t>{0x6a}},
         {"StaticEndpointID", "7"},
     };
-    EXPECT_EQ(I3CMCTPDDevice::from({}, iface), nullptr);
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
+    ASSERT_NE(I3CMCTPDDevice::from({}, iface), nullptr);
 }
 
 TEST(MCTPDeviceFrom, I3CWithAllOptionalFields)
@@ -1611,7 +1613,8 @@ TEST(MCTPDeviceFrom, I3CWithAllOptionalFields)
         {"BridgePoolStartEid", "8"},
         {"BridgePoolEndEID", "9"},
     };
-    EXPECT_EQ(I3CMCTPDDevice::from({}, iface), nullptr);
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
+    ASSERT_NE(I3CMCTPDDevice::from({}, iface), nullptr);
 }
 
 TEST(MCTPDeviceFrom, USBMinimalNoOptionalFields)
@@ -1781,7 +1784,8 @@ TEST(MCTPDeviceFrom, I3CWithBridgeEndEidOnly)
         {"Address", std::vector<uint64_t>{0x6a}},
         {"BridgePoolEndEID", "15"},
     };
-    EXPECT_EQ(I3CMCTPDDevice::from({}, iface), nullptr);
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
+    ASSERT_NE(I3CMCTPDDevice::from({}, iface), nullptr);
 }
 
 TEST(MCTPDeviceFrom, I3CWithBridgeStartBadValue)
@@ -1833,7 +1837,8 @@ TEST(MCTPDeviceFrom, I3CWithPollingInterval)
         {"StaticEndpointID", "7"},
         {"PollingInterval", "30"},
     };
-    EXPECT_EQ(I3CMCTPDDevice::from({}, iface), nullptr);
+    // Netdev resolution is deferred to setup(); from() no longer returns null.
+    ASSERT_NE(I3CMCTPDDevice::from({}, iface), nullptr);
 }
 
 TEST(MCTPDeviceFrom, SPIWithPollingInterval)

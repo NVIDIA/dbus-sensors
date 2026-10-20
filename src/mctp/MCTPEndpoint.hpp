@@ -557,24 +557,53 @@ class I3CMCTPDDevice : public MCTPDDevice
     I3CMCTPDDevice() = delete;
     I3CMCTPDDevice(
         const std::shared_ptr<sdbusplus::asio::connection>& connection,
-        const std::string& name, int bus, const std::vector<uint8_t>& physaddr,
+        const std::string& name, int bus, const std::string& interface,
+        const std::vector<uint8_t>& physaddr,
         std::optional<uint8_t> staticEID = std::nullopt,
         std::optional<uint8_t> bridgePoolStartEid = std::nullopt,
         std::optional<uint8_t> bridgePoolEndEid = std::nullopt,
         std::optional<uint8_t> pollingInterval = std::nullopt,
         const std::vector<std::string>& deviceNames = {},
         bool indeterministicPoolSpace = false) :
-        MCTPDDevice(connection, name, interfaceFromBus(bus), physaddr,
-                    staticEID, bridgePoolStartEid, bridgePoolEndEid,
-                    std::nullopt, std::nullopt, pollingInterval, deviceNames,
-                    indeterministicPoolSpace)
+        MCTPDDevice(connection, name, interface, physaddr, staticEID,
+                    bridgePoolStartEid, bridgePoolEndEid, std::nullopt,
+                    std::nullopt, pollingInterval, deviceNames,
+                    indeterministicPoolSpace),
+        bus_(bus)
     {}
     ~I3CMCTPDDevice() override = default;
+
+    /**
+     * @brief Identify the device by its I3C bus and PID
+     *
+     * The netdev name is not part of the identity, so the identifier stays
+     * stable while the netdev is unresolved.
+     */
+    std::size_t id() const override;
+
+    /**
+     * @brief Set up the endpoint, resolving the I3C netdev first if needed
+     *
+     * Until the endpoint has been established once, the netdev is resolved on
+     * every attempt. A missing netdev fails the attempt with
+     * std::errc::no_such_device so that the reactor retries it.
+     */
+    void setup(std::function<void(const std::error_code& ec,
+                                  const std::shared_ptr<MCTPEndpoint>& ep)>&&
+                   added) override;
 
   private:
     static constexpr const char* configType = "MCTPI3CTarget";
 
     static std::string interfaceFromBus(int bus);
+
+    int bus_{};
+
+    /**
+     * @brief Stop re-resolving the netdev once the endpoint is established
+     */
+    void onEndpointEstablished() override;
+    bool interfaceConfirmed_{false};
 };
 
 class USBMCTPDDevice : public MCTPDDevice

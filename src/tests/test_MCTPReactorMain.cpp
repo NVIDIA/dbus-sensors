@@ -147,7 +147,7 @@ TEST(DeviceFromConfig, i2cValidConfigReturnsNull)
     EXPECT_EQ(deviceFromConfig(conn, config), nullptr);
 }
 
-TEST(DeviceFromConfig, i3cValidConfigReturnsNull)
+TEST(DeviceFromConfig, i3cConfigCreatesDevice)
 {
     std::shared_ptr<sdbusplus::asio::connection> conn = nullptr;
     SensorData config{{"xyz.openbmc_project.Configuration.MCTPI3CTarget",
@@ -155,7 +155,9 @@ TEST(DeviceFromConfig, i3cValidConfigReturnsNull)
                         {"Name", std::string("i3c0")},
                         {"Bus", std::string("0")},
                         {"Address", std::vector<uint64_t>{0x6a}}}}};
-    EXPECT_EQ(deviceFromConfig(conn, config), nullptr);
+    // I3C netdev resolution is deferred to setup(); deviceFromConfig returns a
+    // device even when the sysfs net device is absent.
+    EXPECT_NE(deviceFromConfig(conn, config), nullptr);
 }
 
 TEST(DeviceFromConfig, allDeviceTypesWithValidConfigs)
