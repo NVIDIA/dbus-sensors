@@ -1622,7 +1622,7 @@ TEST_F(DiscoveryFailureEventTest, TimeoutRendersDocumentedMessageShape)
         data.at("REDFISH_RESOLUTION"),
         "Collect the BMC logs, power-cycle the baseboard, then retry the firmware update. If the issue persists, contact support.");
     EXPECT_EQ(data.at("REDFISH_SEVERITY"),
-              "xyz.openbmc_project.Logging.Entry.Level.Critical");
+              "xyz.openbmc_project.Logging.Entry.Level.Informational");
     EXPECT_EQ(data.at("REDFISH_ORIGIN_OF_CONDITION"), "HGX_GPU_0");
     EXPECT_EQ(data.at("DEVICE_NAME"), "HGX_GPU_0");
 }

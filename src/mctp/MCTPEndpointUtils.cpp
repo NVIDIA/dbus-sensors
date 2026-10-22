@@ -256,7 +256,7 @@ void createMctpDiscoveryFailureRedfishEvent(
     additionalData["REDFISH_MESSAGE_ARGS"] = args;
     additionalData["REDFISH_RESOLUTION"] = mctpDiscoveryCommandFailedResolution;
     additionalData["REDFISH_SEVERITY"] =
-        "xyz.openbmc_project.Logging.Entry.Level.Critical";
+        "xyz.openbmc_project.Logging.Entry.Level.Informational";
     additionalData["REDFISH_ORIGIN_OF_CONDITION"] = name;
     additionalData["DEVICE_NAME"] = name;
 
