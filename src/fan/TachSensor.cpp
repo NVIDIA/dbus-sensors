@@ -90,6 +90,10 @@ TachSensor::TachSensor(
                                      std::string()); // unused property
         itemIface->register_property("Present", true);
         itemIface->initialize();
+        fanIface = objectServer.add_interface(
+            "/xyz/openbmc_project/inventory/" + name,
+            "xyz.openbmc_project.Inventory.Item.Fan");
+        fanIface->initialize();
         itemAssoc = objectServer.add_interface(
             "/xyz/openbmc_project/inventory/" + name, association::interface);
         itemAssoc->register_property(
@@ -113,6 +117,7 @@ TachSensor::~TachSensor()
     }
     objServer.remove_interface(sensorInterface);
     objServer.remove_interface(association);
+    objServer.remove_interface(fanIface);
     objServer.remove_interface(itemIface);
     objServer.remove_interface(itemAssoc);
 }
