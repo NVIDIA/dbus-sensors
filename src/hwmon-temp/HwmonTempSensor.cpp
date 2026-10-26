@@ -79,6 +79,13 @@ HwmonTempSensor::HwmonTempSensor(
             name,
         "xyz.openbmc_project.Sensor.Value");
 
+    // LPU850 PVT channels are on-die sensors; publish the Accelerator context
+    // for channels that have none configured.
+    if (physicalContext.empty() && objectType == "LPU850")
+    {
+        physicalContext = "Accelerator";
+    }
+
     if (!physicalContext.empty())
     {
         std::string areaIfaceName =
