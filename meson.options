@@ -282,3 +282,9 @@ option(
     value: 'disabled',
     description: 'Enable HMC readiness FeatureReady publisher (vr-nvl-bmc).',
 )
+option(
+    'hmc-usb-monitor',
+    type: 'feature',
+    value: 'disabled',
+    description: 'BMC-HMC USB link monitor',
+)

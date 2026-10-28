@@ -345,6 +345,27 @@ if get_option('mctp').allowed()
     )
 endif
 
+test(
+    'test_hmc_usb_monitor',
+    executable(
+        'test_hmc_usb_monitor',
+        '../hmc-usb-monitor/hmc_usb_monitor.cpp',
+        'test_HmcUsbMonitor.cpp',
+        # The daemon's main() would replace gtest's; no io_uring in CI.
+        cpp_args: [
+            '-Dmain=hmcUsbMonitorMain',
+            '-UBOOST_ASIO_HAS_IO_URING',
+            '-DBOOST_ASIO_DISABLE_IO_URING',
+            '-UBOOST_ASIO_DISABLE_EPOLL',
+        ],
+        dependencies: [gtest_dep, default_deps, utils_dep],
+        implicit_include_directories: false,
+        include_directories: [src_inc, '../hmc-usb-monitor'],
+    ),
+    # The tests read the log lines lg2 copies to stderr.
+    env: ['LG2_FORCE_STDERR=1', 'LG2_FORMAT=%m'],
+)
+
 subdir('nvidia-gpu')
 
 test(

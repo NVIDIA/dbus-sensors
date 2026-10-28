@@ -1,0 +1,16 @@
+[Unit]
+Description=NVIDIA USB Status Monitor Service
+Requires=bmc-boot-complete.service
+After=bmc-boot-complete.service dbus.service
+Wants=dbus.service
+PartOf=hmc-ready.target
+Conflicts=hmc-not-ready.target
+StartLimitIntervalSec=1
+
+[Service]
+Restart=always
+ExecStart=/usr/libexec/dbus-sensors/hmc-usb-monitor
+SyslogIdentifier=nvidia-usb-monitor
+
+[Install]
+WantedBy=hmc-ready.target

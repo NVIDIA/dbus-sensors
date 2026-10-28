@@ -45,6 +45,7 @@ unit_files = [
     ['nvidia-fw-write-protect', 'com.nvidia.fwwriteprotect.service'],
     ['debug-serial-ctrl', 'xyz.openbmc_project.debugserialctrl.service'],
     ['hmc-readiness', 'xyz.openbmc_project.State.HMCReady.service'],
+    ['hmc-usb-monitor', 'nvidia-usb-monitor.service'],
 ]
 
 fs = import('fs')

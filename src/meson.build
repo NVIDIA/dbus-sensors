@@ -302,6 +302,10 @@ if get_option('hmc-readiness').allowed()
     subdir('hmc-readiness')
 endif
 
+if get_option('hmc-usb-monitor').allowed()
+    subdir('hmc-usb-monitor')
+endif
+
 if get_option('debug-serial-ctrl').allowed()
     executable(
         'debugserialctrl',
