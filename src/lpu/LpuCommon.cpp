@@ -1,12 +1,15 @@
 #include "LpuCommon.hpp"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <phosphor-logging/lg2.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <charconv>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -18,7 +21,9 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace lpu_common
 {
@@ -531,72 +536,10 @@ bool parseUnsignedField(std::string_view line, std::string_view prefix,
     return result.ec == std::errc{} && result.ptr == line.data() + last;
 }
 
-/** Sysfs value=0xHH.. is wire-order (MSB first); widths > 8 do not fit uint64. */
-bool parseSysfsValueHexWireBytes(const char* line, unsigned width,
-                                 uint8_t* out)
-{
-    if (line == nullptr || out == nullptr || width == 0 ||
-        width > kMaxLpu850ReadLength)
-    {
-        return false;
-    }
-    const char* v = std::strstr(line, "value=0x");
-    if (v == nullptr)
-    {
-        return false;
-    }
-    v += 8;
-
-    size_t digitCount = 0;
-    while (std::isxdigit(static_cast<unsigned char>(v[digitCount])) != 0)
-    {
-        ++digitCount;
-    }
-    if (digitCount == 0)
-    {
-        return false;
-    }
-
-    const size_t needDigits = static_cast<size_t>(width) * 2U;
-    if (width > sizeof(uint64_t) && digitCount != needDigits)
-    {
-        return false;
-    }
-    std::array<char, kMaxLpu850ReadLength * 2U + 1U> hexBuf{};
-    size_t pad = 0;
-    if (digitCount < needDigits)
-    {
-        pad = needDigits - digitCount;
-        std::memset(hexBuf.data(), '0', pad);
-    }
-    else if (digitCount > needDigits)
-    {
-        v += digitCount - needDigits;
-        digitCount = needDigits;
-        pad = 0;
-    }
-    std::memcpy(hexBuf.data() + pad, v, digitCount);
-
-    for (unsigned i = 0; i < width; ++i)
-    {
-        unsigned byte = 0;
-        const char* begin =
-            hexBuf.data() + static_cast<size_t>(i) * 2U;
-        const auto result = std::from_chars(begin, begin + 2, byte, 16);
-        if (result.ec != std::errc{} || result.ptr != begin + 2)
-        {
-            return false;
-        }
-        out[i] = static_cast<uint8_t>(byte);
-    }
-    return true;
-}
-
 /** SMBus telemetry with leading status byte; sysfs value=0x is wire-order hex.
  */
-bool sysfsRegisterUsesWireHex(unsigned off, unsigned width)
+bool sysfsRegisterUsesWireHex(unsigned width)
 {
-    (void)off;
     constexpr unsigned statusByteWidth = sizeof(uint8_t);
     return width == statusByteWidth + sizeof(uint16_t) ||
            width == statusByteWidth + sizeof(uint32_t) ||
@@ -612,19 +555,37 @@ bool isFastRegister(uint16_t offset)
            offset == activityMonitorOffset || offset == ticksOffset;
 }
 
-std::optional<std::string_view> pmbusCacheFileForOffset(uint16_t offset)
+/** Generated register dumps exposed by the lpu850 driver for one device. */
+enum class SysfsDump
+{
+    fastRegs,
+    slowRegs,
+    pmbusVddCore,
+    pmbusVddC2c,
+    pmbusVddm,
+    pmbusVddhC2c,
+    pmbusVddlC2c,
+};
+
+constexpr std::array<std::string_view, 7> sysfsDumpNames = {
+    "fast_regs",           "slow_regs",       "pmbus_vdd_core_regs",
+    "pmbus_vdd_c2c_regs",  "pmbus_vddm_regs", "pmbus_vddh_c2c_regs",
+    "pmbus_vddl_c2c_regs",
+};
+
+std::optional<SysfsDump> pmbusDumpForOffset(uint16_t offset)
 {
     struct Range
     {
         uint16_t base;
-        std::string_view file;
+        SysfsDump dump;
     };
     static constexpr std::array<Range, 5> ranges = {{
-        {lpu_pmbus::vddCoreBaseOffset, "pmbus_vdd_core_regs"},
-        {lpu_pmbus::vddC2cBaseOffset, "pmbus_vdd_c2c_regs"},
-        {lpu_pmbus::vddmBaseOffset, "pmbus_vddm_regs"},
-        {lpu_pmbus::vddhC2cBaseOffset, "pmbus_vddh_c2c_regs"},
-        {lpu_pmbus::vddlC2cBaseOffset, "pmbus_vddl_c2c_regs"},
+        {lpu_pmbus::vddCoreBaseOffset, SysfsDump::pmbusVddCore},
+        {lpu_pmbus::vddC2cBaseOffset, SysfsDump::pmbusVddC2c},
+        {lpu_pmbus::vddmBaseOffset, SysfsDump::pmbusVddm},
+        {lpu_pmbus::vddhC2cBaseOffset, SysfsDump::pmbusVddhC2c},
+        {lpu_pmbus::vddlC2cBaseOffset, SysfsDump::pmbusVddlC2c},
     }};
 
     for (const Range& range : ranges)
@@ -632,77 +593,257 @@ std::optional<std::string_view> pmbusCacheFileForOffset(uint16_t offset)
         if (offset >= range.base &&
             offset <= range.base + lpu_pmbus::lastRegisterSubOffset)
         {
-            return range.file;
+            return range.dump;
         }
     }
     return std::nullopt;
 }
 
-struct CachedSysfsRegister
+/** One decoded dump line. The wire bytes live in SysfsSnapshot::bytes. */
+struct SysfsRegister
 {
+    uint16_t offset{};
+    size_t bytesBegin{};
     unsigned width{};
     unsigned long long value{};
     unsigned long long lastPolled{};
-    std::string line;
 };
 
-struct CachedSysfsDump
+/** Parsed contents of one dump, refreshed at most once per cache lifetime.
+ *
+ *  The descriptor stays open between samples: opening a sysfs attribute costs
+ *  a full kernfs path walk, and the kernel regenerates the dump on each
+ *  pread() at offset zero, so one read per cycle returns fresh data without
+ *  the open/fstat/close round trip that previously dominated system time.
+ */
+struct SysfsSnapshot
 {
-    std::chrono::steady_clock::time_point updatedAt{};
-    std::map<unsigned, CachedSysfsRegister> registers;
-};
+    int fd{-1};
+    bool valid{false};
+    /** Start of the sample pass that last read the dump; selects whether the
+     *  cached copy is still within its lifetime. */
+    std::chrono::steady_clock::time_point attemptedAt{};
+    /** Wall clock right after the dump was read; every register stamp in the
+     *  dump precedes it, so sample ages measured against it are never
+     *  negative. */
+    uint64_t readRealtimeNs{};
+    /** Monotonic time taken with readRealtimeNs, so the time a snapshot has
+     *  been reused since the read can be added to the sample age. */
+    std::chrono::steady_clock::time_point readSteady{};
+    std::vector<SysfsRegister> registers;
+    std::vector<uint8_t> bytes;
 
-/** Read and parse each generated sysfs dump once per metric sampling group. */
-const CachedSysfsRegister* cachedSysfsRegister(const char* path,
-                                               uint16_t offset)
-{
-    static std::map<std::string, CachedSysfsDump> cache;
-    constexpr auto cacheLifetime = std::chrono::milliseconds(500);
-
-    const auto now = std::chrono::steady_clock::now();
-    auto& entry = cache[path];
-    if (now - entry.updatedAt >= cacheLifetime)
+    SysfsSnapshot() = default;
+    SysfsSnapshot(const SysfsSnapshot&) = delete;
+    SysfsSnapshot& operator=(const SysfsSnapshot&) = delete;
+    SysfsSnapshot(SysfsSnapshot&& other) noexcept :
+        fd(std::exchange(other.fd, -1)), valid(other.valid),
+        attemptedAt(other.attemptedAt), readRealtimeNs(other.readRealtimeNs),
+        readSteady(other.readSteady), registers(std::move(other.registers)),
+        bytes(std::move(other.bytes))
+    {}
+    SysfsSnapshot& operator=(SysfsSnapshot&&) = delete;
+    ~SysfsSnapshot()
     {
-        entry.updatedAt = now;
-        entry.registers.clear();
+        closeDescriptor();
+    }
 
-        if (FILE* f = std::fopen(path, "r"))
+    void closeDescriptor()
+    {
+        if (fd >= 0)
         {
-            std::array<char, 512> line{};
-            while (std::fgets(line.data(), line.size(), f) != nullptr)
-            {
-                const char* p = std::strstr(line.data(), "off=0x");
-                if (p == nullptr)
-                {
-                    continue;
-                }
-
-                unsigned parsedOffset = 0;
-                CachedSysfsRegister reg;
-                if (!parseUnsignedField(p, "off=0x", 16, parsedOffset) ||
-                    !parseUnsignedField(p, "width=", 10, reg.width) ||
-                    !parseUnsignedField(p, "last_polled_ns=", 10,
-                                        reg.lastPolled))
-                {
-                    continue;
-                }
-
-                const char* value = std::strstr(p, "value=0x");
-                if (value == nullptr ||
-                    (reg.width <= sizeof(reg.value) &&
-                     !parseUnsignedField(p, "value=0x", 16, reg.value)))
-                {
-                    continue;
-                }
-                reg.line = line.data();
-                entry.registers.insert_or_assign(parsedOffset, std::move(reg));
-            }
-            std::fclose(f);
+            ::close(fd);
+            fd = -1;
         }
     }
 
-    auto reg = entry.registers.find(static_cast<unsigned>(offset));
-    return reg == entry.registers.end() ? nullptr : &reg->second;
+    const SysfsRegister* find(uint16_t offset) const
+    {
+        // A dump holds at most sixteen registers; a linear scan over this
+        // contiguous array beats hashing for that size.
+        for (const SysfsRegister& reg : registers)
+        {
+            if (reg.offset == offset)
+            {
+                return &reg;
+            }
+        }
+        return nullptr;
+    }
+};
+
+using DeviceSnapshots = std::array<SysfsSnapshot, sysfsDumpNames.size()>;
+
+/** Decode one "<name> off=0x.. width=.. value=0x.. last_polled_ns=.." line. */
+void parseSysfsDumpLine(SysfsSnapshot& snapshot, std::string_view line)
+{
+    const size_t fieldStart = line.find("off=0x");
+    if (fieldStart == std::string_view::npos)
+    {
+        return;
+    }
+    line.remove_prefix(fieldStart);
+
+    SysfsRegister reg;
+    unsigned parsedOffset = 0;
+    if (!parseUnsignedField(line, "off=0x", 16, parsedOffset) ||
+        parsedOffset > std::numeric_limits<uint16_t>::max() ||
+        !parseUnsignedField(line, "width=", 10, reg.width) ||
+        !parseUnsignedField(line, "last_polled_ns=", 10, reg.lastPolled) ||
+        reg.width == 0 || reg.width > kMaxLpu850ReadLength)
+    {
+        return;
+    }
+    reg.offset = static_cast<uint16_t>(parsedOffset);
+
+    const size_t valueField = line.find("value=0x");
+    if (valueField == std::string_view::npos)
+    {
+        return;
+    }
+    const size_t hexBegin = valueField + 8;
+    size_t hexEnd = hexBegin;
+    while (hexEnd < line.size() &&
+           std::isxdigit(static_cast<unsigned char>(line[hexEnd])) != 0)
+    {
+        ++hexEnd;
+    }
+    std::string_view hex = line.substr(hexBegin, hexEnd - hexBegin);
+    if (hex.empty())
+    {
+        return;
+    }
+    if (reg.width <= sizeof(reg.value) &&
+        !parseUnsignedField(line, "value=0x", 16, reg.value))
+    {
+        return;
+    }
+
+    // The driver prints exactly width bytes. Tolerate legacy dumps by
+    // zero-padding short values and keeping the trailing bytes of long ones,
+    // which keeps the decoded payload identical to the previous parser.
+    const size_t needDigits = static_cast<size_t>(reg.width) * 2U;
+    if (reg.width > sizeof(uint64_t) && hex.size() != needDigits)
+    {
+        return;
+    }
+    if (hex.size() > needDigits)
+    {
+        hex.remove_prefix(hex.size() - needDigits);
+    }
+    const size_t padDigits = needDigits - hex.size();
+
+    reg.bytesBegin = snapshot.bytes.size();
+    for (size_t digit = 0; digit < needDigits; digit += 2)
+    {
+        unsigned byte = 0;
+        if (digit + 2 > padDigits)
+        {
+            const size_t first = digit >= padDigits ? digit - padDigits : 0;
+            const size_t count = digit >= padDigits ? 2 : 1;
+            const auto result = std::from_chars(
+                hex.data() + first, hex.data() + first + count, byte, 16);
+            if (result.ec != std::errc{} ||
+                result.ptr != hex.data() + first + count)
+            {
+                snapshot.bytes.resize(reg.bytesBegin);
+                return;
+            }
+        }
+        snapshot.bytes.push_back(static_cast<uint8_t>(byte));
+    }
+
+    for (SysfsRegister& existing : snapshot.registers)
+    {
+        if (existing.offset == reg.offset)
+        {
+            existing = reg;
+            return;
+        }
+    }
+    snapshot.registers.push_back(reg);
+}
+
+/** Current sample cycle, if one is active on this (single) thread. */
+const SampleCycle* activeSampleCycle = nullptr;
+
+std::chrono::steady_clock::time_point cycleSteadyNow()
+{
+    return activeSampleCycle != nullptr ? activeSampleCycle->steady()
+                                        : std::chrono::steady_clock::now();
+}
+
+uint64_t realtimeNowNs()
+{
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto nowNs =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
+    return nowNs > 0 ? static_cast<uint64_t>(nowNs) : 0U;
+}
+
+/** Return the parsed dump for one device, re-reading it after the cache
+ *  lifetime. Returns nullptr while the attribute is absent or unreadable. */
+const SysfsSnapshot* sysfsSnapshot(uint64_t bus, SysfsDump dump)
+{
+    static std::unordered_map<uint64_t, DeviceSnapshots> devices;
+    // One page bounds every kernfs attribute read, so this buffer always
+    // receives the complete dump. It is shared across all devices.
+    static std::array<char, 4096> buffer;
+    constexpr auto cacheLifetime = std::chrono::milliseconds(500);
+
+    SysfsSnapshot& snapshot = devices[bus][static_cast<size_t>(dump)];
+    const auto now = cycleSteadyNow();
+    if (now - snapshot.attemptedAt < cacheLifetime)
+    {
+        return snapshot.valid ? &snapshot : nullptr;
+    }
+
+    snapshot.attemptedAt = now;
+    snapshot.valid = false;
+    snapshot.registers.clear();
+    snapshot.bytes.clear();
+
+    if (snapshot.fd < 0)
+    {
+        std::array<char, 96> path{};
+        const std::string_view name = sysfsDumpNames[static_cast<size_t>(dump)];
+        std::snprintf(path.data(), path.size(),
+                      "/sys/bus/i2c/devices/%llu-0067/lpu850/%.*s",
+                      static_cast<unsigned long long>(bus),
+                      static_cast<int>(name.size()), name.data());
+        snapshot.fd = ::open(path.data(), O_RDONLY | O_CLOEXEC);
+        if (snapshot.fd < 0)
+        {
+            return nullptr;
+        }
+    }
+
+    const ssize_t length =
+        ::pread(snapshot.fd, buffer.data(), buffer.size(), 0);
+    if (length < 0)
+    {
+        // ENODEV after the device was unbound; reopen on the next cycle.
+        snapshot.closeDescriptor();
+        return nullptr;
+    }
+
+    snapshot.readRealtimeNs = realtimeNowNs();
+    snapshot.readSteady = std::chrono::steady_clock::now();
+    std::string_view contents(buffer.data(), static_cast<size_t>(length));
+    while (!contents.empty())
+    {
+        const size_t newline = contents.find('\n');
+        if (newline == std::string_view::npos)
+        {
+            // A dump never exceeds one page, so an unterminated tail means a
+            // partial line that must not be decoded.
+            break;
+        }
+        parseSysfsDumpLine(snapshot, contents.substr(0, newline));
+        contents.remove_prefix(newline + 1);
+    }
+    snapshot.valid = true;
+    return &snapshot;
 }
 
 int readFromLpu850SysfsCache(uint64_t bus, uint16_t offset, uint8_t* out,
@@ -719,41 +860,37 @@ int readFromLpu850SysfsCache(uint64_t bus, uint16_t offset, uint8_t* out,
         return -1;
     }
 
-    std::array<std::string_view, 2> files{};
-    size_t fileCount = 0;
-    const std::optional<std::string_view> pmbusFile =
-        pmbusCacheFileForOffset(offset);
-    if (pmbusFile)
+    std::array<SysfsDump, 2> dumps{};
+    size_t dumpCount = 0;
+    const std::optional<SysfsDump> pmbusDump = pmbusDumpForOffset(offset);
+    if (pmbusDump)
     {
-        files[fileCount++] = *pmbusFile;
+        dumps[dumpCount++] = *pmbusDump;
     }
     else if (isFastRegister(offset))
     {
-        files[fileCount++] = "fast_regs";
-        files[fileCount++] = "slow_regs";
+        dumps[dumpCount++] = SysfsDump::fastRegs;
+        dumps[dumpCount++] = SysfsDump::slowRegs;
     }
     else
     {
-        files[fileCount++] = "slow_regs";
-        files[fileCount++] = "fast_regs";
+        dumps[dumpCount++] = SysfsDump::slowRegs;
+        dumps[dumpCount++] = SysfsDump::fastRegs;
     }
-    std::array<char, 96> path{};
-    for (size_t fileIndex = 0; fileIndex < fileCount; ++fileIndex)
+
+    for (size_t dumpIndex = 0; dumpIndex < dumpCount; ++dumpIndex)
     {
-        const std::string_view file = files[fileIndex];
-        std::snprintf(
-            path.data(), path.size(),
-            "/sys/bus/i2c/devices/%llu-0067/lpu850/%.*s",
-            static_cast<unsigned long long>(bus),
-            static_cast<int>(file.size()), file.data());
-        const CachedSysfsRegister* reg =
-            cachedSysfsRegister(path.data(), offset);
+        const SysfsSnapshot* snapshot = sysfsSnapshot(bus, dumps[dumpIndex]);
+        if (snapshot == nullptr)
+        {
+            continue;
+        }
+        const SysfsRegister* reg = snapshot->find(offset);
         if (reg == nullptr)
         {
             continue;
         }
 
-        const unsigned off = static_cast<unsigned>(offset);
         const unsigned width = reg->width;
         const unsigned long long value = reg->value;
         if (reg->lastPolled == 0)
@@ -762,23 +899,30 @@ int readFromLpu850SysfsCache(uint64_t bus, uint16_t offset, uint8_t* out,
         }
         if (maxSampleAge > std::chrono::nanoseconds::zero())
         {
-            const auto now =
-                std::chrono::system_clock::now().time_since_epoch();
-            const auto nowNs =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(now)
-                    .count();
-            if (nowNs <= 0 ||
-                reg->lastPolled > static_cast<unsigned long long>(nowNs) ||
-                static_cast<unsigned long long>(nowNs) - reg->lastPolled >
-                    static_cast<unsigned long long>(maxSampleAge.count()))
+            // Age when the dump was read, plus the time the snapshot has been
+            // reused since that read, so the limit holds for the whole cache
+            // lifetime without reading the wall clock again for every sensor.
+            const uint64_t readNs = snapshot->readRealtimeNs;
+            const auto reused = cycleSteadyNow() - snapshot->readSteady;
+            const uint64_t reusedNs =
+                reused > std::chrono::steady_clock::duration::zero()
+                    ? static_cast<uint64_t>(
+                          std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              reused)
+                              .count())
+                    : 0U;
+            if (readNs == 0 || reg->lastPolled > readNs ||
+                (readNs - reg->lastPolled) + reusedNs >
+                    static_cast<uint64_t>(maxSampleAge.count()))
             {
                 continue;
             }
         }
-        if (pmbusFile && width != static_cast<unsigned>(len))
+        if (pmbusDump && width != static_cast<unsigned>(len))
         {
             continue;
         }
+        const uint8_t* wireBytes = snapshot->bytes.data() + reg->bytesBegin;
 
         /* Entity-manager ReadWidthBytes includes a leading status byte for
          * most rows. Accept the current full status+payload sysfs record or a
@@ -789,12 +933,9 @@ int readFromLpu850SysfsCache(uint64_t bus, uint16_t offset, uint8_t* out,
         const unsigned lenU = static_cast<unsigned>(len);
         if (width == lenU)
         {
-            if (pmbusFile || sysfsRegisterUsesWireHex(off, width))
+            if (pmbusDump || sysfsRegisterUsesWireHex(width))
             {
-                if (!parseSysfsValueHexWireBytes(reg->line.c_str(), width, out))
-                {
-                    continue;
-                }
+                std::memcpy(out, wireBytes, width);
             }
             else
             {
@@ -839,18 +980,13 @@ int readFromLpu850SysfsCache(uint64_t bus, uint16_t offset, uint8_t* out,
         }
         else if (lenU > 1U && width == lenU - 1U)
         {
-            if (sysfsRegisterUsesWireHex(off, lenU))
+            out[0] = 0;
+            if (sysfsRegisterUsesWireHex(lenU))
             {
-                out[0] = 0;
-                if (!parseSysfsValueHexWireBytes(reg->line.c_str(), width,
-                                                 out + 1U))
-                {
-                    continue;
-                }
+                std::memcpy(out + 1U, wireBytes, width);
             }
             else
             {
-                out[0] = 0;
                 for (unsigned i = 0; i < width; ++i)
                 {
                     out[1U + i] =
@@ -872,6 +1008,24 @@ int readFromLpu850SysfsCache(uint64_t bus, uint16_t offset, uint8_t* out,
     return -1;
 }
 } // namespace
+
+SampleCycle::SampleCycle() :
+    steadyNow(std::chrono::steady_clock::now()),
+    owner(activeSampleCycle == nullptr)
+{
+    if (owner)
+    {
+        activeSampleCycle = this;
+    }
+}
+
+SampleCycle::~SampleCycle()
+{
+    if (owner)
+    {
+        activeSampleCycle = nullptr;
+    }
+}
 
 bool isI2cEndpointBlocked(uint8_t bus, uint8_t addr)
 {

@@ -46,6 +46,43 @@ inline constexpr uint16_t lastRegisterSubOffset = 0x0FU;
 /** I2C access and EM field parsing helpers for LPU telemetry. */
 namespace lpu_common
 {
+/** Monotonic clock reading shared by every register lookup of one sampling
+ *  pass.
+ *
+ *  Reading a clock is a system call on this platform. One instance at the top
+ *  of a poll loop lets the sysfs cache lifetime test and the shared-memory
+ *  timestamp reuse the same value instead of calling the kernel for every
+ *  sensor. The sample-age check deliberately does not use it: it compares the
+ *  driver's wall-clock stamps against a time taken after each dump was read.
+ *  Nested instances defer to the outermost one; code outside a pass keeps
+ *  reading the clock directly.
+ */
+class SampleCycle
+{
+  public:
+    SampleCycle();
+    ~SampleCycle();
+    SampleCycle(const SampleCycle&) = delete;
+    SampleCycle& operator=(const SampleCycle&) = delete;
+
+    std::chrono::steady_clock::time_point steady() const
+    {
+        return steadyNow;
+    }
+    /** Milliseconds on the monotonic clock, as the telemetry layer expects. */
+    uint64_t steadyMillis() const
+    {
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                steadyNow.time_since_epoch())
+                .count());
+    }
+
+  private:
+    std::chrono::steady_clock::time_point steadyNow;
+    bool owner;
+};
+
 void createInventoryAssoc(
     const std::shared_ptr<sdbusplus::asio::connection>& conn,
     const std::shared_ptr<sdbusplus::asio::dbus_interface>& association,

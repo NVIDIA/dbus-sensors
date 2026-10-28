@@ -10,6 +10,9 @@
 #include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <phosphor-logging/lg2.hpp>
+#ifdef NVIDIA_SHMEM
+#include <tal.hpp>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -481,6 +484,12 @@ class LpuVrSensor :
         lpu_common::createInventoryAssoc(dbusConnection, association,
                                         configurationPath,
                                         std::move(sensorAssociations));
+#ifdef NVIDIA_SHMEM
+        telemetryPath = dbusPath;
+        telemetryInterface = sensorValueInterface;
+        telemetryParent =
+            sdbusplus::message::object_path(configurationPath).parent_path();
+#endif
         markAvailable(false);
     }
 
@@ -494,7 +503,17 @@ class LpuVrSensor :
         objectServer.remove_interface(association);
     }
 
-    void updateReading(std::optional<double> reading)
+    /** Publish one sample taken during the given sampling pass.
+     *
+     *  This follows Sensor::updateValue step by step, including the
+     *  per-sample Available and Functional writes that let a sensor recover
+     *  after an external D-Bus write to Available. The one difference is the
+     *  shared-memory update: it reuses the identifiers cached at construction
+     *  and the pass timestamp instead of rebuilding three strings and reading
+     *  the clock for every sensor.
+     */
+    void updateReading(std::optional<double> reading,
+                       const lpu_common::SampleCycle& cycle)
     {
         if (!reading)
         {
@@ -503,10 +522,57 @@ class LpuVrSensor :
             return;
         }
         rawValue = *reading;
-        updateValue(*reading);
+        publishReading(*reading, cycle);
     }
 
   private:
+    void publishReading(double newValue, const lpu_common::SampleCycle& cycle)
+    {
+        if (!overriddenState)
+        {
+            if (!readingStateGood())
+            {
+                markAvailable(false);
+                for (auto& threshold : thresholds)
+                {
+                    thresholds::assertThresholds(this, value, threshold.level,
+                                                 threshold.direction, false);
+                }
+                setValueProperty(std::numeric_limits<double>::quiet_NaN());
+            }
+            else
+            {
+                setValueProperty(newValue);
+                updateInstrumentation(newValue);
+                checkThresholds();
+                if (!std::isnan(newValue))
+                {
+                    markFunctional(true);
+                    markAvailable(true);
+                }
+            }
+        }
+
+#ifdef NVIDIA_SHMEM
+        static const std::string valueProperty("Value");
+        nv::sensor_aggregation::DbusVariantType shmemValue = newValue;
+        tal::TelemetryAggregator::updateTelemetry(
+            telemetryPath, telemetryInterface, valueProperty, telemetryRawData,
+            cycle.steadyMillis(), 0, shmemValue, telemetryParent);
+#else
+        (void)cycle;
+#endif
+    }
+
+    /** Same as the private Sensor::updateValueProperty: the Value setter
+     *  rejects writes unless they are flagged as internal. */
+    void setValueProperty(double newValue)
+    {
+        internalSet = true;
+        updateProperty(sensorInterface, value, newValue, "Value");
+        internalSet = false;
+    }
+
     void checkThresholds() override
     {
         if (!readingStateGood())
@@ -520,6 +586,12 @@ class LpuVrSensor :
 
     sdbusplus::asio::object_server& objectServer;
     thresholds::ThresholdTimer thresholdTimer;
+#ifdef NVIDIA_SHMEM
+    std::string telemetryPath;
+    std::string telemetryInterface;
+    std::string telemetryParent;
+    std::vector<uint8_t> telemetryRawData;
+#endif
 };
 
 struct PendingSensor
@@ -603,6 +675,9 @@ class LpuVrPublisher : public std::enable_shared_from_this<LpuVrPublisher>
     void poll()
     {
         static constexpr auto maxSampleAge = std::chrono::seconds(3);
+        // All sensors of this LPU decode the same five driver snapshots and
+        // share one clock reading for freshness checks and timestamps.
+        const lpu_common::SampleCycle cycle;
         for (SensorBinding& binding : sensors)
         {
             std::array<uint8_t, 3> bytes{};
@@ -623,7 +698,7 @@ class LpuVrPublisher : public std::enable_shared_from_this<LpuVrPublisher>
                         lpuInstance);
                 }
                 binding.wasAvailable = false;
-                binding.sensor->updateReading(std::nullopt);
+                binding.sensor->updateReading(std::nullopt, cycle);
                 continue;
             }
 
@@ -634,7 +709,7 @@ class LpuVrPublisher : public std::enable_shared_from_this<LpuVrPublisher>
                     "NAME", binding.definition.sensorName, "LPU", lpuInstance);
             }
             binding.wasAvailable = true;
-            binding.sensor->updateReading(value);
+            binding.sensor->updateReading(value, cycle);
         }
 
         timer.expires_after(std::chrono::seconds(1));

@@ -877,6 +877,9 @@ struct InventoryProcessorMetricsPublisher
             return;
         }
 
+        // Every row of this pass reads the same driver snapshots and shares
+        // one clock reading for the cache lifetime test.
+        const lpu_common::SampleCycle cycle;
         uint64_t batchLastUpdatedNs = 0;
         bool polledAnyRow = false;
         bool sawDriverTimestamp = false;
