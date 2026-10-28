@@ -16,6 +16,7 @@
  */
 
 #pragma once
+#include "SatelliteLayout.hpp"
 #include "Thresholds.hpp"
 #include "Utils.hpp"
 
@@ -104,24 +105,7 @@ struct SatelliteSensor : public Sensor
     size_t pollRate;
     static double reading2tempEp(const uint8_t* rawData)
     {
-        // this automatic convert to int (two's complement integer)
-        int32_t intg = (rawData[3] << 24 | rawData[2] << 16 | rawData[1] << 8 |
-                        rawData[0]);
-        uint8_t frac = uint8_t(intg & 0xFF);
-        intg >>=
-            8; // shift operation on a int keep the signal in two's complement
-
-        double temp = 0;
-        if (intg > 0)
-        {
-            temp = double(intg) + double(frac / 256.0);
-        }
-        else
-        {
-            temp = double(intg) - double(frac / 256.0);
-        }
-
-        return temp;
+        return satellite_layout::decodeTemperature(rawData);
     }
     static double reading2power(const uint8_t* rawData)
     {

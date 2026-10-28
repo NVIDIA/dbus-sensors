@@ -1,0 +1,14 @@
+[Unit]
+Description=Virtual I2C Target
+# The mailbox EEPROMs appear once platform init has brought the HMC up, as
+# they did when platform-init created them.
+Requires=platform_init.service
+After=platform_init.service
+
+[Service]
+ExecStart=/usr/bin/virtual-i2c-target
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

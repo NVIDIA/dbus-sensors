@@ -206,7 +206,7 @@ if get_option('psuredundancy').allowed()
     )
 endif
 
-if get_option('satellite').enabled()
+if get_option('satellite').enabled() or get_option('virtual-i2c-target').allowed()
     subdir('satellite')
 endif
 

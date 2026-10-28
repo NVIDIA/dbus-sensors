@@ -46,6 +46,7 @@ unit_files = [
     ['debug-serial-ctrl', 'xyz.openbmc_project.debugserialctrl.service'],
     ['hmc-readiness', 'xyz.openbmc_project.State.HMCReady.service'],
     ['hmc-usb-monitor', 'nvidia-usb-monitor.service'],
+    ['virtual-i2c-target', 'xyz.openbmc_project.virtual-i2c-target.service'],
 ]
 
 fs = import('fs')

@@ -346,6 +346,17 @@ if get_option('mctp').allowed()
 endif
 
 test(
+    'test_satellite_layout',
+    executable(
+        'test_satellite_layout',
+        'test_SatelliteLayout.cpp',
+        dependencies: [gtest_dep],
+        implicit_include_directories: false,
+        include_directories: '../satellite',
+    ),
+)
+
+test(
     'test_hmc_usb_monitor',
     executable(
         'test_hmc_usb_monitor',

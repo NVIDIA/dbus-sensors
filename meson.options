@@ -288,3 +288,9 @@ option(
     value: 'disabled',
     description: 'BMC-HMC USB link monitor',
 )
+option(
+    'virtual-i2c-target',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Virtual I2C target EEPROM writer on the HMC (HMC temperature for satellitesensor).',
+)
