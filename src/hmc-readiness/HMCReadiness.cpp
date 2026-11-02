@@ -28,6 +28,8 @@
 //   --object-path         <path>   where we publish the FeatureReady object
 //   --feature-type        <enum>   FeatureReady.FeatureType value to advertise
 
+#include "HmcFruEeproms.hpp"
+
 #include <boost/asio/io_context.hpp>
 #include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
@@ -35,6 +37,7 @@
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
 
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -57,6 +60,9 @@ constexpr const char* stateStandby =
 constexpr const char* mapperBus = "xyz.openbmc_project.ObjectMapper";
 constexpr const char* mapperPath = "/xyz/openbmc_project/object_mapper";
 constexpr const char* mapperIface = "xyz.openbmc_project.ObjectMapper";
+
+constexpr const char* fruEepromsConfig =
+    "/usr/share/hmc-readiness/hmc-fru-eeproms.json";
 
 struct Config
 {
@@ -175,6 +181,12 @@ int main(int argc, char* argv[])
         static_cast<sdbusplus::bus_t&>(*systemBus),
         sdbusplus::bus::match::rules::interfacesRemoved(),
         std::move(onRemoved));
+
+    std::unique_ptr<HmcFruEeproms> fruEeproms;
+    if (std::filesystem::exists(fruEepromsConfig))
+    {
+        fruEeproms = HmcFruEeproms::create(io, systemBus, fruEepromsConfig);
+    }
 
     io.run();
     return 0;

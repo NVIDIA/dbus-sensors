@@ -45,6 +45,8 @@ unit_files = [
     ['nvidia-fw-write-protect', 'com.nvidia.fwwriteprotect.service'],
     ['debug-serial-ctrl', 'xyz.openbmc_project.debugserialctrl.service'],
     ['hmc-readiness', 'xyz.openbmc_project.State.HMCReady.service'],
+    ['hmc-readiness', 'hmc-ready.target'],
+    ['hmc-readiness', 'hmc-not-ready.target'],
     ['hmc-usb-monitor', 'nvidia-usb-monitor.service'],
     ['virtual-i2c-target', 'xyz.openbmc_project.virtual-i2c-target.service'],
 ]

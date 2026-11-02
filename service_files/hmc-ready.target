@@ -1,0 +1,4 @@
+[Unit]
+Description=HMC Ready Target
+Wants=bmc-boot-complete.service
+After=bmc-boot-complete.service
