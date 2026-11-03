@@ -199,6 +199,12 @@ option(
     description: 'Enable LPU telemetry.',
 )
 option(
+    'lpu-power-mode-store',
+    type: 'string',
+    value: '',
+    description: 'Absolute path of the file where lputelemetry keeps the last applied LPU power mode to re-apply after resets. Required when lpu is enabled: it must be on storage that survives LPU, vHMC and BMC resets, which only the platform knows (the LP30 vHMC /var is new on every start).',
+)
+option(
     'discrete-leak-detect',
     type: 'feature',
     value: 'disabled',

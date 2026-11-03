@@ -574,7 +574,7 @@ int main()
     objectServer.add_manager(
         "/xyz/openbmc_project/inventory/system/accelerator");
     objectServer.add_manager("/xyz/openbmc_project/sensors");
-    lpu::power::Service powerMode(objectServer);
+    lpu::power::Service powerMode(io, systemBus, objectServer);
 
 #ifdef NVIDIA_SHMEM
     tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,

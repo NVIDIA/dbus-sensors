@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -18,6 +19,24 @@ enum class Mode : uint8_t
     maxQ = 1,
     maxP = 2,
 };
+
+inline std::optional<Mode> modeFromName(std::string_view value)
+{
+    if (value == "MaxQ")
+    {
+        return Mode::maxQ;
+    }
+    if (value == "MaxP")
+    {
+        return Mode::maxP;
+    }
+    return std::nullopt;
+}
+
+inline std::string_view modeName(Mode mode)
+{
+    return mode == Mode::maxQ ? "MaxQ" : "MaxP";
+}
 
 enum class Failure
 {
@@ -63,16 +82,11 @@ class Controller
                 return {};
             }
         }
-        return modes.front() == Mode::maxQ ? "MaxQ" : "MaxP";
+        return std::string(modeName(modes.front()));
     }
 
-    void set(std::string_view value)
+    void set(Mode target)
     {
-        if (value != "MaxQ" && value != "MaxP")
-        {
-            throw Error(Failure::invalidArgument, "Expected MaxQ or MaxP");
-        }
-        const Mode target = value == "MaxQ" ? Mode::maxQ : Mode::maxP;
         transport.refresh();
         const auto before = readAll(); // Preflight EVERY LPU before any write.
         std::array<bool, slotCount> attempted{};
@@ -136,6 +150,25 @@ class Controller
                                  ? "; changed slots restored"
                                  : "; rollback incomplete; read actual modes"));
         }
+    }
+
+    // Re-assert the saved selector on one LPU after it rebooted. An LPU that
+    // kept its selector costs one read and no write.
+    bool restore(size_t slot, Mode target)
+    {
+        transport.refresh();
+        if (transport.read(slot) == target)
+        {
+            return false;
+        }
+        transport.write(slot, target);
+        if (transport.read(slot) != target)
+        {
+            throw Error(Failure::writeFailure,
+                        "Power mode restore readback mismatch at slot " +
+                            std::to_string(slot + 1));
+        }
+        return true;
     }
 
   private:
