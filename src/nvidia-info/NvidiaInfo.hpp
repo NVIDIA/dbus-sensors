@@ -19,6 +19,7 @@
 #include "NvidiaInfoSchema.hpp"
 
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/system/error_code.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -55,12 +56,14 @@ inline constexpr const char* processorModuleInterface =
     "xyz.openbmc_project.Inventory.Item.ProcessorModule";
 inline constexpr const char* locationContextInterface =
     "xyz.openbmc_project.Inventory.Decorator.LocationContext";
+inline constexpr const char* instanceInterface =
+    "xyz.openbmc_project.Inventory.Decorator.Instance";
 inline constexpr const char* cpuInterface =
     "xyz.openbmc_project.Inventory.Item.Cpu";
 
-// Inventory path of the CPU published for socket under inventoryPath. DIMMs
-// on that socket copy the LocationContext another service (Entity Manager)
-// publishes on this object.
+using InstanceNumberProperty = std::variant<int64_t, uint64_t>;
+
+// Inventory path of the CPU published for socket under inventoryPath.
 std::string cpuInventoryPath(std::string_view inventoryPath, uint64_t socket);
 
 // D-Bus service constants for the CreateInfo method
@@ -109,6 +112,8 @@ class NvidiaInfo
 
   private:
     std::shared_ptr<boost::asio::io_context> ioCtx;
+    boost::asio::steady_timer motherboardDiscoveryTimer;
+    bool motherboardDiscoveryPending{false};
     std::shared_ptr<sdbusplus::asio::connection> bus;
     std::shared_ptr<sdbusplus::asio::object_server> objServer;
 
@@ -116,9 +121,9 @@ class NvidiaInfo
     std::string persistedDir;
     std::string motherboardPath;
     std::map<uint64_t, std::string> processorModulePaths;
-    // LocationContext of each CPU inventory object (keyed by object path), as
-    // published by its other owner; absent if it has none.
-    std::map<std::string, std::string> cpuLocationContexts;
+    // LocationContext of each CPU inventory object, keyed by its
+    // Inventory.Decorator.Instance.InstanceNumber.
+    std::map<uint64_t, std::string> cpuLocationContexts;
     std::map<std::string, TerminusInfo> terminusInfos;
     std::unique_ptr<sdbusplus::bus::match_t> interfaceAddedMatch;
 
@@ -175,16 +180,21 @@ class NvidiaInfo
     void setupMotherboardMatch();
     void onInterfacesAdded(sdbusplus::message_t& msg);
     void scheduleMotherboardDiscovery();
+    void onMotherboardDiscoveryTimer(const boost::system::error_code& ec);
     void discoverMotherboardPath(std::function<void()> callback);
     void discoverProcessorModulePaths(std::function<void()> callback);
-    // Reads the LocationContext of every CPU inventory object owned by
-    // another service; callback runs once all of those reads finish.
+    // Reads InstanceNumber and LocationContext from every CPU inventory object
+    // owned by another service; callback runs once all reads finish.
     void discoverCpuLocationContexts(std::function<void()> callback);
     void onCpuSubTree(std::function<void()> callback,
                       const boost::system::error_code& ec,
                       const MapperSubTree& subtree);
-    // Stores the LocationContext read for the CPU object at path.
-    void onCpuLocationContext(const std::string& path,
+    void onCpuInstanceNumber(
+        const std::string& path, const std::string& service,
+        std::shared_ptr<void> done, const boost::system::error_code& ec,
+        const InstanceNumberProperty& value);
+    // Stores the LocationContext read for a CPU inventory instance.
+    void onCpuLocationContext(uint64_t instance, const std::string& path,
                               const boost::system::error_code& ec,
                               const std::variant<std::string>& value);
     void discoverPaths(std::function<void()> callback);

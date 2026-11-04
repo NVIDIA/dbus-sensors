@@ -1224,8 +1224,8 @@ TEST_F(NvidiaInfoLiveTest, RecoveryProcessesMultipleFiles)
 
 TEST(CpuInventoryPath, MatchesPublishedCpuPath)
 {
-    // DIMMs look up their CPU's LocationContext at this path, so it must be
-    // the same path the CPU object is published at.
+    // Context discovery is path-independent, but NvidiaInfo still publishes
+    // processor inventory at this stable path.
     EXPECT_EQ(nvi::cpuInventoryPath("/xyz/openbmc_project/inventory/system", 1),
               "/xyz/openbmc_project/inventory/system/cpu/CPU_1");
 }
