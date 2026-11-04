@@ -31,6 +31,9 @@
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
 #include <sdbusplus/message/native_types.hpp>
+#ifdef NVIDIA_SHMEM
+#include <tal.hpp>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -494,6 +497,14 @@ int main()
             }
         }));
 
+#ifdef NVIDIA_SHMEM
+    if (tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                "intelcpumctpsensor"))
+    {
+        lg2::info(
+            "Successfully registered TAL namespaceInit for IntelCPUMctpSensor");
+    }
+#endif
     io.run();
     return 0;
 }
