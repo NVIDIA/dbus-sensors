@@ -20,8 +20,11 @@
 
 #include <phosphor-logging/lg2.hpp>
 
+#include <array>
+#include <bit>
 #include <charconv>
 #include <cstdint>
+#include <format>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -33,6 +36,48 @@ namespace nvidia
 {
 namespace info
 {
+
+static std::string formatCpuSerialNumber(const std::string& serialNumber)
+{
+    constexpr size_t wordCount = 4;
+    constexpr size_t wordWidth = 8;
+    constexpr size_t wordStride = wordWidth + 1;
+    constexpr size_t serialLength = wordCount * wordStride - 1;
+
+    // Expect 35 characters: four 8-digit hex words and three hyphens.
+    // Preserve the input if its length or format does not match.
+    if (serialNumber.size() != serialLength)
+    {
+        return serialNumber;
+    }
+
+    const std::string_view serial{serialNumber};
+    std::array<uint32_t, wordCount> words{};
+
+    for (size_t i = 0; i < words.size(); ++i)
+    {
+        // Extract and parse one 8-digit hex word.
+        const auto word = serial.substr(i * wordStride, wordWidth);
+        const auto [end, ec] = std::from_chars(
+            word.data(), word.data() + word.size(), words[i], 16);
+
+        if (ec != std::errc{} || end != word.data() + word.size())
+        {
+            return serialNumber;
+        }
+
+        // A hyphen must follow each word except the last.
+        if (i + 1 < wordCount && serial[(i + 1) * wordStride - 1] != '-')
+        {
+            return serialNumber;
+        }
+    }
+
+    // Reverse the word order and byte-swap each word to match SMBIOS Type 4.
+    return std::format("{:08X}{:08X}{:08X}{:08X}", std::byteswap(words[3]),
+                       std::byteswap(words[2]), std::byteswap(words[1]),
+                       std::byteswap(words[0]));
+}
 
 void from_json(const Json& j, NvidiaCpu& c)
 {
@@ -46,6 +91,7 @@ void from_json(const Json& j, NvidiaCpu& c)
     j.at("Model").get_to(c.model);
     j.at("ModelRevision").get_to(c.modelRevision);
     j.at("SerialNumber").get_to(c.serialNumber);
+    c.serialNumber = formatCpuSerialNumber(c.serialNumber);
     j.at("Version").get_to(c.version);
     j.at("SKU").get_to(c.sku);
 }
