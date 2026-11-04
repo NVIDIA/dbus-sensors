@@ -18,6 +18,7 @@
 
 #include "NvidiaInfoPersistence.hpp"
 
+#include <boost/asio/error.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <phosphor-logging/lg2.hpp>
@@ -44,6 +45,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -74,6 +76,24 @@ constexpr std::string_view hgxPrefix = NVIDIA_INFO_HGX_PREFIX;
 // Upper bound on the CPU socket index, matching the schema's Socket range.
 constexpr uint32_t maxSocket = 255;
 
+static std::optional<uint64_t> instanceNumberFromProperty(
+    const InstanceNumberProperty& value)
+{
+    return std::visit(
+        [](auto number) -> std::optional<uint64_t> {
+            using Number = decltype(number);
+            if constexpr (std::is_signed_v<Number>)
+            {
+                if (number < 0)
+                {
+                    return std::nullopt;
+                }
+            }
+            return static_cast<uint64_t>(number);
+        },
+        value);
+}
+
 } // namespace
 
 std::string cpuInventoryPath(std::string_view inventoryPath, uint64_t socket)
@@ -85,8 +105,9 @@ NvidiaInfo::NvidiaInfo(const std::shared_ptr<boost::asio::io_context>& io,
                        std::shared_ptr<sdbusplus::asio::connection> conn,
                        std::shared_ptr<sdbusplus::asio::object_server> obj,
                        std::string invPath, std::string persistedDirArg) :
-    ioCtx(io), bus(std::move(conn)), objServer(std::move(obj)),
-    inventoryPath(std::move(invPath)), persistedDir(std::move(persistedDirArg))
+    ioCtx(io), motherboardDiscoveryTimer(*io), bus(std::move(conn)),
+    objServer(std::move(obj)), inventoryPath(std::move(invPath)),
+    persistedDir(std::move(persistedDirArg))
 {
     lg2::info("NVIDIA Info inventory path: {I}", "I", inventoryPath);
 
@@ -164,18 +185,18 @@ void NvidiaInfo::onInterfacesAdded(sdbusplus::message_t& msg)
         InterfacesAddedMap interfaces;
         msg.read(objPath, interfaces);
 
-        // A CPU's LocationContext appearing (Entity Manager) also counts.
-        const bool cpuContext =
-            interfaces.contains(locationContextInterface) &&
-            std::filesystem::path(objPath.str).parent_path().filename() ==
-                "cpu";
+        // A CPU inventory object or its decorators appearing (Entity Manager)
+        // also counts, regardless of its object path.
+        const bool cpuInventory = interfaces.contains(cpuInterface) ||
+                                  interfaces.contains(instanceInterface) ||
+                                  interfaces.contains(locationContextInterface);
         if (!interfaces.contains(systemInterface) &&
-            !interfaces.contains(processorModuleInterface) && !cpuContext)
+            !interfaces.contains(processorModuleInterface) && !cpuInventory)
         {
             return;
         }
 
-        lg2::info("System, processor module or CPU appeared at {P}, scheduling "
+        lg2::info("Inventory interface appeared at {P}, scheduling "
                   "motherboard discovery after delay",
                   "P", std::string(objPath));
         scheduleMotherboardDiscovery();
@@ -189,17 +210,39 @@ void NvidiaInfo::onInterfacesAdded(sdbusplus::message_t& msg)
 
 void NvidiaInfo::scheduleMotherboardDiscovery()
 {
-    // Timer kept alive by its own async_wait callback.
-    auto delayTimer = std::make_shared<boost::asio::steady_timer>(*ioCtx);
-    delayTimer->expires_after(std::chrono::seconds(2));
-    delayTimer->async_wait(
-        [this, delayTimer](const boost::system::error_code& ec) {
-            if (ec)
+    if (motherboardDiscoveryPending)
+    {
+        return;
+    }
+
+    constexpr auto discoveryDelay = std::chrono::seconds(2);
+    // Coalesce inventory bursts without moving the first signal's deadline.
+    motherboardDiscoveryPending = true;
+    motherboardDiscoveryTimer.expires_after(discoveryDelay);
+    motherboardDiscoveryTimer.async_wait(
+        [this](const boost::system::error_code& ec) {
+            // Destruction cancels the timer; do not access this in that case.
+            if (ec == boost::asio::error::operation_aborted)
             {
                 return;
             }
-            discoverPaths([this]() { attachAllAssociations(); });
+            onMotherboardDiscoveryTimer(ec);
         });
+}
+
+void NvidiaInfo::onMotherboardDiscoveryTimer(
+    const boost::system::error_code& ec)
+{
+    motherboardDiscoveryPending = false;
+    if (ec)
+    {
+        lg2::error("Motherboard discovery timer failed: {E}", "E",
+                   ec.message());
+        return;
+    }
+    // Allow new inventory signals to schedule another pass while
+    // discovery runs.
+    discoverPaths([this]() { attachAllAssociations(); });
 }
 
 void NvidiaInfo::attachAssociationsFor(const std::string& terminusName)
@@ -222,9 +265,9 @@ void NvidiaInfo::attachAssociationsFor(const std::string& terminusName)
         }
     }
 
-    // DIMMs share the LocationContext of the CPU on their socket.
-    const auto ctxIt = cpuLocationContexts.find(
-        cpuInventoryPath(inventoryPath, static_cast<uint64_t>(entry.socket)));
+    // DIMMs share the LocationContext of the CPU with the same instance/socket.
+    const auto socket = static_cast<uint64_t>(entry.socket);
+    const auto ctxIt = cpuLocationContexts.find(socket);
     if (ctxIt != cpuLocationContexts.end())
     {
         for (auto& dimm : terminus.dimms)
@@ -469,31 +512,67 @@ void NvidiaInfo::onCpuSubTree(std::function<void()> callback,
     {
         for (const auto& [service, interfaces] : services)
         {
-            // Our own CPU objects carry no LocationContext.
+            // Our own CPU objects do not provide LocationContext.
+            // Require both properties from the external provider.
             if (service == nvidiaInfoService ||
                 std::find(interfaces.begin(), interfaces.end(),
-                          locationContextInterface) == interfaces.end())
+                          locationContextInterface) == interfaces.end() ||
+                std::find(interfaces.begin(), interfaces.end(),
+                          instanceInterface) == interfaces.end())
             {
                 continue;
             }
-            // done is held until the reply is handled; see above.
+
+            // Read InstanceNumber first, then LocationContext from the same
+            // service. done is held through both replies.
             bus->async_method_call(
-                [this, path,
-                 done](const boost::system::error_code& getEc,
-                       const std::variant<std::string>& value) mutable {
-                    onCpuLocationContext(path, getEc, value);
-                    done.reset();
+                [this, path, service,
+                 done](const boost::system::error_code& instanceEc,
+                       const InstanceNumberProperty& instanceValue) mutable {
+                    onCpuInstanceNumber(path, service, std::move(done),
+                                        instanceEc, instanceValue);
                 },
                 service, path, "org.freedesktop.DBus.Properties", "Get",
-                locationContextInterface, "LocationContext");
+                instanceInterface, "InstanceNumber");
             break;
         }
     }
 }
 
-void NvidiaInfo::onCpuLocationContext(const std::string& path,
-                                      const boost::system::error_code& ec,
-                                      const std::variant<std::string>& value)
+void NvidiaInfo::onCpuInstanceNumber(
+    const std::string& path, const std::string& service,
+    std::shared_ptr<void> done, const boost::system::error_code& ec,
+    const InstanceNumberProperty& value)
+{
+    if (ec)
+    {
+        lg2::warning("Failed to read InstanceNumber of {P}: {E}", "P", path,
+                     "E", ec.message());
+        done.reset();
+        return;
+    }
+
+    const auto instance = instanceNumberFromProperty(value);
+    if (!instance)
+    {
+        lg2::warning("CPU {P} has a negative InstanceNumber", "P", path);
+        done.reset();
+        return;
+    }
+    bus->async_method_call(
+        [this, instance = *instance, path, done = std::move(done)](
+            const boost::system::error_code& contextEc,
+            const std::variant<std::string>& contextValue) mutable {
+            onCpuLocationContext(instance, path, contextEc, contextValue);
+            done.reset();
+        },
+        service, path, "org.freedesktop.DBus.Properties", "Get",
+        locationContextInterface, "LocationContext");
+}
+
+void NvidiaInfo::onCpuLocationContext(
+    uint64_t instance, const std::string& path,
+    const boost::system::error_code& ec, const std::variant<std::string>& value)
 {
     if (ec)
     {
@@ -501,9 +580,9 @@ void NvidiaInfo::onCpuLocationContext(const std::string& path,
                      "E", ec.message());
         return;
     }
-    cpuLocationContexts[path] = std::get<std::string>(value);
-    lg2::info("CPU {P} LocationContext: {C}", "P", path, "C",
-              cpuLocationContexts[path]);
+    cpuLocationContexts[instance] = std::get<std::string>(value);
+    lg2::info("CPU instance {I} at {P} LocationContext: {C}", "I", instance,
+              "P", path, "C", cpuLocationContexts[instance]);
 }
 
 void NvidiaInfo::discoverPaths(std::function<void()> callback)
