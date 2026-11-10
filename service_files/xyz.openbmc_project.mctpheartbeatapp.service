@@ -17,4 +17,4 @@ RestartSec=5
 ExecStart=/usr/bin/mctpheartbeat -e $MCTP_HEARTBEAT_EID
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=multi-user.target mctpd.service
