@@ -16,9 +16,11 @@
  */
 #include "SatelliteSensor.hpp"
 
+#include "SatelliteGroups.hpp"
 #include "SensorPaths.hpp"
 #include "Thresholds.hpp"
 #include "Utils.hpp"
+#include "VariantVisitors.hpp"
 #include "sensor.hpp"
 #include "vHMCShmReader.hpp"
 
@@ -38,6 +40,7 @@
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/message.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <chrono>
@@ -47,6 +50,7 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -63,6 +67,16 @@ constexpr const char* configInterface =
     "xyz.openbmc_project.Configuration.Satellite";
 constexpr const char* sensorRootPath = "/xyz/openbmc_project/sensors/";
 constexpr const char* objectType = "Satellite";
+constexpr const char* groupConfigInterface =
+    "xyz.openbmc_project.Configuration.SatelliteGroup";
+constexpr const char* busConfigInterface =
+    "xyz.openbmc_project.Configuration.SatelliteBus";
+// values a Satellite record may leave out
+constexpr const char* defaultValueType = "Raw";
+constexpr uint8_t defaultPollRate = 1;
+constexpr const char* defaultPowerState = "On";
+constexpr double defaultTempMin = -127;
+constexpr double defaultTempMax = 127;
 
 boost::container::flat_map<std::string, std::unique_ptr<SatelliteSensor>>
     sensors;
@@ -553,6 +567,48 @@ void SatelliteSensor::read()
     restartRead();
 }
 
+// Returns the interfaces of one satellite object with each SatelliteGroup
+// replaced by one Satellite configuration per sensor.
+static std::vector<std::pair<std::string, SensorBaseConfigMap>> expandGroups(
+    const SensorData& data)
+{
+    std::vector<std::pair<std::string, SensorBaseConfigMap>> out;
+    for (const auto& entry : data)
+    {
+        if (entry.first != groupConfigInterface)
+        {
+            out.emplace_back(entry);
+            continue;
+        }
+        auto sensorsIt =
+            data.find(std::string(groupConfigInterface) + ".Sensors");
+        if (sensorsIt == data.end())
+        {
+            lg2::error("SatelliteGroup without Sensors");
+            continue;
+        }
+        std::vector<satellite::GroupMember> members;
+        for (const auto& [name, offset] : sensorsIt->second)
+        {
+            members.emplace_back(
+                std::visit(VariantToUnsignedIntVisitor(), offset), name);
+        }
+        size_t firstStaleBit = 0;
+        if (auto it = entry.second.find("FirstStaleBit");
+            it != entry.second.end())
+        {
+            firstStaleBit =
+                std::visit(VariantToUnsignedIntVisitor(), it->second);
+        }
+        for (auto& cfg : satellite::expandGroup(
+                 entry.second, std::move(members), firstStaleBit))
+        {
+            out.emplace_back(configInterface, std::move(cfg));
+        }
+    }
+    return out;
+}
+
 void createSensors(
     boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
     boost::container::flat_map<std::string, std::unique_ptr<SatelliteSensor>>&
@@ -573,9 +629,30 @@ void createSensors(
                 lg2::error("Error contacting entity manager");
                 return;
             }
+            // Bus and address shared by the satellite sensors of a board
+            std::map<std::string, std::pair<uint8_t, uint8_t>> boardBus;
+            for (const auto& [path, ifaces] : resp)
+            {
+                auto it = ifaces.find(busConfigInterface);
+                if (it == ifaces.end())
+                {
+                    continue;
+                }
+                try
+                {
+                    boardBus[std::string(path.parent_path())] = {
+                        loadVariant<uint8_t>(it->second, "Bus"),
+                        loadVariant<uint8_t>(it->second, "Address")};
+                }
+                catch (const std::exception& e)
+                {
+                    lg2::error("Invalid SatelliteBus at {PATH}: {ERROR}",
+                               "PATH", path.str, "ERROR", e.what());
+                }
+            }
             for (const auto& pathPair : resp)
             {
-                for (const auto& entry : pathPair.second)
+                for (const auto& entry : expandGroups(pathPair.second))
                 {
                     if (entry.first != configInterface)
                     {
@@ -606,23 +683,49 @@ void createSensors(
                     size_t staleBit = 0;
                     try
                     {
+                        const auto& cfg = entry.second;
                         valueType =
-                            loadVariant<std::string>(entry.second, "ValueType");
-                        off =
-                            loadVariant<uint16_t>(entry.second, "OffsetValue");
-                        sensorType = loadVariant<std::string>(entry.second,
-                                                              "SensorType");
-                        rate = loadVariant<uint8_t>(entry.second, "PollRate");
-                        powerSate = loadVariant<std::string>(entry.second,
-                                                             "PowerState");
+                            (cfg.count("ValueType") != 0)
+                                ? loadVariant<std::string>(cfg, "ValueType")
+                                : defaultValueType;
+                        off = loadVariant<uint16_t>(cfg, "OffsetValue");
+                        sensorType =
+                            loadVariant<std::string>(cfg, "SensorType");
+                        rate = (cfg.count("PollRate") != 0)
+                                   ? loadVariant<uint8_t>(cfg, "PollRate")
+                                   : defaultPollRate;
+                        powerSate =
+                            (cfg.count("PowerState") != 0)
+                                ? loadVariant<std::string>(cfg, "PowerState")
+                                : defaultPowerState;
                         setReadState(powerSate, pwrState);
-                        minVal = loadVariant<double>(entry.second, "MinValue");
-                        maxVal = loadVariant<double>(entry.second, "MaxValue");
+                        if ((cfg.count("MinValue") == 0) &&
+                            (cfg.count("MaxValue") == 0) &&
+                            sensorType == "Temperature")
+                        {
+                            minVal = defaultTempMin;
+                            maxVal = defaultTempMax;
+                        }
+                        else
+                        {
+                            minVal = loadVariant<double>(cfg, "MinValue");
+                            maxVal = loadVariant<double>(cfg, "MaxValue");
+                        }
                         if (valueType != "SHM")
                         {
-                            busId = loadVariant<uint8_t>(entry.second, "Bus");
-                            addr =
-                                loadVariant<uint8_t>(entry.second, "Address");
+                            auto board = boardBus.find(
+                                std::string(pathPair.first.parent_path()));
+                            if ((cfg.count("Bus") == 0) &&
+                                board != boardBus.end())
+                            {
+                                busId = board->second.first;
+                                addr = board->second.second;
+                            }
+                            else
+                            {
+                                busId = loadVariant<uint8_t>(cfg, "Bus");
+                                addr = loadVariant<uint8_t>(cfg, "Address");
+                            }
                             try
                             {
                                 staleOffset = loadVariant<uint16_t>(

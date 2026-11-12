@@ -357,6 +357,17 @@ test(
 )
 
 test(
+    'test_satellite_groups',
+    executable(
+        'test_satellite_groups',
+        'test_SatelliteGroups.cpp',
+        dependencies: [gtest_dep],
+        implicit_include_directories: false,
+        include_directories: '../satellite',
+    ),
+)
+
+test(
     'test_hmc_usb_monitor',
     executable(
         'test_hmc_usb_monitor',
