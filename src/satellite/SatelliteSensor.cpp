@@ -567,6 +567,14 @@ void SatelliteSensor::read()
     restartRead();
 }
 
+// Bus, address and stale check of the sensors of a board
+struct BoardBus
+{
+    uint8_t bus;
+    uint8_t address;
+    bool staleChecked;
+};
+
 // Returns the interfaces of one satellite object with each SatelliteGroup
 // replaced by one Satellite configuration per sensor.
 static std::vector<std::pair<std::string, SensorBaseConfigMap>> expandGroups(
@@ -629,8 +637,8 @@ void createSensors(
                 lg2::error("Error contacting entity manager");
                 return;
             }
-            // Bus and address shared by the satellite sensors of a board
-            std::map<std::string, std::pair<uint8_t, uint8_t>> boardBus;
+            // Bus, address and stale check shared by the sensors of a board
+            std::map<std::string, BoardBus> boardBus;
             for (const auto& [path, ifaces] : resp)
             {
                 auto it = ifaces.find(busConfigInterface);
@@ -640,9 +648,16 @@ void createSensors(
                 }
                 try
                 {
-                    boardBus[std::string(path.parent_path())] = {
-                        loadVariant<uint8_t>(it->second, "Bus"),
-                        loadVariant<uint8_t>(it->second, "Address")};
+                    BoardBus board{loadVariant<uint8_t>(it->second, "Bus"),
+                                   loadVariant<uint8_t>(it->second, "Address"),
+                                   true};
+                    if (it->second.count("StaleChecked") != 0)
+                    {
+                        board.staleChecked =
+                            loadVariant<uint8_t>(it->second, "StaleChecked") !=
+                            0;
+                    }
+                    boardBus[std::string(path.parent_path())] = board;
                 }
                 catch (const std::exception& e)
                 {
@@ -718,8 +733,8 @@ void createSensors(
                             if ((cfg.count("Bus") == 0) &&
                                 board != boardBus.end())
                             {
-                                busId = board->second.first;
-                                addr = board->second.second;
+                                busId = board->second.bus;
+                                addr = board->second.address;
                             }
                             else
                             {
@@ -738,6 +753,12 @@ void createSensors(
                                 lg2::info(
                                     "No stale bit or offset provided for {NAME}. Ignoring stalness for this sensor.",
                                     "NAME", name);
+                                staleOffset = 0;
+                                staleBit = 0;
+                            }
+                            if (board != boardBus.end() &&
+                                !board->second.staleChecked)
+                            {
                                 staleOffset = 0;
                                 staleBit = 0;
                             }
