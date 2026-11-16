@@ -52,6 +52,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -73,7 +74,7 @@ constexpr const char* busConfigInterface =
     "xyz.openbmc_project.Configuration.SatelliteBus";
 // values a Satellite record may leave out
 constexpr const char* defaultValueType = "Raw";
-constexpr uint8_t defaultPollRate = 1;
+constexpr size_t defaultPollRate = 1;
 constexpr const char* defaultPowerState = "On";
 constexpr double defaultTempMin = -127;
 constexpr double defaultTempMax = 127;
@@ -596,25 +597,226 @@ static std::vector<std::pair<std::string, SensorBaseConfigMap>> expandGroups(
             continue;
         }
         std::vector<satellite::GroupMember> members;
-        for (const auto& [name, offset] : sensorsIt->second)
-        {
-            members.emplace_back(
-                std::visit(VariantToUnsignedIntVisitor(), offset), name);
-        }
         size_t firstStaleBit = 0;
-        if (auto it = entry.second.find("FirstStaleBit");
-            it != entry.second.end())
+        try
         {
-            firstStaleBit =
-                std::visit(VariantToUnsignedIntVisitor(), it->second);
+            for (const auto& [name, offset] : sensorsIt->second)
+            {
+                members.emplace_back(
+                    std::visit(VariantToUnsignedIntVisitor(), offset), name);
+            }
+            if (auto it = entry.second.find("FirstStaleBit");
+                it != entry.second.end())
+            {
+                firstStaleBit =
+                    std::visit(VariantToUnsignedIntVisitor(), it->second);
+            }
         }
-        for (auto& cfg : satellite::expandGroup(
-                 entry.second, std::move(members), firstStaleBit))
+        catch (const std::invalid_argument& e)
+        {
+            lg2::error("Invalid SatelliteGroup: {ERROR}", "ERROR", e.what());
+            continue;
+        }
+        auto expanded = satellite::expandGroup(entry.second, std::move(members),
+                                               firstStaleBit);
+        for (auto& cfg : expanded)
         {
             out.emplace_back(configInterface, std::move(cfg));
         }
     }
     return out;
+}
+
+static std::map<std::string, BoardBus> collectBoardBus(
+    const ManagedObjectType& resp)
+{
+    std::map<std::string, BoardBus> boardBus;
+    for (const auto& [path, ifaces] : resp)
+    {
+        auto it = ifaces.find(busConfigInterface);
+        if (it == ifaces.end())
+        {
+            continue;
+        }
+        try
+        {
+            BoardBus board{loadVariant<uint8_t>(it->second, "Bus"),
+                           loadVariant<uint8_t>(it->second, "Address"), true};
+            if (it->second.count("StaleChecked") != 0)
+            {
+                board.staleChecked =
+                    loadVariant<uint8_t>(it->second, "StaleChecked") != 0;
+            }
+            boardBus[std::string(path.parent_path())] = board;
+        }
+        catch (const std::invalid_argument& e)
+        {
+            lg2::error("Invalid SatelliteBus at {PATH}: {ERROR}", "PATH",
+                       path.str, "ERROR", e.what());
+        }
+    }
+    return boardBus;
+}
+
+// A temperature sensor may leave out either limit
+static void resolveLimits(const SensorBaseConfigMap& cfg,
+                          const std::string& sensorType, double& minVal,
+                          double& maxVal)
+{
+    bool temperature = sensorType == "Temperature";
+    minVal = (temperature && cfg.count("MinValue") == 0)
+                 ? defaultTempMin
+                 : loadVariant<double>(cfg, "MinValue");
+    maxVal = (temperature && cfg.count("MaxValue") == 0)
+                 ? defaultTempMax
+                 : loadVariant<double>(cfg, "MaxValue");
+}
+
+// A sensor may take either of its bus and address from the board
+static void resolveBusAddress(const SensorBaseConfigMap& cfg,
+                              const BoardBus* board, uint8_t& busId,
+                              uint8_t& addr)
+{
+    busId = (cfg.count("Bus") == 0 && board != nullptr)
+                ? board->bus
+                : loadVariant<uint8_t>(cfg, "Bus");
+    addr = (cfg.count("Address") == 0 && board != nullptr)
+               ? board->address
+               : loadVariant<uint8_t>(cfg, "Address");
+}
+
+static void onConfiguration(
+    boost::asio::io_context& io, sdbusplus::asio::object_server& objectServer,
+    std::shared_ptr<sdbusplus::asio::connection>& dbusConnection,
+    boost::container::flat_map<std::string, std::unique_ptr<SatelliteSensor>>&
+        sensors,
+    boost::system::error_code ec, const ManagedObjectType& resp)
+{
+    if (ec)
+    {
+        lg2::error("Error contacting entity manager");
+        return;
+    }
+    auto boardBus = collectBoardBus(resp);
+    for (const auto& pathPair : resp)
+    {
+        for (const auto& entry : expandGroups(pathPair.second))
+        {
+            if (entry.first != configInterface)
+            {
+                continue;
+            }
+            std::string name = loadVariant<std::string>(entry.second, "Name");
+
+            std::vector<thresholds::Threshold> sensorThresholds;
+            if (!parseThresholdsFromConfig(pathPair.second, sensorThresholds))
+            {
+                lg2::error("error populating thresholds for {NAME}", "NAME",
+                           name);
+            }
+
+            uint8_t busId = 0;
+            uint8_t addr = 0;
+            uint16_t off;
+            std::string sensorType;
+            std::string valueType;
+            size_t rate;
+            std::string powerSate;
+            PowerState pwrState;
+            double minVal;
+            double maxVal;
+            uint16_t staleOffset = 0;
+            size_t staleBit = 0;
+            try
+            {
+                const auto& cfg = entry.second;
+                valueType = (cfg.count("ValueType") != 0)
+                                ? loadVariant<std::string>(cfg, "ValueType")
+                                : defaultValueType;
+                off = loadVariant<uint16_t>(cfg, "OffsetValue");
+                sensorType = loadVariant<std::string>(cfg, "SensorType");
+                rate = (cfg.count("PollRate") != 0)
+                           ? loadVariant<uint8_t>(cfg, "PollRate")
+                           : defaultPollRate;
+                powerSate = (cfg.count("PowerState") != 0)
+                                ? loadVariant<std::string>(cfg, "PowerState")
+                                : defaultPowerState;
+                setReadState(powerSate, pwrState);
+                resolveLimits(cfg, sensorType, minVal, maxVal);
+                if (valueType != "SHM")
+                {
+                    auto board = boardBus.find(
+                        std::string(pathPair.first.parent_path()));
+                    resolveBusAddress(
+                        cfg, board != boardBus.end() ? &board->second : nullptr,
+                        busId, addr);
+                    try
+                    {
+                        staleOffset =
+                            loadVariant<uint16_t>(entry.second, "StaleOffset");
+                        staleBit =
+                            loadVariant<size_t>(entry.second, "StaleBit");
+                    }
+                    catch (const std::exception& e)
+                    {
+                        lg2::info(
+                            "No stale bit or offset provided for {NAME}. Ignoring stalness for this sensor.",
+                            "NAME", name);
+                        staleOffset = 0;
+                        staleBit = 0;
+                    }
+                    auto stale = satellite::resolveStaleCheck(
+                        staleOffset, staleBit,
+                        board == boardBus.end() || board->second.staleChecked);
+                    staleOffset = stale.offset;
+                    staleBit = stale.bit;
+                }
+                if constexpr (debug)
+                {
+                    lg2::info(
+                        "Configuration parsed for \n\t {CONF}\nwith\n"
+                        "\tName: {NAME}\n"
+                        "\tBus: {BUS}\n"
+                        "\tAddress:{ADDR}\n"
+                        "\tPowerState:{PWRSTATE}\n"
+                        "\tOffset: {OFF}\n"
+                        "\tStaleOffset: {STALEOFFSET}\n"
+                        "\tStaleBit: {STALEBIT}\n"
+                        "\tType : {TYPE}\n"
+                        "\tValue Type : {VALUETYPE}\n"
+                        "\tPollrate: {RATE}\n"
+                        "\tMinValue: {MIN}\n"
+                        "\tMaxValue: {MAX}\n",
+                        "CONF", entry.first, "NAME", name, "BUS",
+                        static_cast<int>(busId), "ADDR", static_cast<int>(addr),
+                        "PWRSTATE", powerSate, "OFF", static_cast<int>(off),
+                        "STALEOFFSET", static_cast<int>(staleOffset),
+                        "STALEBIT", static_cast<int>(staleBit), "TYPE",
+                        sensorType, "VALUETYPE", valueType, "RATE", rate, "MIN",
+                        minVal, "MAX", maxVal);
+                }
+            }
+            catch (const std::exception& e)
+            {
+                sensors.erase(name);
+                lg2::error(
+                    "Error parsing configuration for {NAME}. There is likely a missing or invalid value. {ERROR}",
+                    "NAME", name, "ERROR", e.what());
+                continue;
+            }
+
+            auto& sensor = sensors[name];
+            sensor = nullptr;
+
+            sensor = std::make_unique<SatelliteSensor>(
+                dbusConnection, io, name, pathPair.first, objectType,
+                objectServer, std::move(sensorThresholds), busId, addr, off,
+                staleOffset, staleBit, sensorType, valueType, rate, minVal,
+                maxVal, pwrState);
+
+            sensor->init();
+        }
+    }
 }
 
 void createSensors(
@@ -630,186 +832,8 @@ void createSensors(
     }
 
     dbusConnection->async_method_call(
-        [&io, &objectServer, &dbusConnection, &sensors](
-            boost::system::error_code ec, const ManagedObjectType& resp) {
-            if (ec)
-            {
-                lg2::error("Error contacting entity manager");
-                return;
-            }
-            // Bus, address and stale check shared by the sensors of a board
-            std::map<std::string, BoardBus> boardBus;
-            for (const auto& [path, ifaces] : resp)
-            {
-                auto it = ifaces.find(busConfigInterface);
-                if (it == ifaces.end())
-                {
-                    continue;
-                }
-                try
-                {
-                    BoardBus board{loadVariant<uint8_t>(it->second, "Bus"),
-                                   loadVariant<uint8_t>(it->second, "Address"),
-                                   true};
-                    if (it->second.count("StaleChecked") != 0)
-                    {
-                        board.staleChecked =
-                            loadVariant<uint8_t>(it->second, "StaleChecked") !=
-                            0;
-                    }
-                    boardBus[std::string(path.parent_path())] = board;
-                }
-                catch (const std::exception& e)
-                {
-                    lg2::error("Invalid SatelliteBus at {PATH}: {ERROR}",
-                               "PATH", path.str, "ERROR", e.what());
-                }
-            }
-            for (const auto& pathPair : resp)
-            {
-                for (const auto& entry : expandGroups(pathPair.second))
-                {
-                    if (entry.first != configInterface)
-                    {
-                        continue;
-                    }
-                    std::string name =
-                        loadVariant<std::string>(entry.second, "Name");
-
-                    std::vector<thresholds::Threshold> sensorThresholds;
-                    if (!parseThresholdsFromConfig(pathPair.second,
-                                                   sensorThresholds))
-                    {
-                        lg2::error("error populating thresholds for {NAME}",
-                                   "NAME", name);
-                    }
-
-                    uint8_t busId = 0;
-                    uint8_t addr = 0;
-                    uint16_t off;
-                    std::string sensorType;
-                    std::string valueType;
-                    size_t rate;
-                    std::string powerSate;
-                    PowerState pwrState;
-                    double minVal;
-                    double maxVal;
-                    uint16_t staleOffset = 0;
-                    size_t staleBit = 0;
-                    try
-                    {
-                        const auto& cfg = entry.second;
-                        valueType =
-                            (cfg.count("ValueType") != 0)
-                                ? loadVariant<std::string>(cfg, "ValueType")
-                                : defaultValueType;
-                        off = loadVariant<uint16_t>(cfg, "OffsetValue");
-                        sensorType =
-                            loadVariant<std::string>(cfg, "SensorType");
-                        rate = (cfg.count("PollRate") != 0)
-                                   ? loadVariant<uint8_t>(cfg, "PollRate")
-                                   : defaultPollRate;
-                        powerSate =
-                            (cfg.count("PowerState") != 0)
-                                ? loadVariant<std::string>(cfg, "PowerState")
-                                : defaultPowerState;
-                        setReadState(powerSate, pwrState);
-                        if ((cfg.count("MinValue") == 0) &&
-                            (cfg.count("MaxValue") == 0) &&
-                            sensorType == "Temperature")
-                        {
-                            minVal = defaultTempMin;
-                            maxVal = defaultTempMax;
-                        }
-                        else
-                        {
-                            minVal = loadVariant<double>(cfg, "MinValue");
-                            maxVal = loadVariant<double>(cfg, "MaxValue");
-                        }
-                        if (valueType != "SHM")
-                        {
-                            auto board = boardBus.find(
-                                std::string(pathPair.first.parent_path()));
-                            if ((cfg.count("Bus") == 0) &&
-                                board != boardBus.end())
-                            {
-                                busId = board->second.bus;
-                                addr = board->second.address;
-                            }
-                            else
-                            {
-                                busId = loadVariant<uint8_t>(cfg, "Bus");
-                                addr = loadVariant<uint8_t>(cfg, "Address");
-                            }
-                            try
-                            {
-                                staleOffset = loadVariant<uint16_t>(
-                                    entry.second, "StaleOffset");
-                                staleBit = loadVariant<size_t>(entry.second,
-                                                               "StaleBit");
-                            }
-                            catch (const std::exception& e)
-                            {
-                                lg2::info(
-                                    "No stale bit or offset provided for {NAME}. Ignoring stalness for this sensor.",
-                                    "NAME", name);
-                                staleOffset = 0;
-                                staleBit = 0;
-                            }
-                            if (board != boardBus.end() &&
-                                !board->second.staleChecked)
-                            {
-                                staleOffset = 0;
-                                staleBit = 0;
-                            }
-                        }
-                        if constexpr (debug)
-                        {
-                            lg2::info(
-                                "Configuration parsed for \n\t {CONF}\nwith\n"
-                                "\tName: {NAME}\n"
-                                "\tBus: {BUS}\n"
-                                "\tAddress:{ADDR}\n"
-                                "\tPowerState:{PWRSTATE}\n"
-                                "\tOffset: {OFF}\n"
-                                "\tStaleOffset: {STALEOFFSET}\n"
-                                "\tStaleBit: {STALEBIT}\n"
-                                "\tType : {TYPE}\n"
-                                "\tValue Type : {VALUETYPE}\n"
-                                "\tPollrate: {RATE}\n"
-                                "\tMinValue: {MIN}\n"
-                                "\tMaxValue: {MAX}\n",
-                                "CONF", entry.first, "NAME", name, "BUS",
-                                static_cast<int>(busId), "ADDR",
-                                static_cast<int>(addr), "PWRSTATE", powerSate,
-                                "OFF", static_cast<int>(off), "STALEOFFSET",
-                                static_cast<int>(staleOffset), "STALEBIT",
-                                static_cast<int>(staleBit), "TYPE", sensorType,
-                                "VALUETYPE", valueType, "RATE", rate, "MIN",
-                                minVal, "MAX", maxVal);
-                        }
-                    }
-                    catch (const std::exception& e)
-                    {
-                        lg2::error(
-                            "Error parsing configuration for {NAME}. There is likely a missing or invalid value. {ERROR}",
-                            "NAME", name, "ERROR", e.what());
-                        continue;
-                    }
-
-                    auto& sensor = sensors[name];
-                    sensor = nullptr;
-
-                    sensor = std::make_unique<SatelliteSensor>(
-                        dbusConnection, io, name, pathPair.first, objectType,
-                        objectServer, std::move(sensorThresholds), busId, addr,
-                        off, staleOffset, staleBit, sensorType, valueType, rate,
-                        minVal, maxVal, pwrState);
-
-                    sensor->init();
-                }
-            }
-        },
+        std::bind_front(onConfiguration, std::ref(io), std::ref(objectServer),
+                        std::ref(dbusConnection), std::ref(sensors)),
         entityManagerName, "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 }
