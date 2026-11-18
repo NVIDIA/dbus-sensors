@@ -643,11 +643,6 @@ class MCTPHeartbeatService
             {
                 lg2::error("Failed to send heartbeat VDM");
             }
-            else
-            {
-                lg2::info("Heartbeat VDM successful");
-            }
-
             // Schedule the next heartbeat
             scheduleNextHeartbeat();
         });
