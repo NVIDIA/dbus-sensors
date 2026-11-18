@@ -832,8 +832,11 @@ void createSensors(
     }
 
     dbusConnection->async_method_call(
-        std::bind_front(onConfiguration, std::ref(io), std::ref(objectServer),
-                        std::ref(dbusConnection), std::ref(sensors)),
+        [&io, &objectServer, &dbusConnection, &sensors](
+            boost::system::error_code ec, const ManagedObjectType& resp) {
+            onConfiguration(io, objectServer, dbusConnection, sensors, ec,
+                            resp);
+        },
         entityManagerName, "/xyz/openbmc_project/inventory",
         "org.freedesktop.DBus.ObjectManager", "GetManagedObjects");
 }
